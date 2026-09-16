@@ -1,0 +1,20 @@
+{
+  "contract_version": "quality-review-fixture/1",
+  "cases": [
+    {
+      "case_id": "accept-clean",
+      "expected_action": "accept",
+      "issue_reference_ids": []
+    },
+    {
+      "case_id": "revise-channel-conflict",
+      "expected_action": "revise",
+      "issue_reference_ids": ["deliverable-a", "deliverable-b"]
+    },
+    {
+      "case_id": "quality-not-met",
+      "expected_action": "quality_not_met",
+      "issue_reference_ids": ["deliverable-a"]
+    }
+  ]
+}

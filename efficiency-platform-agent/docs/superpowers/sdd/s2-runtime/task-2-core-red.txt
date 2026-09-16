@@ -1,0 +1,38 @@
+
+=================================== ERRORS ====================================
+____________ ERROR collecting tests/unit/core/test_budget_guard.py ____________
+ImportError while importing test module 'D:\efficiency-platform\efficiency-platform-agent\tests\unit\core\test_budget_guard.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\unit\core\test_budget_guard.py:7: in <module>
+    from efficiency_platform_agent.core.budget import (
+E   ModuleNotFoundError: No module named 'efficiency_platform_agent.core.budget'
+_________ ERROR collecting tests/unit/core/test_runtime_contracts.py __________
+ImportError while importing test module 'D:\efficiency-platform\efficiency-platform-agent\tests\unit\core\test_runtime_contracts.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\unit\core\test_runtime_contracts.py:9: in <module>
+    from efficiency_platform_agent.core.budget import BudgetCharge, BudgetGuard
+E   ModuleNotFoundError: No module named 'efficiency_platform_agent.core.budget'
+_______ ERROR collecting tests/contract/runtime/test_event_contract.py ________
+ImportError while importing test module 'D:\efficiency-platform\efficiency-platform-agent\tests\contract\runtime\test_event_contract.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+C:\Users\Administrator\AppData\Roaming\uv\python\cpython-3.13-windows-x86_64-none\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\contract\runtime\test_event_contract.py:8: in <module>
+    from efficiency_platform_agent.core.run import JsonObject, RunEventRecord
+E   ImportError: cannot import name 'RunEventRecord' from 'efficiency_platform_agent.core.run' (D:\efficiency-platform\efficiency-platform-agent\src\efficiency_platform_agent\core\run.py)
+=========================== short test summary info ===========================
+ERROR tests/unit/core/test_budget_guard.py
+ERROR tests/unit/core/test_runtime_contracts.py
+ERROR tests/contract/runtime/test_event_contract.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 3 errors during collection !!!!!!!!!!!!!!!!!!!
+3 errors in 0.35s

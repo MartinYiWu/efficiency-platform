@@ -1,0 +1,329 @@
+{
+  "contract_version": "operation.real.acceptance/1",
+  "execution_mode": "real",
+  "fake_fallback": false,
+  "configuration": {
+    "status": "READY",
+    "gate": "deepseek_web_search",
+    "execution_mode": "real",
+    "fake_fallback": false
+  },
+  "cases": [
+    {
+      "case_id": "R01",
+      "message": "你是谁？",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "succeeded",
+        "terminal": true,
+        "event_count": 5,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        },
+        "run_id": "run-7ca7ad2d0e1446048bd5bec86198fe61",
+        "event_sequence": [
+          "run_started",
+          "phase_started",
+          "assistant_started",
+          "assistant_delta",
+          "stream_done"
+        ]
+      },
+      "status": "PASS"
+    },
+    {
+      "case_id": "R02",
+      "message": "请为新品写公众号、小红书和头条三种独立版本的发布文案，不需要联网。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "degraded_succeeded",
+        "terminal": true,
+        "event_count": 10,
+        "reconnect_count": 0,
+        "deliverable_count": 3,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": true,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 4375,
+          "cost_microunits": 0,
+          "estimated": true
+        },
+        "run_id": "run-80de861485b240afbaab14de5253fc1c",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "content_generation_started",
+          "content_generation_completed",
+          "quality_checked",
+          "assistant_started",
+          "assistant_delta",
+          "deliverable",
+          "stream_done"
+        ]
+      },
+      "status": "PASS"
+    },
+    {
+      "case_id": "R03",
+      "message": "收集下周 AI 行业热点，整理成公众号、小红书和头条三种版本。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": false,
+        "error_code": "RESEARCH_UNAVAILABLE",
+        "status": "failed",
+        "terminal": true,
+        "event_count": 6,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        },
+        "run_id": "run-8f6e20188b8a47c7b62d1666a31e594b",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "research_started",
+          "stream_error",
+          "stream_done"
+        ]
+      },
+      "status": "FAIL",
+      "error_code": "RESEARCH_UNAVAILABLE"
+    },
+    {
+      "case_id": "R04",
+      "message": "整理最近 7 天 AI 行业动态，生成一份带来源的公众号周报。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": false,
+        "error_code": "RESEARCH_UNAVAILABLE",
+        "status": "failed",
+        "terminal": true,
+        "event_count": 6,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        },
+        "run_id": "run-3484a10c5a1c4bf198694e458a53dfd9",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "research_started",
+          "stream_error",
+          "stream_done"
+        ]
+      },
+      "status": "FAIL",
+      "error_code": "RESEARCH_UNAVAILABLE"
+    },
+    {
+      "case_id": "R05",
+      "message": "为我们的新品牌制定品牌定位、IP 人设和首月活动策划。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "waiting_input",
+        "terminal": false,
+        "event_count": 2,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": true,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 847,
+          "output_tokens": 2475,
+          "cost_microunits": 0,
+          "estimated": true
+        },
+        "run_id": "run-d2c26eb7f8a046a7b1c744539ab819a4",
+        "event_sequence": [
+          "intent_detected",
+          "clarification_required"
+        ]
+      },
+      "status": "PASS"
+    },
+    {
+      "case_id": "R06",
+      "message": "制定下周的内容日历和选题规划，按日期、平台、主题和目标输出。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "waiting_input",
+        "terminal": false,
+        "event_count": 2,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": true,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 846,
+          "output_tokens": 1974,
+          "cost_microunits": 0,
+          "estimated": true
+        },
+        "run_id": "run-60d136a11eb249a88b5cca5d90a5c712",
+        "event_sequence": [
+          "intent_detected",
+          "clarification_required"
+        ]
+      },
+      "status": "PASS"
+    },
+    {
+      "case_id": "R07",
+      "message": "把上一版文案改得更专业一些，并保留原有的三个重点。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "degraded_succeeded",
+        "terminal": true,
+        "event_count": 10,
+        "reconnect_count": 0,
+        "deliverable_count": 3,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": true,
+        "usage": {
+          "input_tokens": 1185,
+          "output_tokens": 4676,
+          "cost_microunits": 0,
+          "estimated": true
+        },
+        "run_id": "run-cd4e526328c84aa2aa363e12bc84d59b",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "content_generation_started",
+          "content_generation_completed",
+          "quality_checked",
+          "assistant_started",
+          "assistant_delta",
+          "deliverable",
+          "stream_done"
+        ]
+      },
+      "status": "PASS",
+      "preceding_turns": [
+        {
+          "contract_version": "operation.acceptance/1",
+          "passed": true,
+          "error_code": null,
+          "status": "degraded_succeeded",
+          "terminal": true,
+          "event_count": 10,
+          "reconnect_count": 0,
+          "deliverable_count": 2,
+          "citation_count": 0,
+          "clarification_observed": false,
+          "cancel_requested": false,
+          "degraded": true,
+          "usage": {
+            "input_tokens": 808,
+            "output_tokens": 1600,
+            "cost_microunits": 0,
+            "estimated": true
+          },
+          "run_id": "run-290406325dc14ed69b5d30fc052c1508",
+          "event_sequence": [
+            "intent_detected",
+            "run_started",
+            "phase_started",
+            "content_generation_started",
+            "content_generation_completed",
+            "quality_checked",
+            "assistant_started",
+            "assistant_delta",
+            "deliverable",
+            "stream_done"
+          ]
+        }
+      ]
+    },
+    {
+      "case_id": "R08",
+      "message": "在研究来源不足或研究服务超时时，收集最近 7 天 AI 热点并生成摘要。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": false,
+        "error_code": "OPERATION_ALL_SPECIALISTS_FAILED",
+        "status": "failed",
+        "terminal": true,
+        "event_count": 6,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        },
+        "run_id": "run-975352f87c2841ddb49356cea3ba8534",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "research_started",
+          "stream_error",
+          "stream_done"
+        ]
+      },
+      "status": "PASS"
+    }
+  ]
+}

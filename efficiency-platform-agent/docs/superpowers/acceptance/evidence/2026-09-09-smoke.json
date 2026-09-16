@@ -1,0 +1,39 @@
+{
+  "contract_version": "operation.real.acceptance/1",
+  "execution_mode": "real",
+  "fake_fallback": false,
+  "configuration": {
+    "status": "READY",
+    "gate": "deepseek_web_search",
+    "execution_mode": "real",
+    "fake_fallback": false
+  },
+  "cases": [
+    {
+      "case_id": "R01",
+      "message": "你是谁？",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "succeeded",
+        "terminal": true,
+        "event_count": 5,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        }
+      },
+      "status": "PASS"
+    }
+  ]
+}

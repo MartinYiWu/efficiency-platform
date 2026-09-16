@@ -1,0 +1,15 @@
+{
+  "status": "SUCCEEDED",
+  "external_io": true,
+  "selected_real_gates": [
+    "postgres_pgvector"
+  ],
+  "network_calls": 2,
+  "database_rows_read": 14,
+  "database_rows_written": 0,
+  "vector_extension_verified": true,
+  "target_schema_absent": true,
+  "cost_microunits": 0,
+  "cost_observed": false,
+  "elapsed_ms": 62
+}

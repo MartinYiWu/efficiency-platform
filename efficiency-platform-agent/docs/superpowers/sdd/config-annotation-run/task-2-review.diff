@@ -1,0 +1,379 @@
+# 无 Git 审查差异包：Task 2
+# 本机 .env 使用脱敏清单比较，未包含任何值。
+
+
+## task-2-before.env.example -> .env.example
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.example and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\.ENV.EXAMPLE
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.example
+    1:  # Legacy Java configuration domains, intentionally empty in the tracked template.
+    2:  AGENT_VECTOR_DATABASE_URL=
+    3:  AGENT_TASK_BROKER_URL=
+    4:  AGENT_RUN_EVENT_REDIS_URL=
+    5:  AGENT_EMBEDDING_DASHSCOPE_BASE_URL=
+    6:  AGENT_EMBEDDING_DASHSCOPE_API_KEY=
+    7:  AGENT_EMBEDDING_MODEL=
+    8:  AGENT_EMBEDDING_DIMENSIONS=
+    9:  AGENT_RERANK_DASHSCOPE_API_KEY=
+   10:  AGENT_COS_SECRET_ID=
+   11:  AGENT_COS_SECRET_KEY=
+   12:  AGENT_COS_REGION=
+   13:  AGENT_COS_BUCKET=
+   14:  AGENT_COS_BASE_URL=
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\.ENV.EXAMPLE
+    1:  # åéæ°æ®åºè¿æ¥å°åï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼è¿è¡æ¶ç±æ¬æº .env æåä¿¡ä»» Secret æ³¨å¥ã
+    2:  AGENT_VECTOR_DATABASE_URL=
+    3:  
+    4:  # ä»»å¡ä»£çè¿æ¥å°åï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼é¿åæäº¤çå®ä¸­é´ä»¶å°åã
+    5:  AGENT_TASK_BROKER_URL=
+    6:  
+    7:  # è¿è¡äºä»¶ Redis è¿æ¥å°åï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼è¿è¡æ¶æç¯å¢åç¬éç½®ã
+    8:  AGENT_RUN_EVENT_REDIS_URL=
+    9:  
+   10:  # åéåµå¥æå¡åºç¡å°åï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼é¿åè¯¯åçå®ä¾åºåå°åã
+   11:  AGENT_EMBEDDING_DASHSCOPE_BASE_URL=
+   12:  
+   13:  # åéåµå¥æå¡ API Keyï¼ææå¼å¿é¡»ä¸ºç©ºï¼ç±æ¬æº .env æ Secret æ³¨å¥ã
+   14:  AGENT_EMBEDDING_DASHSCOPE_API_KEY=
+   15:  
+   16:  # åéåµå¥æ¨¡åæ è¯ï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼å¾å·ä½ä¾åºåä¸æ¨¡åç­ç¥ç¡®å®ã
+   17:  AGENT_EMBEDDING_MODEL=
+   18:  
+   19:  # åéç»´åº¦ï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼è¿è¡æ¶ä¸æéåµå¥æ¨¡åä¿æä¸è´ã
+   20:  AGENT_EMBEDDING_DIMENSIONS=
+   21:  
+   22:  # éææå¡ API Keyï¼ææå¼å¿é¡»ä¸ºç©ºï¼ç±æ¬æº .env æ Secret æ³¨å¥ã
+   23:  AGENT_RERANK_DASHSCOPE_API_KEY=
+   24:  
+   25:  # å¯¹è±¡å­å¨è®¿é®æ è¯ï¼ææå¼å¿é¡»ä¸ºç©ºï¼ç±æ¬æº .env æ Secret æ³¨å¥ã
+   26:  AGENT_COS_SECRET_ID=
+   27:  
+   28:  # å¯¹è±¡å­å¨è®¿é®å¯é¥ï¼ææå¼å¿é¡»ä¸ºç©ºï¼ç±æ¬æº .env æ Secret æ³¨å¥ã
+   29:  AGENT_COS_SECRET_KEY=
+   30:  
+   31:  # å¯¹è±¡å­å¨å°åæ è¯ï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼æå®éé¨ç½²å°åå¡«åã
+   32:  AGENT_COS_REGION=
+   33:  
+   34:  # å¯¹è±¡å­å¨æ¡¶åç§°ï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼æå®éæ¡¶éç½®å¡«åã
+   35:  AGENT_COS_BUCKET=
+   36:  
+   37:  # å¯¹è±¡å­å¨å¤é¨è®¿é®åºç¡å°åï¼æ¨¡æ¿ä¸­ä¿æä¸ºç©ºï¼æç½å³æ CDN éç½®å¡«åã
+   38:  AGENT_COS_BASE_URL=
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.example
+   15:  
+   16:  # DeepSeek direct provider. Fill only in the ignored local .env file.
+   17:  AGENT_LLM_DEEPSEEK_BASE_URL=
+   18:  AGENT_LLM_DEEPSEEK_API_KEY=
+   19:  AGENT_LLM_DEEPSEEK_FAST_MODEL=
+   20:  AGENT_LLM_DEEPSEEK_BALANCED_MODEL=
+   21:  AGENT_LLM_DEEPSEEK_STRONG_MODEL=
+   22:  
+   23:  # Future model pool. Keep empty until its provider contract is approved.
+   24:  AGENT_LLM_MODEL_POOL_BASE_URL=
+   25:  AGENT_LLM_MODEL_POOL_API_KEY=
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\.ENV.EXAMPLE
+   39:  
+   40:  # DeepSeek å®æ¹ OpenAI å¼å®¹æå¡å°åï¼å½åé»è®¤ä½¿ç¨å®æ¹ååï¼ä¸åå«å¯é¥ã
+   41:  AGENT_LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com
+   42:  
+   43:  # DeepSeek API Keyï¼ææå¼å¿é¡»ä¸ºç©ºï¼ç±æ¬æº .env æ Secret æ³¨å¥ã
+   44:  AGENT_LLM_DEEPSEEK_API_KEY=
+   45:  
+   46:  # å¿«æ¨¡åçå®æ¹æ¨¡åæ è¯ï¼ç¨äºä½å¤æåº¦ä»»å¡ã
+   47:  AGENT_LLM_DEEPSEEK_FAST_MODEL=deepseek-v4-flash
+   48:  
+   49:  # å¹³è¡¡æ¨¡åçå®æ¹æ¨¡åæ è¯ï¼å½åå¤ç¨å¿«æ¨¡åï¼ä¿çç¬ç«éç½®ä½ä»¥æ¯æåç»­æ¿æ¢ã
+   50:  AGENT_LLM_DEEPSEEK_BALANCED_MODEL=deepseek-v4-flash
+   51:  
+   52:  # å¼ºæ¨¡åçå®æ¹æ¨¡åæ è¯ï¼ç¨äºé«å¤æåº¦ä»»å¡ã
+   53:  AGENT_LLM_DEEPSEEK_STRONG_MODEL=deepseek-v4-pro
+   54:  
+   55:  # æªæ¥æ¨¡åæ± çåºç¡å°åï¼å½åä¿çä¸ºç©ºï¼å¾ä¾åºåå¥çº¦ç¡®è®¤åå¯ç¨ã
+   56:  AGENT_LLM_MODEL_POOL_BASE_URL=
+   57:  
+   58:  # æªæ¥æ¨¡åæ± ç API Keyï¼ææå¼å¿é¡»ä¸ºç©ºï¼å¾ä¾åºåå¥çº¦ç¡®è®¤åæ³¨å¥ã
+   59:  AGENT_LLM_MODEL_POOL_API_KEY=
+*****
+
+
+## task-2-before.llm-routing.toml -> config\llm-routing.toml
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+    1:  [router]
+    2:  selection_mode = "agent_proposed_with_harness_guardrails"
+    3:  default_route = "chat_default"
+    4:  allow_lower_tier_degrade_on_retry = true
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+    1:  [router]
+    2:  # éæ©æ¨¡å¼ï¼ç± Agent æè®®è½åå±ï¼åç± Harness æ½å ç¡¬æ§çº¦æã
+    3:  selection_mode = "agent_proposed_with_harness_guardrails"
+    4:  
+    5:  # é»è®¤èå¤©è·¯ç±åç§°ï¼å½åæåèªéåºçéç¨å¯¹è¯è·¯ç±ã
+    6:  default_route = "chat_default"
+    7:  
+    8:  # æ¯å¦åè®¸å¨å¯éè¯å¤±è´¥ååè¾ä½è½åå±éçº§ï¼ä»¥æåå¯ç¨æ§ã
+    9:  allow_lower_tier_degrade_on_retry = true
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+    6:  [providers.deepseek_direct]
+    7:  enabled = true
+    8:  adapter_kind = "openai_compatible"
+    9:  base_url_env = "AGENT_LLM_DEEPSEEK_BASE_URL"
+   10:  api_key_env = "AGENT_LLM_DEEPSEEK_API_KEY"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   11:  [providers.deepseek_direct]
+   12:  # æ¯å¦å¯ç¨ DeepSeek ç´è¿æä¾æ¹ï¼å½åé»è®¤å¯ç¨ã
+   13:  enabled = true
+   14:  
+   15:  # æä¾æ¹ééå¨ç±»åï¼ä½¿ç¨ OpenAI å¼å®¹åè®®è®¿é® DeepSeekã
+   16:  adapter_kind = "openai_compatible"
+   17:  
+   18:  # DeepSeek åºç¡å°åæè¯»åçç¯å¢åéåç§°ã
+   19:  base_url_env = "AGENT_LLM_DEEPSEEK_BASE_URL"
+   20:  
+   21:  # DeepSeek API Key æè¯»åçç¯å¢åéåç§°ã
+   22:  api_key_env = "AGENT_LLM_DEEPSEEK_API_KEY"
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+   12:  [providers.model_pool]
+   13:  enabled = false
+   14:  adapter_kind = "unconfigured"
+   15:  base_url_env = "AGENT_LLM_MODEL_POOL_BASE_URL"
+   16:  api_key_env = "AGENT_LLM_MODEL_POOL_API_KEY"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   24:  [providers.model_pool]
+   25:  # æ¯å¦å¯ç¨æªæ¥æ¨¡åæ± ï¼å½åä¿çå³é­ç¶æã
+   26:  enabled = false
+   27:  
+   28:  # æ¨¡åæ± ééå¨ç±»åï¼æªæ¥å¥åä¿ææªéç½®æ è¯ã
+   29:  adapter_kind = "unconfigured"
+   30:  
+   31:  # æªæ¥æ¨¡åæ± åºç¡å°åæè¯»åçç¯å¢åéåç§°ã
+   32:  base_url_env = "AGENT_LLM_MODEL_POOL_BASE_URL"
+   33:  
+   34:  # æªæ¥æ¨¡åæ±  API Key æè¯»åçç¯å¢åéåç§°ã
+   35:  api_key_env = "AGENT_LLM_MODEL_POOL_API_KEY"
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+   18:  [routes.chat_default]
+   19:  selection_order = "adaptive"
+   20:  allowed_tiers = ["fast", "balanced", "strong"]
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   37:  [routes.chat_default]
+   38:  # è·¯ç±åééæ©é¡ºåºï¼èªéåºæ¨¡å¼ä¼æä»»å¡å¤æåº¦å¨è½åå±é´éæ©ã
+   39:  selection_order = "adaptive"
+   40:  
+   41:  # è¯¥è·¯ç±åè®¸ä½¿ç¨çè½åå±åè¡¨ï¼æ fastãbalancedãstrong éå±å¼æ¾ã
+   42:  allowed_tiers = ["fast", "balanced", "strong"]
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+   22:  [[routes.chat_default.candidates]]
+   23:  provider = "deepseek_direct"
+   24:  tier = "fast"
+   25:  model_env = "AGENT_LLM_DEEPSEEK_FAST_MODEL"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   44:  [[routes.chat_default.candidates]]
+   45:  # åéæä¾æ¹åç§°ï¼å½åå¿«å±ä½¿ç¨ DeepSeek ç´è¿ã
+   46:  provider = "deepseek_direct"
+   47:  
+   48:  # åéè½åå±ï¼ç¨äºä½å¤æåº¦ä»»å¡ã
+   49:  tier = "fast"
+   50:  
+   51:  # å¿«å±æ¨¡åæ è¯æè¯»åçç¯å¢åéåç§°ã
+   52:  model_env = "AGENT_LLM_DEEPSEEK_FAST_MODEL"
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+   27:  [[routes.chat_default.candidates]]
+   28:  provider = "deepseek_direct"
+   29:  tier = "balanced"
+   30:  model_env = "AGENT_LLM_DEEPSEEK_BALANCED_MODEL"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   54:  [[routes.chat_default.candidates]]
+   55:  # åéæä¾æ¹åç§°ï¼å½åå¹³è¡¡å±ä½¿ç¨ DeepSeek ç´è¿ã
+   56:  provider = "deepseek_direct"
+   57:  
+   58:  # åéè½åå±ï¼ç¨äºä¸­ç­å¤æåº¦ä»»å¡ã
+   59:  tier = "balanced"
+   60:  
+   61:  # å¹³è¡¡å±æ¨¡åæ è¯æè¯»åçç¯å¢åéåç§°ã
+   62:  model_env = "AGENT_LLM_DEEPSEEK_BALANCED_MODEL"
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.llm-routing.toml
+   32:  [[routes.chat_default.candidates]]
+   33:  provider = "deepseek_direct"
+   34:  tier = "strong"
+   35:  model_env = "AGENT_LLM_DEEPSEEK_STRONG_MODEL"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\CONFIG\LLM-ROUTING.TOML
+   64:  [[routes.chat_default.candidates]]
+   65:  # åéæä¾æ¹åç§°ï¼å½åå¼ºå±ä½¿ç¨ DeepSeek ç´è¿ã
+   66:  provider = "deepseek_direct"
+   67:  
+   68:  # åéè½åå±ï¼ç¨äºé«å¤æåº¦ä»»å¡ã
+   69:  tier = "strong"
+   70:  
+   71:  # å¼ºå±æ¨¡åæ è¯æè¯»åçç¯å¢åéåç§°ã
+   72:  model_env = "AGENT_LLM_DEEPSEEK_STRONG_MODEL"
+*****
+
+
+## task-2-before.pyproject.toml -> pyproject.toml
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.pyproject.toml and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\PYPROJECT.TOML
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.pyproject.toml
+    1:  [project]
+    2:  name = "efficiency-platform-agent"
+    3:  version = "0.1.0"
+    4:  description = "Framework-neutral foundation for the efficiency platform Agent runtime."
+    5:  requires-python = ">=3.13,<3.14"
+    6:  dependencies = []
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\PYPROJECT.TOML
+    1:  [project]
+    2:  # é¡¹ç®åç§°ï¼ç¨äºæ è¯å½å Agent è¿è¡æ¶åã
+    3:  name = "efficiency-platform-agent"
+    4:  
+    5:  # é¡¹ç®çæ¬ï¼å½åä¸ºåå§åºçº¿çæ¬å·ã
+    6:  version = "0.1.0"
+    7:  
+    8:  # é¡¹ç®ç®ä»ï¼æè¿°å½ååçèè´£è¾¹çã
+    9:  description = "Framework-neutral foundation for the efficiency platform Agent runtime."
+   10:  
+   11:  # Python çæ¬èå´ï¼ä¿æç°æè§£éå¨çº¦æï¼ä¸æ¹åè¿è¡è¯­ä¹ã
+   12:  requires-python = ">=3.13,<3.14"
+   13:  
+   14:  # è¿è¡æ¶ä¾èµåè¡¨ï¼å½åä¸ºç©ºï¼è¡¨ç¤ºåºçº¿é¶æ®µä¸å£°æé¢å¤ä¾èµã
+   15:  dependencies = []
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.pyproject.toml
+    8:  [tool.unittest]
+    9:  start-directory = "tests"
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\PYPROJECT.TOML
+   17:  [tool.unittest]
+   18:  # ååæµè¯èµ·å§ç®å½ï¼ä¿æ unittest ä» tests ç®å½åç°ç¨ä¾ã
+   19:  start-directory = "tests"
+*****
+
+
+## task-2-before.env.redacted -> task-2-after.env.redacted
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted
+    1:  # User-authorized local configuration. This file is ignored and must never be committed.
+    2:  
+    3:  # Migrated legacy PostgreSQL Vector and Redis connections.
+    4:  AGENT_VECTOR_DATABASE_URL=<å·²è±æ>
+    5:  AGENT_TASK_BROKER_URL=<å·²è±æ>
+    6:  AGENT_RUN_EVENT_REDIS_URL=<å·²è±æ>
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+    1:  # åéæ°æ®åºè¿æ¥å°åï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+    2:  AGENT_VECTOR_DATABASE_URL=<å·²è±æ>
+    3:  
+    4:  # ä»»å¡ä»£çè¿æ¥å°åï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+    5:  AGENT_TASK_BROKER_URL=<å·²è±æ>
+    6:  
+    7:  # è¿è¡äºä»¶ Redis è¿æ¥å°åï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+    8:  AGENT_RUN_EVENT_REDIS_URL=<å·²è±æ>
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted
+    7:  
+    8:  # Migrated legacy DashScope embedding configuration. Rerank reuses the same credential only.
+    9:  AGENT_EMBEDDING_DASHSCOPE_BASE_URL=<å·²è±æ>
+   10:  AGENT_EMBEDDING_DASHSCOPE_API_KEY=<å·²è±æ>
+   11:  AGENT_EMBEDDING_MODEL=<å·²è±æ>
+   12:  AGENT_EMBEDDING_DIMENSIONS=<å·²è±æ>
+   13:  AGENT_RERANK_DASHSCOPE_API_KEY=<å·²è±æ>
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+    9:  
+   10:  # åéåµå¥æå¡åºç¡å°åï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   11:  AGENT_EMBEDDING_DASHSCOPE_BASE_URL=<å·²è±æ>
+   12:  
+   13:  # åéåµå¥æå¡ API Keyï¼ææå¼ä¸å¨è¾åºä¸­å±ç¤ºã
+   14:  AGENT_EMBEDDING_DASHSCOPE_API_KEY=<å·²è±æ>
+   15:  
+   16:  # åéåµå¥æ¨¡åæ è¯ï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   17:  AGENT_EMBEDDING_MODEL=<å·²è±æ>
+   18:  
+   19:  # åéç»´åº¦ï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   20:  AGENT_EMBEDDING_DIMENSIONS=<å·²è±æ>
+   21:  
+   22:  # éææå¡ API Keyï¼ææå¼ä¸å¨è¾åºä¸­å±ç¤ºã
+   23:  AGENT_RERANK_DASHSCOPE_API_KEY=<å·²è±æ>
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted
+   14:  
+   15:  # Migrated legacy Tencent COS configuration.
+   16:  AGENT_COS_SECRET_ID=<å·²è±æ>
+   17:  AGENT_COS_SECRET_KEY=<å·²è±æ>
+   18:  AGENT_COS_REGION=<å·²è±æ>
+   19:  AGENT_COS_BUCKET=<å·²è±æ>
+   20:  AGENT_COS_BASE_URL=<å·²è±æ>
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+   24:  
+   25:  # å¯¹è±¡å­å¨è®¿é®æ è¯ï¼ææå¼ä¸å¨è¾åºä¸­å±ç¤ºã
+   26:  AGENT_COS_SECRET_ID=<å·²è±æ>
+   27:  
+   28:  # å¯¹è±¡å­å¨è®¿é®å¯é¥ï¼ææå¼ä¸å¨è¾åºä¸­å±ç¤ºã
+   29:  AGENT_COS_SECRET_KEY=<å·²è±æ>
+   30:  
+   31:  # å¯¹è±¡å­å¨å°åæ è¯ï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   32:  AGENT_COS_REGION=<å·²è±æ>
+   33:  
+   34:  # å¯¹è±¡å­å¨æ¡¶åç§°ï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   35:  AGENT_COS_BUCKET=<å·²è±æ>
+   36:  
+   37:  # å¯¹è±¡å­å¨å¤é¨è®¿é®åºç¡å°åï¼ä¿çç°æå¼ä¸åï¼ä»è¡¥åè¯´æã
+   38:  AGENT_COS_BASE_URL=<å·²è±æ>
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted
+   21:  
+   22:  # DeepSeek direct provider. Fill these locally when the API Key and actual model IDs are ready.
+   23:  AGENT_LLM_DEEPSEEK_BASE_URL=<å·²è±æ>
+   24:  AGENT_LLM_DEEPSEEK_API_KEY=<å·²è±æ>
+   25:  AGENT_LLM_DEEPSEEK_FAST_MODEL=<å·²è±æ>
+   26:  AGENT_LLM_DEEPSEEK_BALANCED_MODEL=<å·²è±æ>
+   27:  AGENT_LLM_DEEPSEEK_STRONG_MODEL=<å·²è±æ>
+   28:  
+   29:  # Future model pool. Keep empty until its provider contract is approved.
+   30:  AGENT_LLM_MODEL_POOL_BASE_URL=<å·²è±æ>
+   31:  AGENT_LLM_MODEL_POOL_API_KEY=<å·²è±æ>
+   32:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+   39:  
+   40:  # DeepSeek å®æ¹ OpenAI å¼å®¹æå¡å°åï¼ä¸å«å¯é¥ï¼å½åä½¿ç¨å®æ¹ååã
+   41:  AGENT_LLM_DEEPSEEK_BASE_URL=<å·²è±æ>
+   42:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-2-before.env.redacted
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\TASK-2-AFTER.ENV.REDACTED
+   43:  # DeepSeek API Keyï¼å¿é¡»ç±ä½¿ç¨èåç»­å¡«åï¼å½åä¿æä¸ºç©ºã
+   44:  AGENT_LLM_DEEPSEEK_API_KEY=<å·²è±æ>
+   45:  
+   46:  # å¿«æ¨¡åçå®æ¹æ¨¡åæ è¯ï¼ç¨äºä½å¤æåº¦ä»»å¡ã
+   47:  AGENT_LLM_DEEPSEEK_FAST_MODEL=<å·²è±æ>
+   48:  
+   49:  # å¹³è¡¡æ¨¡åçå®æ¹æ¨¡åæ è¯ï¼å½åå¤ç¨å¿«æ¨¡åï¼ä¿çç¬ç«éç½®ä½ã
+   50:  AGENT_LLM_DEEPSEEK_BALANCED_MODEL=<å·²è±æ>
+   51:  
+   52:  # å¼ºæ¨¡åçå®æ¹æ¨¡åæ è¯ï¼ç¨äºé«å¤æåº¦ä»»å¡ã
+   53:  AGENT_LLM_DEEPSEEK_STRONG_MODEL=<å·²è±æ>
+   54:  
+   55:  # æªæ¥æ¨¡åæ± åºç¡å°åï¼ä¿çç°æå¼ä¸åæä¸ºç©ºï¼å½åä¸å¯ç¨ã
+   56:  AGENT_LLM_MODEL_POOL_BASE_URL=<å·²è±æ>
+   57:  
+   58:  # æªæ¥æ¨¡åæ±  API Keyï¼å½åä¿æä¸ºç©ºï¼å¾åç»­ä¾åºåæ¥å¥ã
+   59:  AGENT_LLM_MODEL_POOL_API_KEY=<å·²è±æ>
+*****
+

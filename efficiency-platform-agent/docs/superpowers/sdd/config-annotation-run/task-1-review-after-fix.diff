@@ -1,0 +1,160 @@
+# 无 Git 审查差异包：Task 1 修复后复审
+# 基线：docs/superpowers/sdd/config-annotation-run/task-1-before.py
+# 当前：tests/config/test_llm_configuration_template.py
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   11:  class LlmConfigurationTemplateTest(unittest.TestCase):
+   12:      def test_routing_template_declares_dynamic_deepseek_default(self) -> None:
+   13:          document = tomllib.loads(
+   14:              (PROJECT_ROOT / "config/llm-routing.toml").read_text(encoding="utf-8")
+   15:          )
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+   11:  class LlmConfigurationTemplateTest(unittest.TestCase):
+   12:      @staticmethod
+   13:      def assert_assignments_have_chinese_comments(lines: list[str]) -> None:
+   14:          for index, line in enumerate(lines):
+   15:              stripped = line.strip()
+   16:              if not stripped or stripped.startswith("#") or "=" not in stripped:
+   17:                  continue
+   18:  
+   19:              previous = lines[index - 1].strip() if index else ""
+   20:              has_chinese_comment = previous.startswith("#") and any(
+   21:                  "\u4e00" <= character <= "\u9fff" for character in previous
+   22:              )
+   23:              if not has_chinese_comment:
+   24:                  raise AssertionError(f"éç½®é¡¹ç¼ºå°ç´§é»çä¸­æè¯´æï¼{stripped.split('=', 1)[0]}")
+   25:  
+   26:      @staticmethod
+   27:      def read_env_values(path: Path) -> dict[str, str]:
+   28:          return {
+   29:              key: value
+   30:              for line in path.read_text(encoding="utf-8").splitlines()
+   31:              if line and not line.startswith("#") and "=" in line
+   32:              for key, value in [line.split("=", maxsplit=1)]
+   33:          }
+   34:  
+   35:      def test_shared_configuration_assignments_have_chinese_comments(self) -> None:
+   36:          self.assert_assignments_have_chinese_comments(
+   37:              (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+   38:          )
+   39:          self.assert_assignments_have_chinese_comments(
+   40:              (PROJECT_ROOT / "config" / "llm-routing.toml").read_text(encoding="utf-8").splitlines()
+   41:          )
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   16:  
+   17:          self.assertEqual(
+   18:              document["router"]["selection_mode"],
+   19:              "agent_proposed_with_harness_guardrails",
+   20:          )
+   21:          self.assertTrue(document["router"]["allow_lower_tier_degrade_on_retry"])
+   22:          self.assertTrue(document["providers"]["deepseek_direct"]["enabled"])
+   23:          self.assertEqual(
+   24:              document["providers"]["deepseek_direct"]["api_key_env"],
+   25:              "AGENT_LLM_DEEPSEEK_API_KEY",
+   26:          )
+   27:          self.assertEqual(
+   28:              document["routes"]["chat_default"]["selection_order"],
+   29:              "adaptive",
+   30:          )
+   31:          self.assertEqual(
+   32:              document["routes"]["chat_default"]["allowed_tiers"],
+   33:              ["fast", "balanced", "strong"],
+   34:          )
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+   42:  
+   43:      def test_local_env_assignments_have_chinese_comments_when_present(self) -> None:
+   44:          local_env = PROJECT_ROOT / ".env"
+   45:          if local_env.exists():
+   46:              self.assert_assignments_have_chinese_comments(
+   47:                  local_env.read_text(encoding="utf-8").splitlines()
+   48:              )
+   49:  
+   50:      def test_deepseek_default_mapping_uses_current_official_model_ids(self) -> None:
+   51:          values = self.read_env_values(PROJECT_ROOT / ".env.example")
+   52:  
+   53:          self.assertEqual(values["AGENT_LLM_DEEPSEEK_BASE_URL"], "https://api.deepseek.com")
+   54:          self.assertEqual(values["AGENT_LLM_DEEPSEEK_API_KEY"], "")
+   55:          self.assertEqual(values["AGENT_LLM_DEEPSEEK_FAST_MODEL"], "deepseek-v4-flash")
+   56:          self.assertEqual(values["AGENT_LLM_DEEPSEEK_BALANCED_MODEL"], "deepseek-v4-flash")
+   57:          self.assertEqual(values["AGENT_LLM_DEEPSEEK_STRONG_MODEL"], "deepseek-v4-pro")
+   58:  
+   59:      def test_routing_template_declares_dynamic_deepseek_default(self) -> None:
+   60:          document = tomllib.loads(
+   61:              (PROJECT_ROOT / "config/llm-routing.toml").read_text(encoding="utf-8")
+   62:          )
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   35:  
+   36:      def test_future_model_pool_is_reserved_but_disabled(self) -> None:
+   37:          document = tomllib.loads(
+   38:              (PROJECT_ROOT / "config/llm-routing.toml").read_text(encoding="utf-8")
+   39:          )
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+   63:  
+   64:          self.assertEqual(
+   65:              document["router"]["selection_mode"],
+   66:              "agent_proposed_with_harness_guardrails",
+   67:          )
+   68:          self.assertTrue(document["router"]["allow_lower_tier_degrade_on_retry"])
+   69:          self.assertTrue(document["providers"]["deepseek_direct"]["enabled"])
+   70:          self.assertEqual(
+   71:              document["providers"]["deepseek_direct"]["api_key_env"],
+   72:              "AGENT_LLM_DEEPSEEK_API_KEY",
+   73:          )
+   74:          self.assertEqual(
+   75:              document["routes"]["chat_default"]["selection_order"],
+   76:              "adaptive",
+   77:          )
+   78:          self.assertEqual(
+   79:              document["routes"]["chat_default"]["allowed_tiers"],
+   80:              ["fast", "balanced", "strong"],
+   81:          )
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   40:  
+   41:          pool = document["providers"]["model_pool"]
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+   82:  
+   83:      def test_future_model_pool_is_reserved_but_disabled(self) -> None:
+   84:          document = tomllib.loads(
+   85:              (PROJECT_ROOT / "config/llm-routing.toml").read_text(encoding="utf-8")
+   86:          )
+   87:  
+   88:          pool = document["providers"]["model_pool"]
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   46:      def test_env_template_contains_only_empty_runtime_values(self) -> None:
+   47:          lines = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+   48:          values = {
+   49:              key: value
+   50:              for line in lines
+   51:              if line and not line.startswith("#") and "=" in line
+   52:              for key, value in [line.split("=", maxsplit=1)]
+   53:          }
+   54:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+   93:      def test_env_template_contains_only_empty_runtime_values(self) -> None:
+   94:          values = self.read_env_values(PROJECT_ROOT / ".env.example")
+   95:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-1-before.py
+   68:              "AGENT_COS_BASE_URL",
+   69:              "AGENT_LLM_DEEPSEEK_BASE_URL",
+   70:              "AGENT_LLM_DEEPSEEK_API_KEY",
+   71:              "AGENT_LLM_DEEPSEEK_FAST_MODEL",
+   72:              "AGENT_LLM_DEEPSEEK_BALANCED_MODEL",
+   73:              "AGENT_LLM_DEEPSEEK_STRONG_MODEL",
+   74:              "AGENT_LLM_MODEL_POOL_BASE_URL",
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+  109:              "AGENT_COS_BASE_URL",
+  110:              "AGENT_LLM_DEEPSEEK_API_KEY",
+  111:              "AGENT_LLM_MODEL_POOL_BASE_URL",
+*****
+

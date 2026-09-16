@@ -1,0 +1,81 @@
+# Agent 侧扩展开发约定
+
+| 属性 | 内容 |
+|---|---|
+| 标题 | Agent 侧扩展开发约定 |
+| 状态 | 评审中 |
+| 作者/负责人 | Agent 平台架构负责人 |
+| 创建日期 | 2026-09-01 |
+| 最后更新日期 | 2026-09-01 |
+| 评审人/批准人 | 评审人：尚未指定；批准人：尚未批准 |
+| 关联 ADR/设计/计划 | [纯 Agent 侧总体架构](纯Agent侧总体架构.md)、[Agent 侧架构骨架实施计划](../superpowers/plans/2026-09-01-Agent侧架构骨架-实施计划.md) |
+| 替代关系 | 无 |
+| 适用范围 | 纯 Agent 侧扩展候选规则与当前标准库端口；不表示具体扩展或真实运行时已接入 |
+
+## 1. 扩展原则
+
+新增能力优先通过端口和注册机制扩展，不修改统一 Harness 和 Graph Runtime 的公共生命周期。业务代码不得直接依赖具体厂商 SDK，厂商差异必须收敛到 `providers/`。
+
+## 2. 新增专家 Agent
+
+1. 在 `agents/` 下建立独立插件包；
+2. 实现 `core.ports.AgentPlugin`；
+3. 声明名称、能力集合、输入输出 Schema、允许工具和预算；
+4. 通过 Agent Registry 注册；
+5. 只接受 Supervisor 分配的结构化子任务和裁剪后的上下文；
+6. 返回结构化结果、证据、引用和错误，不直接调用其他专家 Agent。
+
+## 3. 新增执行策略
+
+1. 在 `strategies/` 建立独立策略包；
+2. 实现 `StrategyExecutor`；
+3. 声明适用条件、最大步骤、预算、暂停点和终止条件；
+4. 在 Strategy Router 注册；
+5. 复用统一 Context、Tool Runtime、Checkpoint 和事件协议。
+
+## 4. 新增 Tool
+
+1. 根据归属放入 `tools/internal`、`tools/external` 或 `tools/mcp`；
+2. 实现 `Tool` 端口，提供稳定名称、描述和参数 Schema；
+3. 所有调用必须经过 `tools/runtime` 的 Schema 校验、权限、超时、重试、审计和结果归一化；
+4. Tool 不得读取不属于当前租户或用户的资源；
+5. 高风险写操作必须声明审批策略和幂等键。
+
+## 5. 新增 Provider
+
+1. 放入对应的 `providers/<type>/`；
+2. 对上实现内部端口，对下封装厂商 SDK 或 HTTP API；
+3. 不向上泄露厂商响应对象、异常类型和配置键；
+4. 必须定义超时、重试、限流、错误映射和可观测字段；
+5. 相同能力至少保留主 Provider 与可选降级 Provider 的配置空间。
+
+## 6. 新增 Capability
+
+Capability 是可复用的技术能力，不等于业务用例。它可以组合 Provider、Tool、Context 和 Persistence，但不得包含某个业务部门的流程判断。
+
+示例：文档解析、OCR、混合检索、重排、引用校验属于 Capability；“简历筛选”“会议待办分配”属于后续业务 Agent 或 Workflow。
+
+## 7. 强制依赖规则
+
+- `core` 只依赖自身和 Python 标准库；
+- `contracts` 不依赖 API、Harness、编排或策略；
+- 内部任何层不得依赖 `api`；
+- `providers`、`persistence` 不得依赖 Harness、Routing、Orchestration、Strategies、Agents、Workflows；
+- Agent 不直接实例化厂商 SDK；
+- 专家 Agent 不点对点调用其他专家 Agent；
+- 业务 Prompt、业务工具授权和业务数据访问策略与各业务插件同仓位管理。
+
+执行以下命令校验：
+
+```powershell
+python -m unittest tests.architecture.test_dependency_rules -v
+```
+
+## 8. 新增代码的最低测试要求
+
+- 新端口：契约测试；
+- 新 Provider：适配器契约、超时、错误映射和降级测试；
+- 新 Tool：Schema、权限、幂等、超时和审计测试；
+- 新策略：路由、终止条件、预算、Checkpoint 和失败恢复测试；
+- 新 Agent：输入输出 Schema、工具白名单、上下文隔离和 Supervisor 集成测试；
+- 新 RAG/OCR 能力：固定数据集上的质量回归测试。

@@ -1,0 +1,49 @@
+{
+  "contract_version": "operation.real.acceptance/1",
+  "execution_mode": "real",
+  "fake_fallback": false,
+  "configuration": {
+    "status": "READY",
+    "gate": "deepseek_web_search",
+    "execution_mode": "real",
+    "fake_fallback": false
+  },
+  "cases": [
+    {
+      "case_id": "R03",
+      "message": "收集下周 AI 行业热点，整理成公众号、小红书和头条三种版本。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": false,
+        "error_code": "UNEXPECTED_OUTCOME",
+        "status": "failed",
+        "terminal": true,
+        "event_count": 6,
+        "reconnect_count": 0,
+        "deliverable_count": 0,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": false,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cost_microunits": 0,
+          "estimated": false
+        },
+        "run_id": "run-97845b598b374400a5cbba1c3b73fad7",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "research_started",
+          "stream_error",
+          "stream_done"
+        ]
+      },
+      "status": "FAIL",
+      "error_code": "UNEXPECTED_OUTCOME"
+    }
+  ]
+}

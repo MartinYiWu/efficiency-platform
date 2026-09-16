@@ -1,0 +1,15 @@
+S2 任务 1文件级差异包（实施前快照对照）
+
+对照文件：
+- `task-1-baseline/pyproject.toml.snapshot` → `pyproject.toml`
+- `task-1-baseline/uv.lock.snapshot` → `uv.lock`
+- 新增 `tests/admission/test_s2_dependencies.py`
+
+差异摘要：
+- `pyproject.toml`：增加 FastAPI、Pydantic、Uvicorn、Jinja2、LangGraph 运行依赖。
+- `pyproject.toml`：增加 pytest、pytest-asyncio、pytest-cov、httpx、Ruff、mypy 开发依赖。
+- `pyproject.toml`：增加 pytest asyncio_mode、Ruff py313 和 mypy Python 3.13 配置。
+- `uv.lock`：由 uv 重新解析上述依赖及其安全传递依赖；未手工编辑。
+- `tests/admission/test_s2_dependencies.py`：新增必需 distribution、禁止 distribution 和 Python 版本门禁。
+
+完整基线内容保存在 `task-1-baseline/`，当前文件内容可与快照逐文件复核。

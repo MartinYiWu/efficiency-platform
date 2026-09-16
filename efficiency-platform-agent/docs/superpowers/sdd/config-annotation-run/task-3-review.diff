@@ -1,0 +1,296 @@
+# 无 Git 审查差异包：Task 3
+# 基线为 Task 3 执行前快照；当前文件均为仓库工作文件。
+
+
+## AGENTS.md -> AGENTS.md
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-AGENTS.md and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\AGENTS.MD
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-AGENTS.md
+   31:  â éªè¯ â ææ¡£åæ­¥ â è¯å®¡äº¤ä»ãæ°å¢æ©å± SHOULD èµ°ç«¯å£ä¸æ³¨åæºå¶ï¼ä¸ä¿®æ¹ Harness æ Graph Runti
+   32:  me çå¬å±çå½å¨æï¼è·¨å±ä¾èµææ¶æè£å³åæ´ MUST åå½¢æ ADRã
+   33:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\AGENTS.MD
+   31:  â éªè¯ â ææ¡£åæ­¥ â è¯å®¡äº¤ä»ãæ°å¢æ©å± SHOULD èµ°ç«¯å£ä¸æ³¨åæºå¶ï¼ä¸ä¿®æ¹ Harness æ Graph Runti
+   32:  me çå¬å±çå½å¨æï¼è·¨å±ä¾èµææ¶æè£å³åæ´ MUST åå½¢æ ADRãæ¬é¡¹ç®æ°¸ä¹ä¸æ¯ Git ä»åºï¼MUST NOT è
+   33:  ¦æ±ãæ§è¡æå£°ç§° Git åå§åãæäº¤ãåæ¯ãæ¨éãGit diff æåºäº Git çå®¡æ¥æµç¨ï¼åæ´å®¡æ¥ MUST ä
+   34:  ½¿ç¨æä»¶å¿«ç§ãæä»¶çº§å·®å¼ååé¡¹ç®åè¿åº¦è´¦æ¬ãé¡¹ç®èªè¡ç¼åçæ³¨éãDocstringãSQL æ³¨éåéç½®æ
+   35:  ³¨é MUST ä½¿ç¨ä¸­æï¼æ è¯ç¬¦ãç¯å¢åéåãProvider åç§°ãæ¨¡å ID åæ åææ¯æ¯è¯­ MAY ä¿çè±æã
+   36:  
+*****
+
+
+## docs__standards__01-工程与目录规范.md -> docs\standards\01-工程与目录规范.md
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__01-工程与目录规范.md and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\01-工程与目录规范.MD
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__01-工程与目录规范.md
+    8:  | åå»ºæ¥æ | 2026-09-01 |
+    9:  | æåæ´æ°æ¥æ | 2026-09-01 |
+   10:  | è¯å®¡äºº/æ¹åäºº | è¯å®¡äººï¼å°æªæå®ï¼æ¹åäººï¼å°æªæ¹å |
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\01-工程与目录规范.MD
+    8:  | åå»ºæ¥æ | 2026-09-01 |
+    9:  | æåæ´æ°æ¥æ | 2026-09-02 |
+   10:  | è¯å®¡äºº/æ¹åäºº | è¯å®¡äººï¼å°æªæå®ï¼æ¹åäººï¼å°æªæ¹å |
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__01-工程与目录规范.md
+  169:  - éç½®å¯¹è±¡ MUST å¨åºç¨ç»åæ ¹å®æè§£æåæ ¡éªï¼MUST å¯¹ç¼ºå¤±ãéæ³èå´åå²çªéç½®å¿«éå¤±è´¥ã
+  170:  - å¯é¥ãä»¤çãè¿æ¥ä¸²ãçå®è´¦æ·ãä¸ªäººä¿¡æ¯åçäº§æ°æ® MUST NOT åå¥æºç ãæµè¯æ ·æ¬ãPromptãæ¥å
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\01-工程与目录规范.MD
+  169:  - éç½®å¯¹è±¡ MUST å¨åºç¨ç»åæ ¹å®æè§£æåæ ¡éªï¼MUST å¯¹ç¼ºå¤±ãéæ³èå´åå²çªéç½®å¿«éå¤±è´¥ã
+  170:  - æ¯ä¸ªé¡¹ç®èªç»´æ¤ä¸æ¯ææ³¨éè¯­æ³çææéç½®é¡¹ MUST å·æç´§é»ä¸æ¹çä¸­æè¯´æï¼è¯´æ MUST è¦çç¨é
+  171:  ï¼å¿è¦æ¶è¦çæ ¼å¼ãåä½ãæææ§ãé»è®¤å¼ãå¯ç¨æ¡ä»¶æç¼ºå¤±è¡ä¸ºãæ³¨é MUST NOT åå«çå® Secretã
+  172:  
+  173:  - ä¸æ¯ææ³¨éè¯­æ³æç±å·¥å·èªå¨çæçéç½®æä»¶ MUST NOT äººå·¥æå¥æ³¨éï¼å¶éç½®é¡¹è¯´æ MUST åå¥ç´§é
+  174:  »çäººå·¥ç»´æ¤éç½®ãSchema æè¯´æææ¡£ã
+  175:  - å¯é¥ãä»¤çãè¿æ¥ä¸²ãçå®è´¦æ·ãä¸ªäººä¿¡æ¯åçäº§æ°æ® MUST NOT åå¥æºç ãæµè¯æ ·æ¬ãPromptãæ¥å
+*****
+
+
+## docs__standards__03-Python编码与注释规范.md -> docs\standards\03-Python编码与注释规范.md
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__03-Python编码与注释规范.md and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\03-PYTHON编码与注释规范.MD
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__03-Python编码与注释规范.md
+    8:  | åå»ºæ¥æ | 2026-09-01 |
+    9:  | æåæ´æ°æ¥æ | 2026-09-01 |
+   10:  | è¯å®¡äºº/æ¹åäºº | è¯å®¡äººï¼å°æªæå®ï¼æ¹åäººï¼å°æªæ¹å |
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\03-PYTHON编码与注释规范.MD
+    8:  | åå»ºæ¥æ | 2026-09-01 |
+    9:  | æåæ´æ°æ¥æ | 2026-09-02 |
+   10:  | è¯å®¡äºº/æ¹åäºº | è¯å®¡äººï¼å°æªæå®ï¼æ¹åäººï¼å°æªæ¹å |
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__standards__03-Python编码与注释规范.md
+   31:  
+   32:  ä»£ç æ è¯ç¬¦ MUST ä½¿ç¨è±æï¼ä¸­æ Docstring åæ³¨é MAY ä¿ç GraphãCheckpointãProviderãToolãPromptãSchem
+   33:  a ç­æ åè±æææ¯æ¯è¯­ãåä¸æ¨¡å MUST ä¿æä¸è´çè¯­è¨åæ¯è¯­é£æ ¼ã
+   34:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\STANDARDS\03-PYTHON编码与注释规范.MD
+   31:  
+   32:  ä»£ç æ è¯ç¬¦ MUST ä½¿ç¨è±æï¼é¡¹ç®èªè¡ç¼åç Python Docstring åæ³¨é MUST ä½¿ç¨ä¸­æï¼å¹¶ MAY ä¿ç Graphã
+   33:  CheckpointãProviderãToolãPromptãSchema ç­æ åè±æææ¯æ¯è¯­ãåä¸æ¨¡å MUST ä¿æä¸è´çè¯­è¨åæ¯è¯­é
+   34:  £æ ¼ã
+   35:  
+*****
+
+
+## tests__governance__test_documentation_contract.py -> tests\governance\test_documentation_contract.py
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-tests__governance__test_documentation_contract.py and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\GOVERNANCE\TEST_DOCUMENTATION_CONTRACT.PY
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-tests__governance__test_documentation_contract.py
+   73:          ): "ç¤ºä¾æè¿°å°åå¥ docs/standards/00-è§èç´¢å¼.md çæ¨¡æ¿é¾æ¥",
+   74:      }
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\GOVERNANCE\TEST_DOCUMENTATION_CONTRACT.PY
+   73:          ): "ç¤ºä¾æè¿°å°åå¥ docs/standards/00-è§èç´¢å¼.md çæ¨¡æ¿é¾æ¥",
+   74:          (
+   75:              "docs/superpowers/sdd/config-annotation-run/task-3-before-AGENTS.md",
+   76:              "docs/architecture/çº¯Agentä¾§æ»ä½æ¶æ.md",
+   77:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   78:          (
+   79:              "docs/superpowers/sdd/config-annotation-run/task-3-before-AGENTS.md",
+   80:              "docs/architecture/Agentä¾§ææ¯ç»ä»¶éå.md",
+   81:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   82:          (
+   83:              "docs/superpowers/sdd/config-annotation-run/task-3-before-AGENTS.md",
+   84:              "docs/architecture/æ©å±å¼åçº¦å®.md",
+   85:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   86:          (
+   87:              "docs/superpowers/sdd/config-annotation-run/task-3-before-AGENTS.md",
+   88:              "docs/standards/00-è§èç´¢å¼.md",
+   89:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   90:          (
+   91:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__01-å·¥ç¨ä¸ç®å½è§è.md",
+   92:              "../architecture/çº¯Agentä¾§æ»ä½æ¶æ.md",
+   93:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   94:          (
+   95:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__01-å·¥ç¨ä¸ç®å½è§è.md",
+   96:              "../architecture/Agentä¾§ææ¯ç»ä»¶éå.md",
+   97:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+   98:          (
+   99:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__01-å·¥ç¨ä¸ç®å½è§è.md",
+  100:              "../superpowers/plans/2026-09-01-Agentä¾§å·¥ç¨è§èä½ç³»-å®æ½è®¡å.md",
+  101:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  102:          (
+  103:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__01-å·¥ç¨ä¸ç®å½è§è.md",
+  104:              "04-æµè¯ä¸è´¨éé¨ç¦.md",
+  105:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  106:          (
+  107:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__01-å·¥ç¨ä¸ç®å½è§è.md",
+  108:              "05-æ°æ®åºä¸SQLè§è.md",
+  109:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  110:          (
+  111:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__03-Pythonç¼ç ä¸æ³¨éè§è.md",
+  112:              "../architecture/Agentä¾§ææ¯ç»ä»¶éå.md",
+  113:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  114:          (
+  115:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__03-Pythonç¼ç ä¸æ³¨éè§è.md",
+  116:              "02-æ¶æä¸ä¾èµè§è.md",
+  117:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  118:          (
+  119:              "docs/superpowers/sdd/config-annotation-run/task-3-before-docs__standards__03-Pythonç¼ç ä¸æ³¨éè§è.md",
+  120:              "../superpowers/plans/2026-09-01-Agentä¾§å·¥ç¨è§èä½ç³»-å®æ½è®¡å.md",
+  121:          ): "åå²å¿«ç§ä¿çåå§ç¸å¯¹é¾æ¥ï¼ä¾æä»¶çº§å·®å¼å®¡æ¥ä½¿ç¨",
+  122:      }
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-tests__governance__test_documentation_contract.py
+   90:              "å®å¨çº¢çº¿",
+   91:              "](docs/standards/00-è§èç´¢å¼.md)",
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\GOVERNANCE\TEST_DOCUMENTATION_CONTRACT.PY
+  138:              "å®å¨çº¢çº¿",
+  139:              "æ¬é¡¹ç®æ°¸ä¹ä¸æ¯ Git ä»åº",
+  140:              "](docs/standards/00-è§èç´¢å¼.md)",
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-tests__governance__test_documentation_contract.py
+  233:  
+  234:      def test_document_naming_status_sections_and_exception_rules_are_complete(self) -> None:
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\GOVERNANCE\TEST_DOCUMENTATION_CONTRACT.PY
+  282:  
+  283:      def test_annotation_and_configuration_comment_rules_are_documented(self) -> None:
+  284:          required_markers = {
+  285:              PROJECT_ROOT / "docs/standards/01-å·¥ç¨ä¸ç®å½è§è.md": (
+  286:                  "æ¯ä¸ªé¡¹ç®èªç»´æ¤ä¸æ¯ææ³¨éè¯­æ³çææéç½®é¡¹ MUST å·æç´§é»ä¸æ¹çä¸­æè¯´æ",
+  287:              ),
+  288:              PROJECT_ROOT / "docs/standards/03-Pythonç¼ç ä¸æ³¨éè§è.md": (
+  289:                  "é¡¹ç®èªè¡ç¼åç Python Docstring åæ³¨é MUST ä½¿ç¨ä¸­æ",
+  290:              ),
+  291:          }
+  292:          for path, markers in required_markers.items():
+  293:              content = path.read_text(encoding="utf-8")
+  294:              for marker in markers:
+  295:                  with self.subTest(path=path.name, marker=marker):
+  296:                      self.assertIn(marker, content)
+  297:  
+  298:      def test_document_naming_status_sections_and_exception_rules_are_complete(self) -> None:
+*****
+
+
+## tests__config__test_llm_configuration_template.py -> tests\config\test_llm_configuration_template.py
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-tests__config__test_llm_configuration_template.py and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\TESTS\CONFIG\TEST_LLM_CONFIGURATION_TEMPLATE.PY
+FC: no differences encountered
+
+
+## docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md -> docs\superpowers\plans\2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+
+Comparing files D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md and D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+   41:  
+   42:  - [ ] **Step 1: åå¥å¤±è´¥æµè¯**
+   43:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+   41:  
+   42:  - [x] **Step 1: åå¥å¤±è´¥æµè¯**
+   43:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  100:  
+  101:  - [ ] **Step 2: è¿è¡æµè¯å¹¶ç¡®è®¤å¤±è´¥**
+  102:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  100:  
+  101:  - [x] **Step 2: è¿è¡æµè¯å¹¶ç¡®è®¤å¤±è´¥**
+  102:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  123:  
+  124:  - [ ] **Step 1: ä¸º `.env.example` çæ¯ä¸ªåéæ·»å ç´§é»ä¸­æè¯´æ**
+  125:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  123:  
+  124:  - [x] **Step 1: ä¸º `.env.example` çæ¯ä¸ªåéæ·»å ç´§é»ä¸­æè¯´æ**
+  125:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  144:  
+  145:  - [ ] **Step 2: ä¸º `.env` æ·»å è¯´æä¸åªå¡«å DeepSeek éææå¼**
+  146:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  144:  
+  145:  - [x] **Step 2: ä¸º `.env` æ·»å è¯´æä¸åªå¡«å DeepSeek éææå¼**
+  146:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  168:  
+  169:  - [ ] **Step 3: ä¸º `config/llm-routing.toml` å `pyproject.toml` çæ¯ä¸ªéç½®é¡¹æ·»å è¯´æ**
+  170:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  168:  
+  169:  - [x] **Step 3: ä¸º `config/llm-routing.toml` å `pyproject.toml` çæ¯ä¸ªéç½®é¡¹æ·»å è¯´æ**
+  170:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  183:  
+  184:  - [ ] **Step 4: è¿è¡æ°å¢æµè¯å¹¶ç¡®è®¤éè¿**
+  185:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  183:  
+  184:  - [x] **Step 4: è¿è¡æ°å¢æµè¯å¹¶ç¡®è®¤éè¿**
+  185:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  208:  
+  209:  - [ ] **Step 1: æ¶ç´§å·¥ç¨ä¸ç¼ç è§è**
+  210:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  208:  
+  209:  - [x] **Step 1: æ¶ç´§å·¥ç¨ä¸ç¼ç è§è**
+  210:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  227:  
+  228:  - [ ] **Step 2: æ©å±è§èæµè¯çç¨³å®æ­è¨**
+  229:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  227:  
+  228:  - [x] **Step 2: æ©å±è§èæµè¯çç¨³å®æ­è¨**
+  229:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  239:  
+  240:  - [ ] **Step 3: æ§è¡å¨éæµè¯**
+  241:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  239:  
+  240:  - [x] **Step 3: æ§è¡å¨éæµè¯**
+  241:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+  249:  
+  250:  - [ ] **Step 4: æ´æ°å®æ½è®¡åç¶æå¹¶åéæå¤æ ¸**
+  251:  
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  249:  
+  250:  - [x] **Step 4: æ´æ°å®æ½è®¡åç¶æå¹¶åéæå¤æ ¸**
+  251:  
+*****
+
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\SDD\CONFIG-ANNOTATION-RUN\task-3-before-docs__superpowers__plans__2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+***** D:\EFFICIENCY-PLATFORM\EFFICIENCY-PLATFORM-AGENT\DOCS\SUPERPOWERS\PLANS\2026-09-02-中文注释与DEEPSEEK默认配置-实施计划.MD
+  263:  
+  264:  ## æ§è¡è®°å½
+  265:  
+  266:  - å®éä¿®æ¹æä»¶ï¼`AGENTS.md`ã`docs/standards/01-å·¥ç¨ä¸ç®å½è§è.md`ã`docs/standards/03-Pythonç¼ç ä¸æ³¨éè§
+  267:  è.md`ã`tests/governance/test_documentation_contract.py`ã`docs/superpowers/plans/2026-09-02-ä¸­ææ³¨éä¸DeepSeeké»è®¤é
+  268:  ç½®-å®æ½è®¡å.md`ã
+  269:  - å¤±è´¥æµè¯è¯æ®ï¼`& '.\.venv\Scripts\python.exe' -m unittest tests.governance.test_documentation_contract -v` é¦æ¬¡æ§è¡
+  270:   `Ran 15 tests in 0.466s`ï¼ç»æ `FAILED (failures=4)`ï¼å¤±è´¥ç¹ä¸º `AGENTS.md` ç¼ºå°âæ¬é¡¹ç®æ°¸ä¹ä¸æ¯ Git ä»åºâ
+  271:  ï¼ä»¥åä¸¤ä»½æ åææ¡£ç¼ºå°æ°å¢ä¸­æè§åæ­è¨ï¼å¤å åå²å¿«ç§ææ¡£çç¸å¯¹é¾æ¥æ ¡éªæªè±åã
+  272:  - éè¿æµè¯è¯æ®ï¼åä¸æ²»çæµè¯å½ä»¤å¤è·å `Ran 15 tests in 0.329s`ï¼ç»æ `OK`ã
+  273:  - å¨éæµè¯è¯æ®ï¼`& '.\.venv\Scripts\python.exe' -m unittest discover -s tests -v` æç»æ§è¡ `Ran 47 tests in 2.703s`ï
+  274:  ¼ç»æ `OK`ã
+  275:  - éæå¤æ ¸ï¼å·²æ§è¡å ä½æ è®°æ«æå½ä»¤æ£æ¥è®¡åä¸å¯¹åºè®¾è®¡ææ¡£ï¼è®¾è®¡ææ¡£æªå½ä¸­å ä½æ è®°ï¼è®¡å
+  276:  ä¸­çä»»å¡å¤éæ¡å·²å¨é¨å¾éã
+  277:  - æªæ§è¡çå¤é¨è°ç¨ï¼æªè®¿é® DeepSeekãPostgreSQLãRedisãCOSãDashScope æå¶ä»å¤é¨æå¡ï¼æªè¯»åãè¾å
+  278:  ºææ¹å¨ `.env`ã
+*****
+

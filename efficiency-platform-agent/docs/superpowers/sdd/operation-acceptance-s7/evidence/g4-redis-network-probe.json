@@ -1,0 +1,13 @@
+{
+  "status": "SUCCEEDED",
+  "external_io": true,
+  "selected_real_gates": [
+    "redis_taskiq"
+  ],
+  "network_calls": 2,
+  "model_calls": 0,
+  "redis_records": 0,
+  "cost_microunits": 0,
+  "cost_observed": false,
+  "elapsed_ms": 8
+}

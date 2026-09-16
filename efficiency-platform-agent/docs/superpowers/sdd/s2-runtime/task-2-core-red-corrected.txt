@@ -1,0 +1,18 @@
+S2 任务 2 修正后核心 RED 证据
+==============================
+
+说明：原 task-2-core-red.txt 保留为历史事实，未重写。由于目标模块已经存在，无法在当前工作树上重放“实现前”时序；本文件记录按修正后的测试导入构造的等价隔离快照 RED。隔离快照仅复制 core/run.py、core/enums.py、测试文件，并移除 core/budget.py、core/runtime.py、core/runtime_ports.py，未改写生产工作树。
+
+快照路径：C:\Users\ADMINI~1\AppData\Local\Temp\s2-core-red-corrected-faa7226936dc4735bba321e4a597f10a
+命令：
+  uv run --project D:\efficiency-platform\efficiency-platform-agent -- python -m pytest tests/unit/core/test_budget_guard.py tests/unit/core/test_runtime_contracts.py tests/contract/runtime/test_event_contract.py -q
+执行时间：2026-09-04T10:37（Asia/Shanghai；隔离快照）
+退出码：1
+
+结果摘要：
+  - test_budget_guard.py 导入 efficiency_platform_agent.core.budget 失败：ModuleNotFoundError
+  - test_runtime_contracts.py 导入 efficiency_platform_agent.core.budget 失败：ModuleNotFoundError
+  - test_event_contract.py 导入 efficiency_platform_agent.core.runtime 失败：ModuleNotFoundError
+  - 未进入测试执行阶段，失败原因仅为三个目标 core 模块缺失。
+
+该证据用于补足修正后的导入路径与目标模块缺失边界；不伪造原始实现时序，也不替代 task-2-core-red.txt 的历史记录。

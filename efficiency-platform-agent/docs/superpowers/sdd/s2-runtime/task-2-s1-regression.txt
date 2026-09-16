@@ -1,0 +1,24 @@
+test_agent_plugin_exposes_versioned_agent_spec (tests.architecture.test_core_contracts.CoreContractsTest.test_agent_plugin_exposes_versioned_agent_spec) ... ok
+test_controlled_json_values_reject_mutable_or_non_json_values (tests.architecture.test_core_contracts.CoreContractsTest.test_controlled_json_values_reject_mutable_or_non_json_values) ... ok
+test_core_agent_dependency_guard_rejects_relative_and_dynamic_import_bypasses (tests.architecture.test_core_contracts.CoreContractsTest.test_core_agent_dependency_guard_rejects_relative_and_dynamic_import_bypasses) ... ok
+test_core_agent_does_not_depend_on_agent_runtime_implementations (tests.architecture.test_core_contracts.CoreContractsTest.test_core_agent_does_not_depend_on_agent_runtime_implementations) ... ok
+test_core_exposes_framework_neutral_extension_ports (tests.architecture.test_core_contracts.CoreContractsTest.test_core_exposes_framework_neutral_extension_ports) ... ok
+test_execution_budget_is_immutable_and_validated (tests.architecture.test_core_contracts.CoreContractsTest.test_execution_budget_is_immutable_and_validated) ... ok
+test_extension_descriptor_is_versioned_and_fail_closed (tests.architecture.test_core_contracts.CoreContractsTest.test_extension_descriptor_is_versioned_and_fail_closed) ... ok
+test_protocols_expose_descriptors_and_structured_requests (tests.architecture.test_core_contracts.CoreContractsTest.test_protocols_expose_descriptors_and_structured_requests) ... ok
+test_provider_contract_normalizes_messages_usage_and_errors (tests.architecture.test_core_contracts.CoreContractsTest.test_provider_contract_normalizes_messages_usage_and_errors) ... ok
+test_run_status_transition_table_covers_recovery_and_terminal_rules (tests.architecture.test_core_contracts.CoreContractsTest.test_run_status_transition_table_covers_recovery_and_terminal_rules) ... ok
+test_run_statuses_cover_complete_execution_lifecycle (tests.architecture.test_core_contracts.CoreContractsTest.test_run_statuses_cover_complete_execution_lifecycle) ... ok
+test_s2_runtime_core_does_not_import_upper_layers_or_frameworks (tests.architecture.test_core_contracts.CoreContractsTest.test_s2_runtime_core_does_not_import_upper_layers_or_frameworks)
+S2 预算、运行事实和端口保持标准库及 core 内部依赖。 ... ok
+test_stable_core_boundaries_do_not_use_any (tests.architecture.test_core_contracts.CoreContractsTest.test_stable_core_boundaries_do_not_use_any) ... ok
+test_strategy_modes_cover_hybrid_multi_agent_execution (tests.architecture.test_core_contracts.CoreContractsTest.test_strategy_modes_cover_hybrid_multi_agent_execution) ... ok
+test_supervisor_task_contains_only_trimmed_subtask_context (tests.architecture.test_core_contracts.CoreContractsTest.test_supervisor_task_contains_only_trimmed_subtask_context) ... ok
+test_tool_contract_is_versioned_structured_and_bounded (tests.architecture.test_core_contracts.CoreContractsTest.test_tool_contract_is_versioned_structured_and_bounded) ... ok
+test_agent_spec_is_immutable_and_requires_complete_metadata (tests.unit.agents.test_agent_spec.AgentSpecTest.test_agent_spec_is_immutable_and_requires_complete_metadata) ... ok
+test_capability_requirement_uses_all_of_and_any_of_semantics (tests.unit.agents.test_agent_spec.AgentSpecTest.test_capability_requirement_uses_all_of_and_any_of_semantics) ... ok
+
+----------------------------------------------------------------------
+Ran 18 tests in 0.041s
+
+OK

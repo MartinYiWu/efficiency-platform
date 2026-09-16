@@ -1,0 +1,35 @@
+[router]
+selection_mode = "agent_proposed_with_harness_guardrails"
+default_route = "chat_default"
+allow_lower_tier_degrade_on_retry = true
+
+[providers.deepseek_direct]
+enabled = true
+adapter_kind = "openai_compatible"
+base_url_env = "AGENT_LLM_DEEPSEEK_BASE_URL"
+api_key_env = "AGENT_LLM_DEEPSEEK_API_KEY"
+
+[providers.model_pool]
+enabled = false
+adapter_kind = "unconfigured"
+base_url_env = "AGENT_LLM_MODEL_POOL_BASE_URL"
+api_key_env = "AGENT_LLM_MODEL_POOL_API_KEY"
+
+[routes.chat_default]
+selection_order = "adaptive"
+allowed_tiers = ["fast", "balanced", "strong"]
+
+[[routes.chat_default.candidates]]
+provider = "deepseek_direct"
+tier = "fast"
+model_env = "AGENT_LLM_DEEPSEEK_FAST_MODEL"
+
+[[routes.chat_default.candidates]]
+provider = "deepseek_direct"
+tier = "balanced"
+model_env = "AGENT_LLM_DEEPSEEK_BALANCED_MODEL"
+
+[[routes.chat_default.candidates]]
+provider = "deepseek_direct"
+tier = "strong"
+model_env = "AGENT_LLM_DEEPSEEK_STRONG_MODEL"

@@ -1,0 +1,19 @@
+[project]
+# 项目名称；用于标识当前 Agent 运行时包。
+name = "efficiency-platform-agent"
+
+# 项目版本；当前为初始基线版本号。
+version = "0.1.0"
+
+# 项目简介；描述当前包的职责边界。
+description = "Framework-neutral foundation for the efficiency platform Agent runtime."
+
+# Python 版本范围；保持现有解释器约束，不改变运行语义。
+requires-python = ">=3.13,<3.14"
+
+# 运行时依赖列表；当前为空，表示基线阶段不声明额外依赖。
+dependencies = []
+
+[tool.unittest]
+# 单元测试起始目录；保持 unittest 从 tests 目录发现用例。
+start-directory = "tests"

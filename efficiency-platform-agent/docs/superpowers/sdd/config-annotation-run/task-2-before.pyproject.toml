@@ -1,0 +1,9 @@
+[project]
+name = "efficiency-platform-agent"
+version = "0.1.0"
+description = "Framework-neutral foundation for the efficiency platform Agent runtime."
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[tool.unittest]
+start-directory = "tests"

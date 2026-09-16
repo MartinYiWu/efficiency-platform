@@ -1,0 +1,14 @@
+{
+  "status": "FAILED",
+  "reason": "redis_streams_unsupported",
+  "external_io": true,
+  "selected_real_gates": [
+    "redis_taskiq"
+  ],
+  "network_calls": 1,
+  "model_calls": 0,
+  "redis_records": 0,
+  "cleanup_ok": true,
+  "cost_microunits": 0,
+  "cost_observed": false
+}

@@ -1,0 +1,21 @@
+# S7 集成 Gate 默认全部关闭；启用前必须取得独立授权。
+[gates]
+deepseek_chat = false
+deepseek_web_search = false
+postgres_pgvector = false
+redis_taskiq = false
+cos_artifact = false
+document_pipeline = false
+end_to_end = false
+
+# 非敏感的单次验收上限；真实执行仍必须使用动作级授权再次约束。
+[limits]
+max_network_calls = 12
+max_model_calls = 12
+max_search_calls = 4
+max_cost_microunits = 0
+max_database_rows_read = 100
+max_database_rows_written = 100
+max_redis_records = 20
+max_cos_objects = 3
+max_bytes = 1048576

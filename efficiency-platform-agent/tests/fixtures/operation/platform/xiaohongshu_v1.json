@@ -1,0 +1,1 @@
+{"fixture_version":"platform/1","channel_id":"xiaohongshu","rules_version":"fixture-1","content_structure":["title","body","tags"],"tone_rules":["friendly"],"formatting_rules":["paragraphs"],"tag_rules":["three-to-five"],"factual_claim_policy":"evidence-only"}

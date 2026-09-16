@@ -1,0 +1,20 @@
+{
+  "contract_version": "operation.acceptance/1",
+  "passed": true,
+  "error_code": null,
+  "status": "degraded_succeeded",
+  "terminal": true,
+  "event_count": 8,
+  "reconnect_count": 0,
+  "deliverable_count": 1,
+  "citation_count": 0,
+  "clarification_observed": false,
+  "cancel_requested": false,
+  "degraded": true,
+  "usage": {
+    "input_tokens": 1063,
+    "output_tokens": 3520,
+    "cost_microunits": 0,
+    "estimated": true
+  }
+}

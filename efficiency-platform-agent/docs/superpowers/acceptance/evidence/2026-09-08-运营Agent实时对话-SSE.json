@@ -1,0 +1,101 @@
+{
+  "contract_version": "operation-chat-acceptance-evidence/1",
+  "generated_at": "2026-09-08T17:56:22+08:00",
+  "privacy": {
+    "environment_file_read": false,
+    "secret_value_recorded": false,
+    "prompt_or_response_body_recorded": false
+  },
+  "agent_quality_gates": {
+    "pytest": {
+      "status": "passed",
+      "tests": 867,
+      "subtests": 266,
+      "warnings": 2
+    },
+    "ruff": "passed",
+    "mypy_source_files": 204,
+    "compileall": "passed",
+    "documentation_contract": {
+      "tests": 19,
+      "subtests": 117,
+      "status": "passed"
+    }
+  },
+  "frontend_quality_gates": {
+    "target_vitest": {
+      "files": 4,
+      "tests": 22,
+      "status": "passed"
+    },
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "full_vitest": {
+      "files": 26,
+      "tests": 70,
+      "status": "passed"
+    }
+  },
+  "real_api": [
+    {
+      "case": "identity",
+      "run_id": "run-e0937bc6e8a542918b492baa492db32f",
+      "status": "succeeded",
+      "strategy": "direct",
+      "degraded": false,
+      "event_names": [
+        "run_started",
+        "phase_started",
+        "assistant_started",
+        "assistant_delta",
+        "stream_done"
+      ],
+      "delta_count": 1,
+      "content_length": 31,
+      "content_sha256": "f248720b3f41619b1bdacab3d12e027233e6372e7865069a567adeec9fd0b159",
+      "saved_matches_stream": true
+    },
+    {
+      "case": "general_chat",
+      "run_id": "run-deec1b34f52541809bf048ac164a5842",
+      "status": "succeeded",
+      "strategy": "direct",
+      "degraded": false,
+      "assistant_delta_count": 41,
+      "first_delta_at_ms": 7040,
+      "stream_done_at_ms": 7200,
+      "first_delta_before_stream_done": true,
+      "content_length": 78,
+      "content_sha256": "92c8fa7828cb5c30ad9986597c49c64f1d982b39b8eacb239eacecfd3a72d9b6",
+      "saved_matches_stream": true
+    },
+    {
+      "case": "explicit_research",
+      "run_id": "run-2e343e8a2ef44e34b1230b2b4d764bc9",
+      "status": "failed",
+      "strategy": "multi_agent",
+      "degraded": false,
+      "error_code": "RESEARCH_UNAVAILABLE",
+      "safe_message": "本次未能完成在线核验，请稍后重试",
+      "assistant_delta_count": 0,
+      "citation_count": 0,
+      "false_online_success": false
+    }
+  ],
+  "browser_acceptance": {
+    "url": "http://127.0.0.1:5190/ai-assistants/operations/chat",
+    "thinking_indicator_visible_before_first_delta": true,
+    "thinking_indicator_has_visible_process_text": false,
+    "thinking_indicator_hidden_after_first_delta": true,
+    "partial_typewriter_text_observed": true,
+    "stable_final_text_observed": true,
+    "console_error_or_warning_count": 0,
+    "backend_note": "页面使用用户已有 8080 实例完成视觉交互；最新后端真实流式契约在隔离 18080 实例单独验收"
+  },
+  "process_isolation": {
+    "existing_ports_left_untouched": [8080, 5190],
+    "temporary_ports": [18080, 5191],
+    "temporary_processes_stopped": true
+  }
+}

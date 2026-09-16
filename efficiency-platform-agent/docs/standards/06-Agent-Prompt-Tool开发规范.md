@@ -1,0 +1,173 @@
+# Agent、Prompt 与 Tool 开发规范
+
+| 属性 | 内容 |
+|---|---|
+| 标题 | Agent、Prompt 与 Tool 开发规范 |
+| 状态 | 评审中 |
+| 作者/负责人 | Agent 平台架构负责人 |
+| 创建日期 | 2026-09-01 |
+| 最后更新日期 | 2026-09-03 |
+| 评审人/批准人 | 评审人：尚未指定；批准人：尚未批准 |
+| 关联 ADR/设计/计划 | [纯 Agent 侧总体架构](../architecture/纯Agent侧总体架构.md)、[Agent 侧工程规范体系设计](../superpowers/specs/2026-09-01-Agent侧工程规范体系-设计.md)、[Agent 侧工程规范体系实施计划](../superpowers/plans/2026-09-01-Agent侧工程规范体系-实施计划.md)、[Agent 快速构建底座实施计划](../superpowers/plans/2026-09-03-Agent快速构建底座-实施计划.md) |
+| 替代关系 | 无 |
+| 适用范围 | 纯 Agent 侧 Agent Plugin、Strategy、Workflow、Graph Node、Prompt、Tool、MCP 与 Provider 扩展 |
+| 不适用范围 | 具体业务 Agent/Workflow/Prompt、Java 侧设计与部署拓扑 |
+
+## 1. 扩展共同契约
+
+所有扩展 MUST 通过稳定端口和注册机制接入，MUST NOT 修改统一 Harness 或 LangGraph Runtime 的公共生命周期。扩展定义 MUST 包含以下可机器读取或可评审元数据：
+
+| 字段 | 约束 |
+|---|---|
+| `id`、`name`、`version` | MUST 使用稳定 ID、展示名和语义版本；展示文案变化 MUST NOT 改变稳定 ID |
+| `owner`、`capabilities` | MUST 声明责任人和最小能力集合 |
+| `input_schema`、`output_schema` | MUST 使用明确、版本化 Schema；未知字段和非法枚举 MUST 默认拒绝 |
+| `permissions` | MUST 声明数据、Tool、Provider 和租户权限；空缺 MUST 解释为无权限 |
+| `budgets` | MUST 至少包含循环次数、Tool 调用次数、输入/输出 Token、总时间和费用上限 |
+| `termination_conditions` | MUST 声明成功、失败、预算耗尽、取消、超时和等待输入/审批的终止语义 |
+| `checkpoint_policy` | MUST 声明持久化点、恢复键、重放和幂等边界 |
+| `error_model` | MUST 声明稳定错误码、可重试性、安全消息和部分结果语义 |
+| `observability` | MUST 声明 Span、Metric、Log、Audit 和用量字段，且遵守最小化与脱敏 |
+| `tests` | MUST 指向契约、拒绝路径、预算、Checkpoint 和回归用例 |
+
+Schema 校验失败、元数据缺失、权限不明确、预算不可计算或错误无法归一化时，注册和执行 MUST 失败关闭。自然语言描述 MUST NOT 替代输入输出 Schema、权限策略或错误契约。
+
+### 1.1 当前版本化 Core 端口基线
+
+`core` 当前已用标准库提供以下稳定、冻结且版本化的治理契约：`JsonObject` / 受控 JSON 值、`ExecutionBudget`、`ExtensionDescriptor`、`SupervisorTask`、`ApprovalBinding`、`ToolRequest` / `ToolResult` / `ToolError`、`ProviderMessage` / `ProviderRequest` / `ProviderUsage` / `ProviderResult` / `ProviderError`。`ApprovalBinding` 将批准记录绑定到主体、Tool、参数摘要和失效时间。所有 dataclass 使用 `frozen=True, slots=True`，集合使用不可变类型，稳定边界不使用 `Any`。
+
+`StrategyExecutor`、`AgentPlugin`、`Tool` 与 `ModelProvider` Protocol 都 MUST 暴露 `descriptor: ExtensionDescriptor`。`AgentPlugin.run` 只接收 Supervisor 已裁剪的 `SupervisorTask`；`Tool.invoke` 只接收带版本、结构化参数、超时、审批绑定、幂等/副作用和输出上限的 `ToolRequest`；`ModelProvider.complete` 只接收版本化消息/options，并返回归一化 usage、消息或结构化错误，MUST NOT 返回厂商对象。
+
+上述内容是可测试的骨架契约，不是运行时接入声明。真实 LangGraph、LLM、Provider、数据库、OCR、权限执行、审批持久化和网络副作用仍未接入；任何实现接入都 MUST 继续遵守本规范的注册、预算、安全和专项测试门禁。
+
+### 1.2 S1 新 Agent 接入顺序与注册门禁
+
+新 Agent MUST 严格依次完成以下步骤，任何一步失败都 MUST 阻断后续接入：
+
+```text
+定义 AgentSpec
+→ 定义稳定输入输出 Schema
+→ 实现 AgentPlugin
+→ AgentValidator 本地校验
+→ AgentRegistry 显式注册
+→ AgentFactory 装配
+→ 运行准入契约测试
+→ 才能被 Supervisor 按能力匹配
+```
+
+`AgentSpec` MUST 完整表达 Agent 类型、能力、任务、输入输出 Schema、策略、Prompt、工具、知识、记忆、模型、质量、权限和终止条件；能力约束 MUST 使用 `CapabilityRequirement`。`AgentValidator` MUST 对元数据缺失、能力或 ID 冲突、Schema 不一致及实例不一致失败关闭。`AgentRegistry` MUST 采用显式注册并提供稳定能力匹配；`AgentFactory` MUST 负责从已登记定义装配实例，并将 Builder 失败或非法实例安全归一化。
+
+业务 Agent MUST NOT 修改 Harness 或 Graph Runtime 的公共生命周期，MUST NOT 直接调用 Provider SDK，MUST NOT 动态扫描或动态导入插件，MUST NOT 通过 `__init__.py` 导入副作用完成注册，也 MUST NOT 绕过 `AgentValidator`、`AgentRegistry` 或 `AgentFactory` 直接交给 Supervisor。新接口 MUST NOT 改变 Harness、Graph Runtime、Run 状态机、Tool 或 Provider 的既有语义。
+
+因此，注册门禁明确禁止动态导入和注册副作用。
+
+只有通过上述准入契约测试的 Agent，才允许由 Supervisor 使用 `CapabilityRequirement` 进行能力匹配；文档、Mock 或未执行的外部调用均 MUST NOT 被表述为真实运行时接入。
+
+### 1.3 S1 交付与配置治理边界
+
+S1 的离线回归记录为 79/79 通过，且 `compileall` 已通过；这仅证明该次离线验证，最终代码修复仍在并行进行，因此 S1 保持待终审，批准状态仍为“尚未批准”。
+
+用户明确确认：本机 `.env` 的真实可调用值不做值校验，只校验文件结构和中文注释；模板与路由仍须严格校验。该配置治理维护独立于 Agent 功能，不得用作 Agent 能力、Provider 可调用性或生产可用性的证据。执行该维护时不得读取、记录或写入 Key、令牌、密码、连接串及其他 Secret。
+
+## 2. 扩展类型准入
+
+下表将第 1 节共同契约具体化；每一行的八类信息均 MUST 出现在该扩展的注册描述、版本资源或可追溯设计中：
+
+| 类型 | 必填元数据 | 输入/输出 Schema | 权限与预算 | 终止与 Checkpoint | 错误模型 | 测试门禁 |
+|---|---|---|---|---|---|---|
+| Agent Plugin | ID/版本/负责人/能力/允许 Tool | 子任务与结构化结果/证据 | 最小上下文和能力；循环/Tool/Token/时间/费用 | 成功、能力缺口、预算、取消；分配/副作用/汇总点 | 输入、权限、Tool、预算、部分结果 | 注册、隔离、白名单、预算、恢复、Supervisor 汇总 |
+| Strategy | ID/版本/负责人/适用风险/Graph 入口 | 路由输入与结构化执行结果 | 允许能力；全部五类预算 | 策略成功/降级/耗尽；路由后、暂停和终态 | 路由冲突、状态、预算、执行失败 | 路由边界、终止、降级、取消和恢复 |
+| Workflow | ID/版本/负责人/步骤图/补偿策略 | 流程请求、步骤状态与结果 | 步骤权限；步骤及总预算 | 每条终边、等待/补偿；受审步骤前后 | 步骤、补偿、状态冲突、部分完成 | 全边覆盖、幂等、补偿、暂停/恢复 |
+| Graph Node | ID/版本/负责人/状态所有权/副作用 | 所需状态与最小状态增量 | Node 能力；单次及累计预算 | 返回边/中断/异常；副作用前后 | 输入状态、持久化、取消、执行错误 | 状态合并、重放、异常、取消、Checkpoint |
+| Prompt | Prompt ID/语义版本/负责人/用途/模型能力 | 变量 Schema 与输出 Schema | 数据分级/允许能力；长度/Token/费用 | 输出、拒绝、截断；发布版本与回滚版本 | 渲染、变量、输出、不兼容版本 | 契约、固定回归、版本规则和回滚 |
+| Tool | ID/版本/负责人/副作用/幂等/审批 | 参数与有界结果 Schema | 主体/租户/资源能力；调用/时间/费用 | 成功/拒绝/超时；审批与副作用前后 | 参数、权限、审批、超时、结果超限 | 允许/拒绝、防重放、无副作用、审计 |
+| MCP | Server/方法或资源 ID/版本/负责人 | MCP 消息与内部 Tool Schema 映射 | 连接/方法允许清单；调用/时间/结果 | 协议完成/断连/拒绝；调用前后 | 握手、协议、Schema、策略、断连 | 能力变化、恶意返回、超时、断连、治理旁路 |
+| Provider | ID/版本/负责人/能力/逻辑模型映射 | 内部请求/结果与厂商映射 Schema | 调用身份；Token/请求/时间/费用 | 成功/降级/限流；可恢复调用边界 | 认证、限流、超时、响应非法、不可用 | 共享契约、映射、错误、重试、降级、用量 |
+
+表中简写 MUST 由具体扩展补为可执行数值、枚举、Schema 引用和测试路径，MUST NOT 原样复制为“已定义”的占位描述。
+
+### 2.1 Agent Plugin
+
+Agent Plugin MUST 声明能力、允许 Tool、输入输出 Schema、上下文需要、预算、证据要求、终止条件、Checkpoint 和错误模型。它 MUST 只接收 Supervisor 分配的结构化子任务和最小必要上下文，并 MUST 返回结构化结果、证据、引用或错误。
+
+Agent Plugin MUST NOT 直接面向用户、直接调用其他 Specialist、绕过 Context Builder/Tool Runtime/Provider，或把自身私有状态当作权威 Run 状态。准入测试 MUST 覆盖注册冲突、上下文裁剪、Tool 白名单、租户隔离、预算终止、结构化输出和 Supervisor 汇总。
+
+### 2.2 Strategy
+
+Strategy MUST 声明适用条件、风险等级、Graph 入口、允许能力、最大循环、Tool/Token/时间/费用预算、暂停点、Checkpoint、终止条件和降级路径。它 MUST 在统一 Harness 内运行，并 MUST 由 Strategy Router 依据结构化规则选择。
+
+Strategy Router MUST 只选择 Direct、Workflow、ReAct、Plan-and-Execute 或 Multi-Agent 执行模式。它 MUST NOT 调度 Specialist、合并专家结果或替代 Supervisor。Strategy 测试 MUST 覆盖路由边界、同优先级冲突、预算耗尽、取消、失败和降级。
+
+### 2.3 Workflow
+
+Workflow MUST 定义版本化输入输出 Schema、确定性步骤、允许的模型节点、补偿/回滚边界、暂停/审批点、Checkpoint、步骤级超时和错误传播。步骤依赖 MUST 形成有界图，MUST NOT 通过隐藏循环或动态代码绕过 Graph Runtime。
+
+Workflow 的模型节点 MAY 处理受约束内容，但 MUST NOT 自行改变权限、步骤图或审批条件。测试 MUST 覆盖每条边、非法状态、步骤幂等、恢复和部分失败。
+
+### 2.4 Graph Node
+
+Graph Node MUST 声明所需状态字段、最小状态增量、副作用、暂停点、幂等键、超时、异常和 Checkpoint 时机。Node MUST NOT 覆盖无所有权的状态字段，也 MUST NOT 返回未经 Schema 校验的控制数据。
+
+Node 具有外部副作用时 MUST 通过 Tool Runtime 或稳定 Persistence 端口执行；重放时 MUST 使用同一 `run_id`、任务 ID 和幂等键判定副作用。测试 MUST 覆盖输入缺失、状态合并、重放、取消、异常和 Checkpoint 失败。
+
+### 2.5 Prompt
+
+Prompt MUST 具有稳定 `prompt_id`、用途、负责人、版本、变量 Schema、输出 Schema、允许模型能力、最大长度、数据分级、回归集和回滚版本。Prompt 文本 MUST 存放在 `prompts/` 的受治理资源或版本化存储中，MUST NOT 散落在业务代码、异常消息或 Tool 描述拼接逻辑中。
+
+Prompt 版本 MUST 使用 `MAJOR.MINOR.PATCH`：
+
+- 删除或重命名已有变量/输出字段、修改已有变量/输出字段的类型或语义，以及其他使既有调用方不兼容的变化 MUST 升 `MAJOR`；
+- 在不改变任何已有变量和输出字段契约的前提下，兼容地增加可选变量、可选输出字段或能力 MUST 升 `MINOR`；
+- 只修正文案且变量、输出和语义不变 MUST 升 `PATCH`。
+
+版本判定 MUST 先检查不兼容变化；同一变更同时包含不兼容变化和兼容新增时 MUST 升 `MAJOR`，MUST NOT 以新增能力为由降为 `MINOR`。每次变更 MUST 提供变量与输出契约测试、版本化回归样例、变更说明、兼容性判断和可用回滚版本。回归样例 MUST 使用合成或脱敏数据，MUST NOT 包含 Secret、真实敏感 Prompt 或生产文档。变更无法证明语义不变时 MUST NOT 选择 `PATCH`。
+
+### 2.6 Tool
+
+Tool MUST 声明稳定名称、版本、参数与结果 Schema、权限、副作用等级、幂等性、超时、重试、审批需求、结果大小上限、错误模型和审计事件。副作用等级 MUST 至少区分只读、可逆写、高风险/不可逆写；未声明 MUST 按高风险处理。
+
+所有 Tool MUST 只经 Tool Runtime 调用。Runtime MUST 在调用前执行 Schema、身份/租户授权、白名单、预算、审批与 SSRF/文件等策略，在调用中执行超时和取消，在调用后执行结果 Schema、大小、脱敏和审计。高风险 Tool MUST 在执行前取得绑定本次主体、Tool、参数摘要、幂等键和有效期的审批；拒绝、过期或不匹配时 MUST NOT 执行。
+
+自动重试 MUST 仅用于已分类临时错误且副作用可由幂等键证明安全的调用。写 Tool 缺少幂等保证时 MUST NOT 自动重试。测试 MUST 覆盖允许、拒绝、审批、防重放、超时、结果超限、审计和无副作用证明。
+
+### 2.7 MCP
+
+MCP MUST 只作为外部工具协议适配。每个 MCP Server、方法和资源 MUST 映射为内部 Tool 契约，并 MUST 经过 Tool Runtime 的 Schema、权限、预算、超时、重试、审批、审计和结果治理。
+
+MCP 返回的描述、Tool 列表、资源和内容 MUST 视为不可信数据。动态发现 MUST NOT 自动扩大允许清单；当前 MCP Client MUST NOT 转发 Secret 或建立绕过 Harness 的旁路。MCP Server 当前不建设，未来若单独批准也 MUST NOT 暴露全部内部 Tool。测试 MUST 使用受控协议替身覆盖握手、能力变化、非法 Schema、超时、断连和恶意返回。
+
+### 2.8 Provider
+
+Provider MUST 对上实现内部稳定端口，对下隔离厂商 SDK、HTTP API、配置键、响应对象和异常类型。Provider 元数据 MUST 声明能力、逻辑模型/服务映射、输入输出 Schema、连接池、超时、重试、限流、用量、成本来源、降级条件和错误映射。
+
+上层 MUST NOT 接收厂商对象或按厂商错误文案分支。Provider 切换 MUST 保持核心契约和错误分类稳定；能力或语义不兼容时 MUST 通过版本或明确降级结果表达。Provider MUST 保留安全的厂商关联 ID、逻辑 Provider/模型版本、真实用量和重试证据，但 MUST NOT 记录 Secret 或敏感正文。
+
+测试 MUST 复用同类 Provider 的共享契约，并覆盖请求映射、响应归一化、非法响应、超时、限流、认证失败、重试、降级和用量缺失。Mock 通过 MUST NOT 被表述为真实 Provider 冒烟通过。
+
+## 3. Supervisor 与 Specialist 边界
+
+Supervisor MUST 只在 Multi-Agent 模式内选择 Specialist、分配结构化子任务、裁剪上下文、控制并发/权限/预算/终止/重试，并合并结构化结果、证据和错误。Supervisor MUST NOT 改写全局 Strategy Router 政策、绕过 Harness 或把 Specialist 暴露给用户。
+
+Specialist 需要另一能力时 MUST 返回能力缺口或候选子任务，由 Supervisor 决定后续调度。Specialist MUST NOT 自由对话、点对点调用或共享未裁剪上下文。任何并行调用 MUST 有并发上限、取消语义、总预算和稳定汇总顺序。
+
+## 4. 预算、终止与 Checkpoint
+
+预算 MUST 在 Harness 建立并向 Graph、Strategy、Agent、Tool 和 Provider 递减传播。子任务预算总和 MUST NOT 超过 Run 剩余预算；未知 Token 或费用 MUST 标记未知并触发策略限制，MUST NOT 伪造为零。
+
+循环次数、Tool 次数、Token、时间或费用任一达到上限时，执行 MUST 按契约终止、降级或等待输入，MUST NOT 静默继续。Checkpoint MUST 在外部副作用前后、等待输入/审批、可恢复长步骤和终态持久化；恢复 MUST 使用原 `run_id + checkpoint`，并 MUST 校验版本、身份、权限和幂等状态。
+
+## 5. 错误模型
+
+扩展错误 MUST 归一化为稳定错误码、类别、可重试性、是否产生副作用、安全消息、关联 ID 和可选部分结果。Provider/MCP/Tool 的原始异常 MUST NOT 穿过稳定端口，且错误消息 MUST NOT 包含 Secret、原始 Prompt、文件正文或跨租户数据。
+
+Schema 不兼容、权限不明确、Checkpoint 冲突和高风险副作用状态未知 MUST 默认失败关闭。部分结果 MAY 返回，但 MUST 标明完成范围、失败项、证据和不可继续条件，MUST NOT 伪造完整成功。
+
+## 6. 最低质量门禁
+
+每个扩展 MUST 在注册前具备元数据/Schema 契约测试、权限和安全拒绝测试、预算/终止测试、错误归一化测试、可观测/审计断言以及与类型匹配的专项测试。Prompt MUST 增加版本与固定回归样例；Tool/MCP MUST 增加无授权无副作用证明；Provider MUST 增加共享适配器契约；Graph/Strategy/Agent MUST 增加 Checkpoint、恢复和取消测试。
+
+评审证据 MUST 区分离线测试、临时集成和真实 Provider 调用。未安装的工具、未调用的 Provider、未执行的数据库或外部系统 MUST 标记未验证，MUST NOT 以文档或 Mock 替代。
+
+## 7. 例外
+
+对本规范 `MUST` 或 `MUST NOT` 的例外 MUST 按[工程规范索引](00-规范索引.md)记录。LangGraph 唯一运行时、统一 Harness、中央 Supervisor、Tool Runtime、Provider 隔离、租户隔离和高风险审批边界 MUST NOT 通过普通例外降低。

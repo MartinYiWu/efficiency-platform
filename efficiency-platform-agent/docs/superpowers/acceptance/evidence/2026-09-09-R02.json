@@ -1,0 +1,53 @@
+{
+  "contract_version": "operation.real.acceptance/1",
+  "execution_mode": "real",
+  "fake_fallback": false,
+  "configuration": {
+    "status": "READY",
+    "gate": "deepseek_web_search",
+    "execution_mode": "real",
+    "fake_fallback": false
+  },
+  "cases": [
+    {
+      "case_id": "R02",
+      "message": "请为新品写公众号、小红书和头条三种独立版本的发布文案，不需要联网。",
+      "execution_mode": "real",
+      "summary": {
+        "contract_version": "operation.acceptance/1",
+        "passed": true,
+        "error_code": null,
+        "status": "degraded_succeeded",
+        "terminal": true,
+        "event_count": 10,
+        "reconnect_count": 0,
+        "deliverable_count": 3,
+        "citation_count": 0,
+        "clarification_observed": false,
+        "cancel_requested": false,
+        "degraded": true,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 4840,
+          "cost_microunits": 0,
+          "estimated": true
+        },
+        "run_id": "run-251e59f9229642b98c999578c1368c75",
+        "event_sequence": [
+          "intent_detected",
+          "run_started",
+          "phase_started",
+          "content_generation_started",
+          "content_generation_completed",
+          "quality_checked",
+          "assistant_started",
+          "assistant_delta",
+          "deliverable",
+          "stream_done"
+        ]
+      },
+      "status": "FAIL",
+      "error_code": "UNEXPECTED_STATUS"
+    }
+  ]
+}

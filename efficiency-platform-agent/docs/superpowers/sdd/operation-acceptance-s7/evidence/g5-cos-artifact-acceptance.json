@@ -1,0 +1,15 @@
+{
+  "status": "SUCCEEDED",
+  "external_io": true,
+  "selected_real_gates": [
+    "cos_artifact"
+  ],
+  "network_calls": 7,
+  "model_calls": 0,
+  "cos_objects": 1,
+  "bytes_written": 15,
+  "cleanup_ok": true,
+  "cost_microunits": 0,
+  "cost_observed": false,
+  "elapsed_ms": 708
+}

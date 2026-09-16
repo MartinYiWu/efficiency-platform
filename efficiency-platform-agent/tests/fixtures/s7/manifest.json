@@ -1,0 +1,140 @@
+{
+  "manifest_version": "s7-fixture-manifest/1",
+  "seed": "s7-fixed",
+  "generator_version": "s7-fixtures/1",
+  "fixtures": [
+    {
+      "name": "plain_text_v1.md",
+      "kind": "text",
+      "pages": 1,
+      "sha256": "4b487a5916d45362be985e26737c332e7009d1f600cb884bca384c4855bf9f65",
+      "subject": "青禾实验室",
+      "expected_structure": "docling_markdown",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "structured_document_v1.docx",
+      "kind": "document",
+      "pages": 1,
+      "sha256": "eed42cabdf214259125a217615844403ea0a463c77c85262596bd76e832bd1cb",
+      "subject": "青禾实验室",
+      "expected_structure": "docling_markdown",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "table_document_v1.xlsx",
+      "kind": "spreadsheet",
+      "pages": 1,
+      "sha256": "ee47d1cfe9744a20c1752464b6521d8a7c71cc1790555727b7b885ca0f14aa96",
+      "subject": "青禾实验室",
+      "expected_structure": [
+        "date",
+        "channel",
+        "visits",
+        "activations"
+      ],
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "text_pdf_v1.pdf",
+      "kind": "pdf_text",
+      "pages": 1,
+      "sha256": "fb40e0c6e62ba111a2bf5cce2d474d261dfdf016dcfd12c88bc94eacd533e91d",
+      "subject": "青禾实验室",
+      "expected_structure": "docling_markdown",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "scan_pdf_v1.pdf",
+      "kind": "pdf_scan",
+      "pages": 1,
+      "sha256": "9227f00f9fee08c93c44025999f4263f13a4eb9a952e00146d9c55f5e37ee068",
+      "subject": "青禾实验室",
+      "expected_structure": "ocr_required",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "mixed_pdf_v1.pdf",
+      "kind": "pdf_mixed",
+      "pages": 2,
+      "sha256": "9c7f58651b59569a2c840e8b1c598dd4fa7eb23d939766644c84a736d75725ca",
+      "subject": "青禾实验室",
+      "expected_structure": "page_level_document",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "ocr_zh_en_v1.png",
+      "kind": "image",
+      "pages": 1,
+      "sha256": "9853e99cb7e9817f7ee8b6fb9ade7c8e023d2520647034a098f7f85ed81e9cb0",
+      "subject": "青禾实验室",
+      "expected_structure": "ocr_required",
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "analytics_metrics_v1.csv",
+      "kind": "analytics",
+      "pages": 1,
+      "sha256": "3abeb8314da1db9c768c251fc28936cd01273a0ef34f2fff8965578df6470633",
+      "subject": "青禾实验室",
+      "expected_structure": [
+        "date",
+        "channel",
+        "visits",
+        "activations"
+      ],
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "analytics_metrics_v1.json",
+      "kind": "analytics",
+      "pages": 1,
+      "sha256": "a2c6447f19e4ee7722a21cab6d9ec5596fc8be015b0bd15098a19ff5dc954751",
+      "subject": "青禾实验室",
+      "expected_structure": [
+        "date",
+        "channel",
+        "visits",
+        "activations"
+      ],
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "analytics_metrics_v1.parquet",
+      "kind": "analytics",
+      "pages": 1,
+      "sha256": "e82e27a0a8b9ee592cdfcad279ad17e87738216d6fb98a83289b874bb7bb5edd",
+      "subject": "青禾实验室",
+      "expected_structure": [
+        "date",
+        "channel",
+        "visits",
+        "activations"
+      ],
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "analytics_metrics_v1.xlsx",
+      "kind": "analytics",
+      "pages": 1,
+      "sha256": "ee47d1cfe9744a20c1752464b6521d8a7c71cc1790555727b7b885ca0f14aa96",
+      "subject": "青禾实验室",
+      "expected_structure": [
+        "date",
+        "channel",
+        "visits",
+        "activations"
+      ],
+      "generator_version": "s7-fixtures/1"
+    },
+    {
+      "name": "rejected_signature_mismatch_v1.png",
+      "kind": "rejected",
+      "pages": 1,
+      "sha256": "b734fe33b111ed6e1f1fa9dd6e99dfccfc5d4d27f5d0925466ee1687b4fd8823",
+      "subject": "青禾实验室",
+      "expected_structure": "rejected_before_parse",
+      "generator_version": "s7-fixtures/1"
+    }
+  ]
+}

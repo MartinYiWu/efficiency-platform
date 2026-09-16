@@ -1,0 +1,72 @@
+[router]
+# 选择模式：由 Agent 提议能力层，再由 Harness 施加硬性约束。
+selection_mode = "agent_proposed_with_harness_guardrails"
+
+# 默认聊天路由名称；当前指向自适应的通用对话路由。
+default_route = "chat_default"
+
+# 是否允许在可重试失败后向较低能力层降级，以提升可用性。
+allow_lower_tier_degrade_on_retry = true
+
+[providers.deepseek_direct]
+# 是否启用 DeepSeek 直连提供方；当前默认启用。
+enabled = true
+
+# 提供方适配器类型；使用 OpenAI 兼容协议访问 DeepSeek。
+adapter_kind = "openai_compatible"
+
+# DeepSeek 基础地址所读取的环境变量名称。
+base_url_env = "AGENT_LLM_DEEPSEEK_BASE_URL"
+
+# DeepSeek API Key 所读取的环境变量名称。
+api_key_env = "AGENT_LLM_DEEPSEEK_API_KEY"
+
+[providers.model_pool]
+# 是否启用未来模型池；当前保留关闭状态。
+enabled = false
+
+# 模型池适配器类型；未接入前保持未配置标识。
+adapter_kind = "unconfigured"
+
+# 未来模型池基础地址所读取的环境变量名称。
+base_url_env = "AGENT_LLM_MODEL_POOL_BASE_URL"
+
+# 未来模型池 API Key 所读取的环境变量名称。
+api_key_env = "AGENT_LLM_MODEL_POOL_API_KEY"
+
+[routes.chat_default]
+# 路由候选选择顺序；自适应模式会按任务复杂度在能力层间选择。
+selection_order = "adaptive"
+
+# 该路由允许使用的能力层列表；按 fast、balanced、strong 逐层开放。
+allowed_tiers = ["fast", "balanced", "strong"]
+
+[[routes.chat_default.candidates]]
+# 候选提供方名称；当前快层使用 DeepSeek 直连。
+provider = "deepseek_direct"
+
+# 候选能力层；用于低复杂度任务。
+tier = "fast"
+
+# 快层模型标识所读取的环境变量名称。
+model_env = "AGENT_LLM_DEEPSEEK_FAST_MODEL"
+
+[[routes.chat_default.candidates]]
+# 候选提供方名称；当前平衡层使用 DeepSeek 直连。
+provider = "deepseek_direct"
+
+# 候选能力层；用于中等复杂度任务。
+tier = "balanced"
+
+# 平衡层模型标识所读取的环境变量名称。
+model_env = "AGENT_LLM_DEEPSEEK_BALANCED_MODEL"
+
+[[routes.chat_default.candidates]]
+# 候选提供方名称；当前强层使用 DeepSeek 直连。
+provider = "deepseek_direct"
+
+# 候选能力层；用于高复杂度任务。
+tier = "strong"
+
+# 强层模型标识所读取的环境变量名称。
+model_env = "AGENT_LLM_DEEPSEEK_STRONG_MODEL"

@@ -1,0 +1,85 @@
+[build-system]
+# 构建依赖；使用已锁定的 setuptools 将 src 布局构建为可安装包。
+requires = ["setuptools>=68,<85"]
+# 构建后端；由 setuptools 负责生成项目元数据和安装包。
+build-backend = "setuptools.build_meta"
+
+[project]
+# 项目名称；用于标识当前 Agent 运行时包。
+name = "efficiency-platform-agent"
+
+# 项目版本；当前为初始基线版本号。
+version = "0.1.0"
+
+# 项目简介；描述当前包的职责边界。
+description = "Framework-neutral foundation for the efficiency platform Agent runtime."
+
+# Python 版本范围；保持现有解释器约束，不改变运行语义。
+requires-python = ">=3.13,<3.14"
+
+# S2 运行时依赖列表；仅包含已批准的执行主链组件。
+dependencies = [
+    "charset-normalizer>=3,<4",
+    "cos-python-sdk-v5>=1.9,<2",
+    "defusedxml>=0.7,<1",
+    "docling>=2,<3",
+    "fastapi>=0.135,<1",
+    "fastexcel>=0.16,<1",
+    "jinja2>=3.1,<4",
+    "langgraph>=1,<2",
+    "langgraph-checkpoint-postgres>=3,<4",
+    "nh3>=0.3,<1",
+    "openai>=2,<3",
+    "paddleocr>=3,<4",
+    "paddlepaddle>=3,<4",
+    "pgvector>=0.3,<1",
+    "pillow>=11,<13",
+    "polars>=1,<2",
+    "psycopg[binary,pool]>=3,<4",
+    "puremagic>=2,<3",
+    "pydantic>=2,<3",
+    "pydantic-settings>=2,<3",
+    "pypdf>=6.16.1,<7",
+    "pypdfium2>=5,<6",
+    "python-multipart>=0.0.20,<1",
+    "redis>=6,<7",
+    "semantic-text-splitter>=0.32,<1",
+    "sqlalchemy>=2,<3",
+    "taskiq>=0.11,<1",
+    "taskiq-redis>=1,<2",
+    "uvicorn>=0.52.4",
+]
+
+[tool.setuptools.packages.find]
+# 源码根目录；项目包位于 src 下，uv run 将据此安装本地项目。
+where = ["src"]
+# 包筛选范围；只安装 Agent 侧的 Python 包，不包含测试和文档快照。
+include = ["efficiency_platform_agent*"]
+
+[tool.unittest]
+# 单元测试起始目录；保持 unittest 从 tests 目录发现用例。
+start-directory = "tests"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.6",
+]
+
+[tool.pytest.ini_options]
+# 让异步测试函数由 pytest-asyncio 自动处理。
+asyncio_mode = "auto"
+# 仅收集正式测试目录，避免文档快照中的同名测试模块被重复导入。
+testpaths = ["tests"]
+
+[tool.ruff]
+# S2 代码和测试以 Python 3.13 语法为目标。
+target-version = "py313"
+
+[tool.mypy]
+# 类型检查以 Python 3.13 的标准库类型为准。
+python_version = "3.13"

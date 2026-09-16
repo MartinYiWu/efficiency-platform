@@ -1,0 +1,20 @@
+{
+  "status": "SUCCEEDED",
+  "external_io": true,
+  "selected_real_gates": [
+    "postgres_pgvector"
+  ],
+  "network_calls": 2,
+  "database_rows_read": 12,
+  "database_rows_written": 5,
+  "transaction_checked": true,
+  "optimistic_version_checked": true,
+  "checkpoint_cross_connection_checked": true,
+  "vector_checked": true,
+  "fts_checked": true,
+  "tenant_filter_checked": true,
+  "cost_microunits": 0,
+  "cost_observed": false,
+  "cleanup_ok": true,
+  "elapsed_ms": 183
+}

@@ -1,0 +1,11 @@
+{
+  "status": "SUCCEEDED",
+  "external_io": true,
+  "selected_real_gates": [
+    "deepseek_chat"
+  ],
+  "network_calls": 1,
+  "model_calls": 0,
+  "cost_microunits": 0,
+  "elapsed_ms": 2057
+}

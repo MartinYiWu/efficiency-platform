@@ -1,0 +1,116 @@
+# 无 Git 审查差异包：Task 5
+# 不包含 .env 原始内容。
+
+--- docs\superpowers\sdd\config-annotation-run\task-5-before-test_llm_configuration_template.py
++++ tests\config\test_llm_configuration_template.py
+@@ -10,6 +10,15 @@
+ 
+ class LlmConfigurationTemplateTest(unittest.TestCase):
+     @staticmethod
++    def has_meaningful_chinese_comment(line: str) -> bool:
++        chinese_character_count = sum("\u4e00" <= character <= "\u9fff" for character in line)
++        return (
++            line.startswith("#")
++            and chinese_character_count >= 8
++            and any(punctuation in line for punctuation in ("。", "；"))
++        )
++
++    @staticmethod
+     def assert_assignments_have_chinese_comments(lines: list[str]) -> None:
+         for index, line in enumerate(lines):
+             stripped = line.strip()
+@@ -17,10 +26,7 @@
+                 continue
+ 
+             previous = lines[index - 1].strip() if index else ""
+-            has_chinese_comment = previous.startswith("#") and any(
+-                "\u4e00" <= character <= "\u9fff" for character in previous
+-            )
+-            if not has_chinese_comment:
++            if not LlmConfigurationTemplateTest.has_meaningful_chinese_comment(previous):
+                 raise AssertionError(f"配置项缺少紧邻的中文说明：{stripped.split('=', 1)[0]}")
+ 
+     @staticmethod
+@@ -40,10 +46,7 @@
+                 continue
+ 
+             previous = lines[index - 1].strip() if index else ""
+-            has_chinese_comment = previous.startswith("#") and any(
+-                "\u4e00" <= character <= "\u9fff" for character in previous
+-            )
+-            if not has_chinese_comment:
++            if not LlmConfigurationTemplateTest.has_meaningful_chinese_comment(previous):
+                 raise AssertionError(f"忽略规则缺少紧邻的中文说明：{stripped}")
+ 
+     def test_shared_configuration_assignments_have_chinese_comments(self) -> None:
+@@ -53,6 +56,19 @@
+         self.assert_assignments_have_chinese_comments(
+             (PROJECT_ROOT / "config" / "llm-routing.toml").read_text(encoding="utf-8").splitlines()
+         )
++
++    def test_rejects_placeholder_chinese_comment_for_assignment(self) -> None:
++        with self.assertRaises(AssertionError) as context:
++            self.assert_assignments_have_chinese_comments(
++                [
++                    "# 中文",
++                    "AGENT_LLM_DEEPSEEK_API_KEY=should-not-appear",
++                ]
++            )
++
++        message = str(context.exception)
++        self.assertIn("AGENT_LLM_DEEPSEEK_API_KEY", message)
++        self.assertNotIn("should-not-appear", message)
+ 
+     def test_local_env_assignments_have_chinese_comments_when_present(self) -> None:
+         local_env = PROJECT_ROOT / ".env"
+
+--- docs\superpowers\sdd\config-annotation-run\task-5-before-plan.md
++++ docs\superpowers\plans\2026-09-02-中文注释与DeepSeek默认配置-实施计划.md
+@@ -184,7 +184,6 @@
+ - Modify: `D:\efficiency-platform\efficiency-platform-agent\docs\standards\01-工程与目录规范.md`
+ - Modify: `D:\efficiency-platform\efficiency-platform-agent\docs\standards\03-Python编码与注释规范.md`
+ - Modify: `D:\efficiency-platform\efficiency-platform-agent\tests\config\test_llm_configuration_template.py`
+-- Modify: `D:\efficiency-platform\efficiency-platform-agent\tests\governance\test_documentation_contract.py`
+ - Modify: `D:\efficiency-platform\efficiency-platform-agent\tests\governance\test_documentation_contract.py`
+ - Modify: `D:\efficiency-platform\efficiency-platform-agent\docs\superpowers\plans\2026-09-02-中文注释与DeepSeek默认配置-实施计划.md`
+ 
+@@ -320,19 +319,19 @@
+ - Consumes: Task 1–4 的执行前快照、当前非敏感配置与既有不泄密状态证据。
+ - Produces: 覆盖 Task 1–4 最终状态的 UTF-8 文件级差异包，以及拒绝无意义中文占位注释的配置说明测试。
+ 
+-- [ ] **Step 1: 先添加会失败的无意义注释测试**
++- [x] **Step 1: 先添加会失败的无意义注释测试**
+ 
+ 在 `tests/config/test_llm_configuration_template.py` 增加最小测试，向现有配置注释辅助方法传入 `# 中文` 与一个配置项，断言必须失败。先运行聚焦测试，预期该测试因当前辅助方法只检查任意汉字而失败。
+ 
+-- [ ] **Step 2: 收紧配置说明辅助方法**
++- [x] **Step 2: 收紧配置说明辅助方法**
+ 
+ 配置说明校验必须同时要求：紧邻注释、至少八个中文字符，并且包含中文句号或分号。错误信息仅暴露配置项名称，不得显示配置值。现有 `.env.example`、TOML、`.gitignore` 和本机 `.env`（存在时）的有效说明均必须继续通过。
+ 
+-- [ ] **Step 3: 生成完整 UTF-8 最终审查包**
++- [x] **Step 3: 生成完整 UTF-8 最终审查包**
+ 
+ 使用标准库 `difflib` 将下列基线快照与当前文件比较并以 UTF-8 写入 `final-review-package-complete-utf8.md`：Task 1 的配置测试快照；Task 2 的 `.env.example`、路由 TOML、`pyproject.toml` 快照；Task 3 的 `AGENTS.md`、工程规范、Python 规范、治理测试和计划快照；Task 4 的 `.gitignore` 快照。`tests/config/test_llm_configuration_template.py` 必须使用 Task 1 基线，`tests/governance/test_documentation_contract.py` 使用 Task 3 基线，`03-Python编码与注释规范.md` 使用 Task 3 基线，计划使用 Task 3 基线，从而覆盖 Task 1–4 的最终状态和 Task 4 精确白名单。`.env` 只允许包含 Task 2 前后脱敏结构差异及既有公开状态证据，MUST NOT 出现原始值。
+ 
+-- [ ] **Step 4: 清理计划记录重复项并验证**
++- [x] **Step 4: 清理计划记录重复项并验证**
+ 
+ 删除 Task 3 文件清单中重复的 `tests/governance/test_documentation_contract.py` 项；将 Task 5 步骤如实勾选，并在执行记录中加入 RED/GREEN、完整审查包和最终全量测试证据。执行：
+ 
+@@ -343,3 +342,14 @@
+ 
+ 预期：聚焦测试和全量测试均通过；不执行 Git 或外部服务调用。
+ - 未执行的外部调用：未访问 DeepSeek、PostgreSQL、Redis、COS、DashScope 或其他外部服务；未运行 Git 初始化、提交、分支、推送、Git diff 或基于 Git 的审查流程。
++
++## Task 5 执行记录
++
++- 实际修改文件：`tests/config/test_llm_configuration_template.py`、`docs/superpowers/plans/2026-09-02-中文注释与DeepSeek默认配置-实施计划.md`。
++- 实际新增文件：`docs/superpowers/sdd/config-annotation-run/final-review-package-complete-utf8.md`、`docs/superpowers/sdd/config-annotation-run/task-5-report.md`。
++- Task 5 RED 证据：`& '.\.venv\Scripts\python.exe' -m unittest tests.config.test_llm_configuration_template -v` 在只新增 `# 中文` 占位注释拒绝用例后退出码 1，`Ran 10 tests in 0.007s`，结果 `FAILED (failures=1)`；失败原因为 `AssertionError not raised`，证明旧辅助方法会接受无意义占位中文注释。
++- Task 5 GREEN 证据：收紧配置说明辅助方法后，同一聚焦命令退出码 0，`Ran 10 tests in 0.007s`，结果 `OK`；新增断言确认失败消息包含配置项键名且不包含赋值内容。
++- 完整 UTF-8 审查包：已使用 Python 标准库 `difflib` 生成 `docs/superpowers/sdd/config-annotation-run/final-review-package-complete-utf8.md`，覆盖 Task 1–4 指定基线到当前文件的差异，并仅使用 Task 2 `.env` 脱敏快照与 Task 4 公开状态证据。
++- 最终聚焦测试证据：`& '.\.venv\Scripts\python.exe' -m unittest tests.config.test_llm_configuration_template -v` 退出码 0，`Ran 10 tests in 0.025s`，结果 `OK`。
++- 最终全量测试证据：`& '.\.venv\Scripts\python.exe' -m unittest discover -s tests -v` 退出码 0，`Ran 50 tests in 1.124s`，结果 `OK`。
++- 安全检查：未读取或输出本机 `.env` 原始内容；未访问 DeepSeek、PostgreSQL、Redis、COS、DashScope 或其他外部服务；未运行 Git 初始化、提交、分支、推送、Git diff 或基于 Git 的审查流程。
+

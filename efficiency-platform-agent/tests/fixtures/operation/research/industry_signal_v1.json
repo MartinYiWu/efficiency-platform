@@ -1,0 +1,31 @@
+{
+  "contract_version": "research-fixture/1",
+  "observations": [
+    {
+      "observation_id": "observation-1",
+      "title": "算力基础设施投资持续增长",
+      "publisher": "示例产业研究院",
+      "source_url": "https://example.com/industry/compute-investment",
+      "published_at_epoch_ms": 1780000000000,
+      "retrieved_at_epoch_ms": 1780003600000,
+      "source_scope": "external_reference",
+      "supported_conclusion_ids": ["claim-1"],
+      "within_time_window": true,
+      "duplicate_status": "unique",
+      "quality_status": "valid"
+    },
+    {
+      "observation_id": "observation-2",
+      "title": "企业级模型服务需求扩大",
+      "publisher": "示例数据观察站",
+      "source_url": "https://example.com/industry/model-service",
+      "published_at_epoch_ms": 1780007200000,
+      "retrieved_at_epoch_ms": 1780010800000,
+      "source_scope": "external_reference",
+      "supported_conclusion_ids": ["claim-2"],
+      "within_time_window": true,
+      "duplicate_status": "unique",
+      "quality_status": "valid"
+    }
+  ]
+}

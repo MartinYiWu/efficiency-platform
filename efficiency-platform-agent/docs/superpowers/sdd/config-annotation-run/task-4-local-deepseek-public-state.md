@@ -1,0 +1,13 @@
+# Task 4 本机 DeepSeek 公开状态
+
+| 变量名 | 期望状态 |
+|---|---|
+| AGENT_LLM_DEEPSEEK_BASE_URL | 匹配 |
+| AGENT_LLM_DEEPSEEK_FAST_MODEL | 匹配 |
+| AGENT_LLM_DEEPSEEK_BALANCED_MODEL | 匹配 |
+| AGENT_LLM_DEEPSEEK_STRONG_MODEL | 匹配 |
+| AGENT_LLM_DEEPSEEK_API_KEY | 匹配 |
+| AGENT_LLM_MODEL_POOL_BASE_URL | 匹配 |
+| AGENT_LLM_MODEL_POOL_API_KEY | 匹配 |
+
+整体退出状态：匹配

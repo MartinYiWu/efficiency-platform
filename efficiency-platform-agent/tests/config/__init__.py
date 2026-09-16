@@ -1,0 +1,1 @@
+"""Configuration template contract tests."""

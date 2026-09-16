@@ -1,0 +1,243 @@
+from __future__ import annotations
+
+import ast
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = PROJECT_ROOT / "src"
+sys.path.insert(0, str(SRC_ROOT))
+
+
+class DependencyRulesTest(unittest.TestCase):
+    def test_langgraph_imports_are_confined_to_orchestration(self) -> None:
+        package_root = SRC_ROOT / "efficiency_platform_agent"
+        for path in package_root.rglob("*.py"):
+            if "orchestration" in path.relative_to(package_root).parts:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    modules = [item.name for item in node.names]
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [node.module or ""]
+                else:
+                    continue
+                self.assertFalse(
+                    any(
+                        m.startswith(("langgraph", "langchain.agents")) for m in modules
+                    ),
+                    path,
+                )
+
+    def test_current_scaffold_obeys_dependency_direction(self) -> None:
+        from efficiency_platform_agent.core.architecture import validate_dependencies
+
+        self.assertEqual(validate_dependencies(SRC_ROOT), ())
+
+    def test_core_cannot_depend_on_an_upper_layer(self) -> None:
+
+        violations = self._validate_source(
+            "core/bad.py",
+            "from efficiency_platform_agent.api import app\n",
+        )
+
+        self.assertTrue(any("core" in item and "api" in item for item in violations))
+
+    def test_provider_cannot_depend_on_execution_strategy(self) -> None:
+
+        violations = self._validate_source(
+            "providers/bad.py",
+            "from efficiency_platform_agent.strategies import react\n",
+        )
+
+        self.assertTrue(
+            any("providers" in item and "strategies" in item for item in violations)
+        )
+
+    def test_internal_layers_cannot_depend_on_api(self) -> None:
+
+        violations = self._validate_source(
+            "orchestration/bad.py",
+            "import efficiency_platform_agent.api\n",
+        )
+
+        self.assertTrue(
+            any("orchestration" in item and "api" in item for item in violations)
+        )
+
+    def test_root_package_imports_are_resolved_to_concrete_layers(self) -> None:
+        cases = (
+            (
+                "core/bad.py",
+                "from efficiency_platform_agent import api\n",
+                "core",
+                "api",
+            ),
+            (
+                "providers/bad.py",
+                "from efficiency_platform_agent import strategies\n",
+                "providers",
+                "strategies",
+            ),
+        )
+
+        for relative_path, source, importer, target in cases:
+            with self.subTest(importer=importer, target=target):
+                violations = self._validate_source(relative_path, source)
+                self.assertTrue(
+                    any(importer in item and target in item for item in violations),
+                    violations,
+                )
+
+    def test_relative_imports_and_init_reexports_cannot_bypass_rules(self) -> None:
+        cases = (
+            ("core/bad.py", "from .. import api\n", "core", "api"),
+            ("core/__init__.py", "from .. import api\n", "core", "api"),
+            (
+                "providers/__init__.py",
+                "from .. import strategies\n",
+                "providers",
+                "strategies",
+            ),
+        )
+
+        for relative_path, source, importer, target in cases:
+            with self.subTest(path=relative_path):
+                violations = self._validate_source(relative_path, source)
+                self.assertTrue(
+                    any(importer in item and target in item for item in violations),
+                    violations,
+                )
+
+    def test_star_imports_fail_closed(self) -> None:
+        cases = (
+            "from efficiency_platform_agent import *\n",
+            "from efficiency_platform_agent.core import *\n",
+            "from ..core import *\n",
+        )
+
+        for source in cases:
+            with self.subTest(source=source.strip()):
+                violations = self._validate_source("contracts/bad.py", source)
+                self.assertTrue(
+                    any("star import" in item for item in violations), violations
+                )
+
+    def test_complete_layer_matrix_allows_documented_directions(self) -> None:
+        allowed_pairs = (
+            ("contracts", "core"),
+            ("conversation", "core"),
+            ("conversation", "contracts"),
+            ("conversation", "orchestration"),
+            ("conversation", "harness"),
+            ("providers", "contracts"),
+            ("persistence", "core"),
+            ("context", "persistence"),
+            ("memory", "providers"),
+            ("capabilities", "tools"),
+            ("tools", "security"),
+            ("agents", "capabilities"),
+            ("workflows", "tools"),
+            ("strategies", "agents"),
+            ("orchestration", "strategies"),
+            ("orchestration", "conversation"),
+            ("routing", "strategies"),
+            ("harness", "orchestration"),
+            ("api", "harness"),
+            ("api", "runtime"),
+            ("harness", "runtime"),
+            ("harness", "configuration"),
+            ("harness", "conversation"),
+            ("harness", "api"),
+            ("runtime", "contracts"),
+            ("tasks", "harness"),
+        )
+
+        for importer, target in allowed_pairs:
+            with self.subTest(importer=importer, target=target):
+                violations = self._validate_source(
+                    f"{importer}/sample.py",
+                    f"from efficiency_platform_agent.{target} import sample\n",
+                )
+                self.assertEqual(violations, ())
+
+    def test_application_entry_can_depend_on_composition_root_only(self) -> None:
+        allowed = self._validate_source(
+            "main.py",
+            "from efficiency_platform_agent.harness import local_real_factory\n",
+        )
+        forwarded = self._validate_source(
+            "__main__.py",
+            "from efficiency_platform_agent.main import main\n",
+        )
+        forbidden = self._validate_source(
+            "main.py",
+            "from efficiency_platform_agent.api import app\n",
+        )
+
+        self.assertEqual(allowed, ())
+        self.assertEqual(forwarded, ())
+        self.assertTrue(
+            any("application" in item and "api" in item for item in forbidden),
+            forbidden,
+        )
+
+    def test_complete_layer_matrix_rejects_reverse_directions(self) -> None:
+        forbidden_pairs = (
+            ("contracts", "harness"),
+            ("core", "context"),
+            ("providers", "strategies"),
+            ("persistence", "orchestration"),
+            ("context", "routing"),
+            ("memory", "api"),
+            ("capabilities", "strategies"),
+            ("tools", "orchestration"),
+            ("agents", "harness"),
+            ("workflows", "routing"),
+            ("strategies", "harness"),
+            ("orchestration", "harness"),
+            ("routing", "harness"),
+        )
+
+        for importer, target in forbidden_pairs:
+            with self.subTest(importer=importer, target=target):
+                violations = self._validate_source(
+                    f"{importer}/bad.py",
+                    f"from efficiency_platform_agent.{target} import sample\n",
+                )
+                self.assertTrue(
+                    any(importer in item and target in item for item in violations),
+                    violations,
+                )
+
+    def test_unknown_internal_layers_fail_closed(self) -> None:
+        unknown_import = self._validate_source(
+            "core/bad.py",
+            "from efficiency_platform_agent.unknown_layer import sample\n",
+        )
+        unknown_importer = self._validate_source(
+            "unknown_layer/bad.py",
+            "from efficiency_platform_agent.core import sample\n",
+        )
+
+        self.assertTrue(any("unknown target layer" in item for item in unknown_import))
+        self.assertTrue(
+            any("unknown importer layer" in item for item in unknown_importer)
+        )
+
+    def _validate_source(self, relative_path: str, source: str) -> tuple[str, ...]:
+        from efficiency_platform_agent.core.architecture import validate_dependencies
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_root = Path(temp_dir) / "src"
+            file_path = source_root / "efficiency_platform_agent" / relative_path
+            file_path.parent.mkdir(parents=True)
+            file_path.write_text(source, encoding="utf-8")
+            return validate_dependencies(source_root)
+
+
+if __name__ == "__main__":
+    unittest.main()
