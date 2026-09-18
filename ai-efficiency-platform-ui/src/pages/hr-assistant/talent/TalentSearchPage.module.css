@@ -1,0 +1,272 @@
+.page {
+  color: #0f172a;
+}
+.header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.header h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.header p {
+  color: #64748b;
+  margin: 5px 0 0;
+}
+.header > div:last-child,
+.actions,
+.tools > div {
+  display: flex;
+  gap: 8px;
+}
+.layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 260px minmax(0, 1fr);
+  align-items: start;
+}
+.filters,
+.results {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.results {
+  align-self: start;
+}
+.filters {
+  padding: 16px;
+}
+.filters > h2,
+.filter h2 {
+  font-size: 15px;
+  margin: 0 0 9px;
+}
+.filters > .ant-btn {
+  margin: 10px 0;
+}
+.filter {
+  border-top: 1px solid #f1f5f9;
+  display: grid;
+  gap: 8px;
+  padding: 14px 0;
+}
+.filter label,
+.filter small {
+  color: #64748b;
+  font-size: 12px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chips button {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  cursor: pointer;
+  font: 12px inherit;
+  padding: 5px 10px;
+}
+.chips .chipActive {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+}
+.range {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+.range .ant-input-number,
+.range .ant-input {
+  min-width: 0;
+  width: 100%;
+}
+.tools {
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  color: #64748b;
+  display: flex;
+  font-size: 14px;
+  justify-content: space-between;
+  padding: 12px;
+}
+.viewActive {
+  border-color: #2563eb !important;
+  color: #2563eb !important;
+}
+.candidate {
+  align-items: center;
+  border-bottom: 1px solid #f1f5f9;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 44px minmax(280px, 1fr) 240px 94px;
+  padding: 14px;
+}
+.candidate > i {
+  align-items: center;
+  background: #2563eb;
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  font-size: 20px;
+  font-style: normal;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+.candidate:nth-child(2) > i {
+  background: #1668dc;
+}
+.candidate:nth-child(3) > i {
+  background: #f97316;
+}
+.candidate:nth-child(4) > i {
+  background: #94a3b8;
+}
+.candidate:nth-child(5) > i {
+  background: #7c3aed;
+}
+.info h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+.info h2 span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+.info p {
+  color: #64748b;
+  font-size: 12px;
+  margin: 7px 0;
+}
+.info small {
+  background: #f8fafc;
+  color: #475569;
+  display: block;
+  font-size: 12px;
+  padding: 6px;
+}
+.match {
+  border-left: 1px solid #f1f5f9;
+  display: grid;
+  gap: 4px;
+  padding-left: 14px;
+}
+.match label,
+.match span {
+  color: #64748b;
+  font-size: 12px;
+}
+.match b {
+  font-size: 13px;
+}
+.match strong {
+  color: #16a34a;
+  font-size: 18px;
+}
+.match .ant-tag {
+  width: max-content;
+}
+.actions {
+  flex-direction: column;
+}
+.cards {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: 12px;
+}
+.cards .candidate {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  grid-template-columns: 44px minmax(0, 1fr);
+}
+.cards .match,
+.cards .actions {
+  grid-column: 1/-1;
+}
+.cards .actions {
+  flex-direction: row;
+}
+.pagination {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 15px;
+}
+.notice {
+  background: #eff6ff;
+  border-radius: 8px;
+  color: #2563eb;
+  font-size: 13px;
+  margin-top: 12px;
+  padding: 12px;
+}
+@media (max-width: 1050px) {
+  .candidate {
+    grid-template-columns: 44px minmax(0, 1fr) 180px;
+  }
+  .actions {
+    grid-column: 3;
+  }
+  .info {
+    min-width: 0;
+  }
+}
+@media (max-width: 720px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .layout {
+    display: block;
+  }
+  .filters {
+    margin-bottom: 12px;
+  }
+  .candidate {
+    align-items: start;
+    grid-template-columns: 40px minmax(0, 1fr);
+    padding: 12px;
+  }
+  .candidate > i {
+    height: 40px;
+    width: 40px;
+  }
+  .match,
+  .actions {
+    border-left: 0;
+    grid-column: 1/-1;
+    padding-left: 0;
+  }
+  .actions {
+    flex-direction: row;
+  }
+  .actions .ant-btn {
+    flex: 1;
+  }
+  .tools {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .cards {
+    grid-template-columns: 1fr;
+  }
+  .notice {
+    line-height: 19px;
+  }
+  .pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

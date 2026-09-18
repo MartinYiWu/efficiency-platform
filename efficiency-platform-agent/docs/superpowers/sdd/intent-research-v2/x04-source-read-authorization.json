@@ -1,0 +1,13 @@
+{
+  "version": "x04-source-read-authorization/1",
+  "authorization_id": "user-20260917-all-source-read",
+  "approved_by": "project-owner-user",
+  "approved_at": "2026-09-17T01:50:26+00:00",
+  "expires_at": "2026-09-18T01:50:26+00:00",
+  "allowed_actions": ["source_read"],
+  "allowed_source_ids": [
+    "fixture_official_feed",
+    "fixture_github_releases",
+    "fixture_hacker_news"
+  ]
+}

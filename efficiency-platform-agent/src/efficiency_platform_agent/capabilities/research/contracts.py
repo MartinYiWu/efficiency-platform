@@ -22,6 +22,7 @@ class ResearchStatus(StrEnum):
     """研究请求的稳定结果状态。"""
 
     SUCCEEDED = "succeeded"
+    EMPTY = "empty"
     FAILED = "failed"
 
 
@@ -158,6 +159,9 @@ class ResearchResult:
         if self.status is ResearchStatus.SUCCEEDED:
             if not self.observations or self.error_code is not None:
                 raise ValueError("RESEARCH_RESULT_INVALID:success")
+        elif self.status is ResearchStatus.EMPTY:
+            if self.observations or self.error_code is not None or not self.warnings:
+                raise ValueError("RESEARCH_RESULT_INVALID:empty")
         elif self.error_code not in {
             "RESEARCH_UNAVAILABLE",
             "RESEARCH_INSUFFICIENT",

@@ -1,0 +1,72 @@
+{
+  "schema_version": "research-v2-preflight/1",
+  "status": "PASS",
+  "external_io": true,
+  "config_version": "research-sources/3-official-materials",
+  "source_count": 5,
+  "eligible_source_count": 3,
+  "probed_source_count": 3,
+  "sources": [
+    {
+      "source_id": "fixture_official_feed",
+      "adapter_id": "rss_atom",
+      "eligible": true,
+      "reason_codes": []
+    },
+    {
+      "source_id": "fixture_arxiv",
+      "adapter_id": "arxiv",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_gdelt",
+      "adapter_id": "gdelt",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_github_releases",
+      "adapter_id": "rss_atom",
+      "eligible": true,
+      "reason_codes": []
+    },
+    {
+      "source_id": "fixture_hacker_news",
+      "adapter_id": "hacker_news",
+      "eligible": true,
+      "reason_codes": []
+    }
+  ],
+  "reason_codes": [],
+  "execution_status": "EXECUTED",
+  "probes": [
+    {
+      "source_id": "fixture_official_feed",
+      "status_code": 200,
+      "schema_valid": true
+    },
+    {
+      "source_id": "fixture_github_releases",
+      "status_code": 200,
+      "schema_valid": true
+    },
+    {
+      "source_id": "fixture_hacker_news",
+      "status_code": 200,
+      "schema_valid": true
+    }
+  ]
+}

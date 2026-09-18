@@ -1,0 +1,883 @@
+NON-GIT REVIEW PACKAGE
+Base: task-start filesystem snapshot
+Head: current filesystem after Agent Task 2
+
+FILE STAT
+src\efficiency_platform_agent\capabilities\quality\deliverable_v2.py	9857 bytes	SHA256 1BCD83E1B3DE9DE8BF4C1A6B5CEC132F386057EBE5C7BCC1AE5F180CE1C67742
+
+DIFF src\efficiency_platform_agent\capabilities\quality\deliverable_v2.py
+--- a/src\efficiency_platform_agent\capabilities\quality\deliverable_v2.py
++++ b/src\efficiency_platform_agent\capabilities\quality\deliverable_v2.py
+@@ -0,0 +1,279 @@
++"""确定性校验与派生 Deliverable V2 的用户展示结果。"""
++
++from __future__ import annotations
++
++import hashlib
++import unicodedata
++
++from efficiency_platform_agent.contracts.deliverables import (
++    CitationV1,
++    DeliverableSetV1,
++    DeliverableSetV2,
++    DeliverableV1,
++    OperationDeliverableV2,
++    WarningV2,
++)
++
++_ALLOWED_ACTION_TYPES = {
++    "rewrite_for_platform",
++    "expand_item",
++    "generate_script",
++    "replace_candidates",
++    "show_sources",
++    "refine_constraints",
++}
++
++_PRIORITY_LABELS = {
++    "high": "高优先级",
++    "medium": "中优先级",
++    "low": "低优先级",
++}
++
++
++class DeliveryPresentationValidator:
++    """校验交付物展示不变量并重算复制文本。"""
++
++    def validate_deliverable(
++        self, value: OperationDeliverableV2
++    ) -> OperationDeliverableV2:
++        """验证排名与引用闭包，并返回确定性复制文本快照。"""
++
++        if value.content.kind == "ranked_digest":
++            citations = {citation.citation_id for citation in value.citations}
++            referenced = {
++                reference
++                for item in value.content.items
++                for reference in item.source_refs
++            }
++            if not referenced.issubset(citations):
++                raise ValueError("DELIVERY_CITATION_CLOSURE_INVALID")
++
++            ranks = [item.rank for item in value.content.items]
++            if ranks != list(range(1, len(ranks) + 1)):
++                raise ValueError("DELIVERY_RANK_INVALID")
++
++        rendered = render_copy_text(value)
++        if value.copy_text == rendered:
++            return value
++        return value.model_copy(update={"copy_text": rendered})
++
++
++def render_copy_text(value: OperationDeliverableV2) -> str:
++    """按五类结构化内容生成固定顺序的纯文本，不调用模型。"""
++
++    content = value.content
++    if content.kind == "ranked_digest":
++        blocks: list[str] = []
++        for item in content.items:
++            lines = [
++                f"{item.rank}. {item.title}",
++                f"摘要：{item.summary}",
++                f"运营价值：{item.why_it_matters}",
++            ]
++            if item.content_angles:
++                lines.append(f"内容角度：{'、'.join(item.content_angles)}")
++            if item.metrics:
++                lines.append(f"指标：{'、'.join(item.metrics)}")
++            blocks.append("\n".join(lines))
++        return "\n\n".join(blocks)
++
++    if content.kind == "platform_content":
++        sections = [content.body_markdown.rstrip()]
++        if content.hashtags:
++            sections.append(" ".join(content.hashtags))
++        return "\n\n".join(sections)
++
++    if content.kind == "action_plan":
++        sections = [f"目标：{content.goal}\n受众：{content.audience}"]
++        for phase_index, phase in enumerate(content.phases, start=1):
++            phase_lines = [f"阶段 {phase_index}：{phase.title}"]
++            phase_lines.extend(
++                f"{action_index}. {action}"
++                for action_index, action in enumerate(phase.actions, start=1)
++            )
++            if phase.metrics:
++                phase_lines.append(f"阶段指标：{'、'.join(phase.metrics)}")
++            sections.append("\n".join(phase_lines))
++        trailing: list[str] = []
++        if content.metrics:
++            trailing.append(f"整体指标：{'、'.join(content.metrics)}")
++        if content.assumptions:
++            trailing.append(f"假设：{'、'.join(content.assumptions)}")
++        if trailing:
++            sections.append("\n".join(trailing))
++        return "\n\n".join(sections)
++
++    if content.kind == "diagnosis":
++        blocks = []
++        for finding_index, finding in enumerate(content.findings, start=1):
++            lines = [
++                (
++                    f"{finding_index}. [{_PRIORITY_LABELS[finding.priority]}] "
++                    f"{finding.title}"
++                )
++            ]
++            if finding.evidence:
++                lines.append(f"证据：{'、'.join(finding.evidence)}")
++            lines.append(f"建议：{finding.recommendation}")
++            blocks.append("\n".join(lines))
++        if content.data_gaps:
++            blocks.append(f"数据缺口：{'、'.join(content.data_gaps)}")
++        return "\n\n".join(blocks)
++
++    retrospective_sections = (
++        ("目标", content.objectives),
++        ("结果", content.outcomes),
++        ("差距", content.gaps),
++        ("原因", content.causes),
++        ("下一步", content.next_steps),
++    )
++    return "\n\n".join(
++        f"{title}\n{_render_numbered(values)}"
++        for title, values in retrospective_sections
++    )
++
++
++def assemble_set_v2(value: DeliverableSetV2) -> DeliverableSetV2:
++    """校验集合级引用、目标和独立性，并生成确定性展示字段。"""
++
++    deliverable_ids = [item.deliverable_id for item in value.deliverables]
++    if len(deliverable_ids) != len(set(deliverable_ids)):
++        raise ValueError("DELIVERY_ID_DUPLICATED")
++
++    validator = DeliveryPresentationValidator()
++    deliverables = [validator.validate_deliverable(item) for item in value.deliverables]
++
++    if any(item.content.kind == "ranked_digest" for item in deliverables):
++        provenance = value.provenance
++        if (
++            provenance is None
++            or provenance.collection_window_start is None
++            or provenance.collection_window_end is None
++            or provenance.ranking_basis is None
++        ):
++            raise ValueError("DELIVERY_RESEARCH_PROVENANCE_REQUIRED")
++
++    _validate_platform_content_independence(deliverables)
++    _validate_next_actions(value, deliverables)
++
++    warnings = _deduplicate_warnings(value.warnings)
++    degraded = (
++        value.degraded
++        or not value.summary.complete
++        or bool(warnings)
++        or any(item.warnings for item in deliverables)
++    )
++    return value.model_copy(
++        update={
++            "deliverables": deliverables,
++            "degraded": degraded,
++            "warnings": warnings,
++        }
++    )
++
++
++def project_set_v2_to_v1(value: DeliverableSetV2) -> DeliverableSetV1:
++    """只投影 V1 明确拥有的字段，不反推 V2 质量语义。"""
++
++    deliverables = []
++    for item in value.deliverables:
++        platform_content = (
++            item.content if item.content.kind == "platform_content" else None
++        )
++        deliverables.append(
++            DeliverableV1(
++                platform=item.platform,
++                title=item.title,
++                body=item.copy_text,
++                hashtags=(platform_content.hashtags if platform_content else []),
++                format_notes=(
++                    platform_content.format_notes if platform_content else []
++                ),
++                citations=[
++                    CitationV1(
++                        url=citation.url, title=citation.title, source=citation.source
++                    )
++                    for citation in item.citations
++                ],
++                warnings=[warning.code for warning in item.warnings],
++            )
++        )
++    return DeliverableSetV1(
++        deliverables=deliverables,
++        summary=value.summary.message,
++        degraded=value.degraded,
++    )
++
++
++def _render_numbered(values: list[str]) -> str:
++    """用从一开始的稳定编号渲染字符串列表。"""
++
++    if not values:
++        return "无"
++    return "\n".join(f"{index}. {value}" for index, value in enumerate(values, start=1))
++
++
++def _validate_platform_content_independence(
++    deliverables: list[OperationDeliverableV2],
++) -> None:
++    """拒绝不同平台间标准化后完全相同的正文。"""
++
++    platform_by_digest: dict[str, str] = {}
++    for item in deliverables:
++        if item.content.kind != "platform_content":
++            continue
++        normalized = "".join(
++            unicodedata.normalize("NFKC", item.content.body_markdown).split()
++        )
++        digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
++        previous_platform = platform_by_digest.get(digest)
++        if previous_platform is not None and previous_platform != item.platform:
++            raise ValueError("DELIVERY_PLATFORM_CONTENT_DUPLICATED")
++        platform_by_digest[digest] = item.platform
++
++
++def _validate_next_actions(
++    value: DeliverableSetV2,
++    deliverables: list[OperationDeliverableV2],
++) -> None:
++    """校验允许动作、交付物目标与排名条目目标。"""
++
++    deliverable_by_id = {item.deliverable_id: item for item in deliverables}
++    for action in value.next_actions:
++        if action.action_type not in _ALLOWED_ACTION_TYPES:
++            raise ValueError("DELIVERY_ACTION_TYPE_INVALID")
++        target = (
++            deliverable_by_id.get(action.target_deliverable_id)
++            if action.target_deliverable_id is not None
++            else None
++        )
++        if action.target_deliverable_id is not None and target is None:
++            raise ValueError("DELIVERY_ACTION_TARGET_INVALID")
++        if not action.target_item_ids:
++            continue
++        if target is None or target.content.kind != "ranked_digest":
++            raise ValueError("DELIVERY_ACTION_ITEM_TARGET_INVALID")
++        item_ids = {item.item_id for item in target.content.items}
++        if not set(action.target_item_ids).issubset(item_ids):
++            raise ValueError("DELIVERY_ACTION_ITEM_TARGET_INVALID")
++
++
++def _deduplicate_warnings(warnings: list[WarningV2]) -> list[WarningV2]:
++    """按首次出现顺序移除完全重复的结构化提醒。"""
++
++    result: list[WarningV2] = []
++    seen: set[tuple[str, str]] = set()
++    for warning in warnings:
++        key = (warning.code, warning.message)
++        if key not in seen:
++            seen.add(key)
++            result.append(warning)
++    return result
++
++
++__all__ = [
++    "DeliveryPresentationValidator",
++    "assemble_set_v2",
++    "project_set_v2_to_v1",
++    "render_copy_text",
++]
+
+src\efficiency_platform_agent\capabilities\quality\__init__.py	316 bytes	SHA256 1B571FBB8BEAE98CBE847AD92298BC11B77017DECB27E8E3F69FDBB7EAAD11A6
+
+DIFF src\efficiency_platform_agent\capabilities\quality\__init__.py
+--- a/src\efficiency_platform_agent\capabilities\quality\__init__.py
++++ b/src\efficiency_platform_agent\capabilities\quality\__init__.py
+@@ -1 +1,15 @@
+ """结构化成品组装与格式质量检查。"""
++
++from .deliverable_v2 import (
++    DeliveryPresentationValidator,
++    assemble_set_v2,
++    project_set_v2_to_v1,
++    render_copy_text,
++)
++
++__all__ = [
++    "DeliveryPresentationValidator",
++    "assemble_set_v2",
++    "project_set_v2_to_v1",
++    "render_copy_text",
++]
+
+tests\unit\capabilities\quality\test_deliverable_v2.py	14557 bytes	SHA256 1F2BB70E2C22D1C5A3F37A0B47B3A8C30C878E45A3DA6600E207E3D20F9F80C2
+
+DIFF tests\unit\capabilities\quality\test_deliverable_v2.py
+--- a/tests\unit\capabilities\quality\test_deliverable_v2.py
++++ b/tests\unit\capabilities\quality\test_deliverable_v2.py
+@@ -0,0 +1,466 @@
++"""Deliverable V2 展示验证、复制文本和 V1 投影测试。"""
++
++from __future__ import annotations
++
++from datetime import UTC, datetime
++
++import pytest
++from pydantic import ValidationError
++
++from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
++    DeliveryPresentationValidator,
++    assemble_set_v2,
++    project_set_v2_to_v1,
++    render_copy_text,
++)
++from efficiency_platform_agent.contracts.deliverables import (
++    ActionPhaseV2,
++    ActionPlanContentV2,
++    ActionPlanDeliverableV2,
++    CitationV2,
++    DeliverableSetV2,
++    DeliveryProvenanceV2,
++    DeliverySummaryV2,
++    DiagnosisContentV2,
++    DiagnosisDeliverableV2,
++    FindingV2,
++    NextActionV2,
++    OperationDeliverableV2,
++    PlatformContentDeliverableV2,
++    PlatformContentV2,
++    RankedDigestContentV2,
++    RankedDigestDeliverableV2,
++    RankedItemV2,
++    RankingBasisV2,
++    RetrospectiveContentV2,
++    RetrospectiveDeliverableV2,
++    WarningV2,
++)
++
++
++def citation(
++    citation_id: str = "citation-1", *, supports: list[str] | None = None
++) -> CitationV2:
++    """构造离线引用样本。"""
++
++    return CitationV2(
++        citation_id=citation_id,
++        url="https://example.test/a",
++        title="来源 A",
++        source="示例站点",
++        published_at="2026-09-16T08:00:00Z",
++        source_type="official",
++        source_tier="primary",
++        verification_status="verified",
++        supports_item_ids=supports or ["item-1"],
++        independent_source_group="example.test",
++    )
++
++
++def item(
++    *,
++    item_id: str = "item-1",
++    rank: int = 1,
++    title: str = "事件 A",
++    summary: str = "摘要 A",
++    refs: list[str] | None = None,
++) -> RankedItemV2:
++    """构造离线排名条目。"""
++
++    return RankedItemV2(
++        item_id=item_id,
++        rank=rank,
++        title=title,
++        occurred_at="2026-09-16T08:00:00Z",
++        summary=summary,
++        why_it_matters=f"{title} 的运营价值",
++        content_angles=["产品观察", "行业趋势"],
++        metrics=["来源数=1"],
++        source_refs=["citation-1"] if refs is None else refs,
++        confidence="high",
++        verification_status="verified",
++    )
++
++
++def ranked_deliverable(
++    *,
++    items: list[RankedItemV2] | None = None,
++    deliverable_id: str = "d-1",
++    warnings: list[WarningV2] | None = None,
++) -> RankedDigestDeliverableV2:
++    """构造排名摘要交付物。"""
++
++    return RankedDigestDeliverableV2(
++        deliverable_id=deliverable_id,
++        platform="research",
++        title="热点摘要",
++        lead="按重要性整理候选事件。",
++        citations=[citation()],
++        copy_text="待重算",
++        warnings=warnings or [],
++        content=RankedDigestContentV2(
++            selection_summary="保留经过核验的候选事件。",
++            ranking_basis="importance",
++            items=items or [item()],
++        ),
++    )
++
++
++def platform_deliverable(
++    platform: str,
++    body: str,
++    *,
++    deliverable_id: str | None = None,
++) -> PlatformContentDeliverableV2:
++    """构造平台内容交付物。"""
++
++    return PlatformContentDeliverableV2(
++        deliverable_id=deliverable_id or f"d-{platform}",
++        platform=platform,
++        title=f"{platform} 标题",
++        lead="平台内容导语。",
++        citations=[citation()],
++        copy_text="待重算",
++        warnings=[],
++        content=PlatformContentV2(
++            body_markdown=body,
++            hashtags=["#AI", "#运营"],
++            format_notes=["短段落", "发布前复核事实"],
++        ),
++    )
++
++
++def provenance(
++    *, ranking_basis: RankingBasisV2 | None = "importance"
++) -> DeliveryProvenanceV2:
++    """构造完整研究 provenance。"""
++
++    return DeliveryProvenanceV2(
++        source_count=1,
++        verified_source_count=1,
++        candidate_count=1,
++        merged_event_count=1,
++        retained_count=1,
++        eliminated_count=0,
++        collection_window_start=datetime(2026, 9, 15, tzinfo=UTC),
++        collection_window_end=datetime(2026, 9, 17, tzinfo=UTC),
++        ranking_basis=ranking_basis,
++    )
++
++
++_DEFAULT_PROVENANCE = provenance()
++
++
++def deliverable_set_v2(
++    *,
++    deliverables: list[OperationDeliverableV2] | None = None,
++    provenance_value: DeliveryProvenanceV2 | None = _DEFAULT_PROVENANCE,
++    next_actions: list[NextActionV2] | None = None,
++    complete: bool = True,
++    degraded: bool = False,
++    warnings: list[WarningV2] | None = None,
++) -> DeliverableSetV2:
++    """构造 V2 集合，允许测试覆盖集合级不变量。"""
++
++    values: list[OperationDeliverableV2] = (
++        deliverables if deliverables is not None else [ranked_deliverable()]
++    )
++    return DeliverableSetV2(
++        run_id="run-1",
++        intent_revision=1,
++        summary=DeliverySummaryV2(
++            message="已完成结构化交付。",
++            result_count=len(values),
++            complete=complete,
++        ),
++        deliverables=values,
++        next_actions=next_actions or [],
++        provenance=provenance_value,
++        degraded=degraded,
++        warnings=warnings or [],
++    )
++
++
++def test_validator_rejects_missing_citation_before_non_contiguous_rank() -> None:
++    value = ranked_deliverable(
++        items=[
++            item(rank=1, refs=["missing"]),
++            item(item_id="item-2", rank=3, refs=[]),
++        ]
++    )
++
++    with pytest.raises(ValueError, match="DELIVERY_CITATION_CLOSURE_INVALID"):
++        DeliveryPresentationValidator().validate_deliverable(value)
++
++
++def test_validator_rejects_non_contiguous_rank() -> None:
++    value = ranked_deliverable(
++        items=[item(rank=1), item(item_id="item-2", rank=3, refs=[])]
++    )
++
++    with pytest.raises(ValueError, match="DELIVERY_RANK_INVALID"):
++        DeliveryPresentationValidator().validate_deliverable(value)
++
++
++def test_validator_rejects_unknown_next_action() -> None:
++    with pytest.raises(ValidationError):
++        NextActionV2(
++            action_id="publish",
++            action_type="publish_now",  # type: ignore[arg-type]
++            label="立即发布",
++            target_deliverable_id="d-1",
++            target_item_ids=[],
++            intent_patch={},
++            requires_user_input=False,
++        )
++
++
++def test_ranked_digest_copy_text_is_rendered_from_structured_items() -> None:
++    value = ranked_deliverable(items=[item(rank=1, title="事件 A", summary="摘要 A")])
++
++    assert render_copy_text(value) == (
++        "1. 事件 A\n"
++        "摘要：摘要 A\n"
++        "运营价值：事件 A 的运营价值\n"
++        "内容角度：产品观察、行业趋势\n"
++        "指标：来源数=1"
++    )
++
++
++def test_platform_content_copy_text_keeps_body_and_hashtag_order() -> None:
++    value = platform_deliverable("xiaohongshu", "第一段。\n\n第二段。")
++
++    assert render_copy_text(value) == "第一段。\n\n第二段。\n\n#AI #运营"
++
++
++def test_action_plan_copy_text_uses_fixed_section_and_item_order() -> None:
++    value = ActionPlanDeliverableV2(
++        deliverable_id="d-plan",
++        platform="general",
++        title="推广计划",
++        lead="分阶段执行。",
++        citations=[],
++        copy_text="待重算",
++        warnings=[],
++        content=ActionPlanContentV2(
++            goal="提升试用转化",
++            audience="AI 工具新用户",
++            phases=[
++                ActionPhaseV2(
++                    phase_id="phase-1",
++                    title="准备",
++                    actions=["整理素材", "确认排期"],
++                    metrics=["素材完成率"],
++                )
++            ],
++            metrics=["试用转化率"],
++            assumptions=["落地页按期上线"],
++        ),
++    )
++
++    assert render_copy_text(value) == (
++        "目标：提升试用转化\n"
++        "受众：AI 工具新用户\n\n"
++        "阶段 1：准备\n"
++        "1. 整理素材\n"
++        "2. 确认排期\n"
++        "阶段指标：素材完成率\n\n"
++        "整体指标：试用转化率\n"
++        "假设：落地页按期上线"
++    )
++
++
++def test_diagnosis_copy_text_separates_evidence_and_recommendation() -> None:
++    value = DiagnosisDeliverableV2(
++        deliverable_id="d-diagnosis",
++        platform="general",
++        title="账号诊断",
++        lead="基于现有材料诊断。",
++        citations=[],
++        copy_text="待重算",
++        warnings=[],
++        content=DiagnosisContentV2(
++            findings=[
++                FindingV2(
++                    finding_id="finding-1",
++                    title="更新频率不稳定",
++                    evidence=["最近四周仅发布两篇"],
++                    priority="high",
++                    recommendation="建立固定周更计划",
++                )
++            ],
++            data_gaps=["缺少曝光数据"],
++        ),
++    )
++
++    assert render_copy_text(value) == (
++        "1. [高优先级] 更新频率不稳定\n"
++        "证据：最近四周仅发布两篇\n"
++        "建议：建立固定周更计划\n\n"
++        "数据缺口：缺少曝光数据"
++    )
++
++
++def test_retrospective_copy_text_uses_fixed_section_order() -> None:
++    value = RetrospectiveDeliverableV2(
++        deliverable_id="d-retro",
++        platform="general",
++        title="活动复盘",
++        lead="区分事实与推断。",
++        citations=[],
++        copy_text="待重算",
++        warnings=[],
++        content=RetrospectiveContentV2(
++            objectives=["提升注册"],
++            outcomes=["新增注册 100"],
++            gaps=["未达目标"],
++            causes=["渠道覆盖不足"],
++            next_steps=["补充垂直渠道"],
++        ),
++    )
++
++    assert render_copy_text(value) == (
++        "目标\n1. 提升注册\n\n"
++        "结果\n1. 新增注册 100\n\n"
++        "差距\n1. 未达目标\n\n"
++        "原因\n1. 渠道覆盖不足\n\n"
++        "下一步\n1. 补充垂直渠道"
++    )
++
++
++def test_validator_replaces_model_copy_text_without_mutating_input() -> None:
++    value = ranked_deliverable()
++
++    validated = DeliveryPresentationValidator().validate_deliverable(value)
++
++    assert validated.copy_text == render_copy_text(value)
++    assert value.copy_text == "待重算"
++
++
++def test_v1_projection_keeps_only_explicit_v2_projection_fields() -> None:
++    warning = WarningV2(code="PARTIAL_RESULT", message="结果不完整。")
++    value = deliverable_set_v2(
++        deliverables=[
++            ranked_deliverable(warnings=[warning]).model_copy(
++                update={"copy_text": "1. 事件 A\n摘要：摘要 A"}
++            )
++        ],
++        degraded=True,
++        warnings=[WarningV2(code="SET_WARNING", message="集合提醒。")],
++    )
++
++    projected = project_set_v2_to_v1(value)
++
++    assert projected.contract_version == "deliverable-set/1"
++    assert projected.summary == "已完成结构化交付。"
++    assert projected.degraded is True
++    assert projected.deliverables[0].body == "1. 事件 A\n摘要：摘要 A"
++    assert projected.deliverables[0].citations[0].url == "https://example.test/a"
++    assert projected.deliverables[0].warnings == ["PARTIAL_RESULT"]
++    assert projected.deliverables[0].hashtags == []
++    assert projected.deliverables[0].format_notes == []
++
++
++def test_v1_projection_keeps_platform_hashtags_and_format_notes() -> None:
++    platform = platform_deliverable("xiaohongshu", "正文").model_copy(
++        update={"copy_text": "正文\n\n#AI #运营"}
++    )
++
++    projected = project_set_v2_to_v1(
++        deliverable_set_v2(deliverables=[platform], provenance_value=None)
++    )
++
++    assert projected.deliverables[0].hashtags == ["#AI", "#运营"]
++    assert projected.deliverables[0].format_notes == ["短段落", "发布前复核事实"]
++
++
++@pytest.mark.parametrize(
++    "provenance_value",
++    [None, provenance(ranking_basis=None)],
++)
++def test_ranked_digest_requires_collection_window_and_ranking_basis(
++    provenance_value: DeliveryProvenanceV2 | None,
++) -> None:
++    value = deliverable_set_v2(provenance_value=provenance_value)
++
++    with pytest.raises(ValueError, match="DELIVERY_RESEARCH_PROVENANCE_REQUIRED"):
++        assemble_set_v2(value)
++
++
++def test_platform_bodies_cannot_be_copied_across_platforms() -> None:
++    value = deliverable_set_v2(
++        deliverables=[
++            platform_deliverable("xiaohongshu", "同一 正文"),
++            platform_deliverable("wechat", "同一\n正文"),
++        ],
++        provenance_value=None,
++    )
++
++    with pytest.raises(ValueError, match="DELIVERY_PLATFORM_CONTENT_DUPLICATED"):
++        assemble_set_v2(value)
++
++
++def test_assemble_rejects_duplicate_deliverable_ids() -> None:
++    value = deliverable_set_v2(
++        deliverables=[
++            platform_deliverable("xiaohongshu", "正文 A", deliverable_id="same"),
++            platform_deliverable("wechat", "正文 B", deliverable_id="same"),
++        ],
++        provenance_value=None,
++    )
++
++    with pytest.raises(ValueError, match="DELIVERY_ID_DUPLICATED"):
++        assemble_set_v2(value)
++
++
++@pytest.mark.parametrize(
++    ("target_deliverable_id", "target_item_ids", "error_code"),
++    [
++        ("missing", [], "DELIVERY_ACTION_TARGET_INVALID"),
++        ("d-1", ["missing-item"], "DELIVERY_ACTION_ITEM_TARGET_INVALID"),
++        (None, ["item-1"], "DELIVERY_ACTION_ITEM_TARGET_INVALID"),
++    ],
++)
++def test_assemble_rejects_invalid_action_targets(
++    target_deliverable_id: str | None,
++    target_item_ids: list[str],
++    error_code: str,
++) -> None:
++    action = NextActionV2(
++        action_id="action-1",
++        action_type="expand_item",
++        label="展开条目",
++        target_deliverable_id=target_deliverable_id,
++        target_item_ids=target_item_ids,
++        intent_patch={},
++        requires_user_input=False,
++    )
++    value = deliverable_set_v2(next_actions=[action])
++
++    with pytest.raises(ValueError, match=error_code):
++        assemble_set_v2(value)
++
++
++def test_assemble_recomputes_copy_text_and_degraded_from_explicit_facts() -> None:
++    warning = WarningV2(code="PARTIAL_RESULT", message="结果不完整。")
++    value = deliverable_set_v2(
++        complete=False,
++        warnings=[warning, warning],
++        next_actions=[
++            NextActionV2(
++                action_id="action-1",
++                action_type="expand_item",
++                label="展开条目",
++                target_deliverable_id="d-1",
++                target_item_ids=["item-1"],
++                intent_patch={},
++                requires_user_input=False,
++            )
++        ],
++    )
++
++    assembled = assemble_set_v2(value)
++
++    assert assembled.deliverables[0].copy_text.startswith("1. 事件 A")
++    assert assembled.degraded is True
++    assert assembled.warnings == [warning]
+
+docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md	10631 bytes	SHA256 0B9884B08A18EC24E4B36B389930FABDBD414BEAC6A49645334B360895472361
+
+DIFF docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+--- a/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
++++ b/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+@@ -102,3 +102,90 @@
+ 
+ - Task 1：complete（non-Git 文件快照基线 → 当前文件，规格复核通过，代码质量 Approved，无 Critical/Important/Minor 问题）。
+ - 静态复核无法独立重现 TDD 执行时序；RED/GREEN 原始摘要保存在本账本与 `docs/superpowers/progress/sdd/agent-task-1-report.md`。
++
++## Task 2：实现确定性展示验证、复制文本和 V1 投影
++
++### 实施结果
++
++- 新增 `DeliveryPresentationValidator`，校验排名摘要的引用闭包与连续排名，并从结构化内容重算 `copy_text`，不接受模型另写的不同正文。
++- 新增五类固定文本渲染：排名摘要、平台内容、行动计划、诊断和复盘均使用确定标题、编号、换行和字段顺序，不调用模型。
++- 新增集合校验：交付物 ID 唯一、研究时间窗与排序口径完整、动作目标存在、条目目标属于目标排名摘要。
++- 不同平台 `body_markdown` 经 NFKC 与空白标准化后计算 SHA-256；相同哈希以 `DELIVERY_PLATFORM_CONTENT_DUPLICATED` 失败关闭。
++- 集合 `degraded` 仅从已有运行降级事实、摘要完整性及结构化 warning 派生；集合 warning 按首次出现顺序去重，不读取正文推断质量。
++- 新增 V2 到 V1 单向投影，只保留 V1 明确拥有的复制文本、平台字段、引用和交付物 warning code，不反推 V2 来源质量、排名或动作。
++
++### RED 证据
++
++命令：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/unit/capabilities/quality/test_deliverable_v2.py -q
++```
++
++结果：退出码 `1`，收集阶段按预期失败。关键输出：
++
++```text
++ModuleNotFoundError: No module named 'efficiency_platform_agent.capabilities.quality.deliverable_v2'
++1 error in 0.42s
++```
++
++### GREEN 与回归证据
++
++目标测试首次 GREEN：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/unit/capabilities/quality/test_deliverable_v2.py -q
++```
++
++结果：退出码 `0`，`19 passed in 0.43s`。
++
++Task 2、V1 hashtags、V2 契约与类型映射联合回归：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/unit/capabilities/quality/test_deliverable_v2.py tests/unit/capabilities/quality/test_deliverable_hashtags.py tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py -q
++```
++
++结果：退出码 `0`，`38 passed in 0.52s`。
++
++全量回归：
++
++```powershell
++.venv\Scripts\python.exe -m pytest -q
++```
++
++最终结果：退出码 `0`，`1604 passed, 9 skipped, 2 warnings, 280 subtests passed in 54.42s`。首次全量运行的唯一失败来自控制器复核快照嵌套进仓库后产生的文档相对链接污染；控制器将快照移出仓库后，同一命令重跑通过，Task 2 实现未为该外部失败修改行为。
++
++质量门禁：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/architecture/test_dependency_rules.py -q
++.venv\Scripts\python.exe -m compileall -q src tests
++.venv\Scripts\python.exe -m ruff check src/efficiency_platform_agent/capabilities/quality/deliverable_v2.py src/efficiency_platform_agent/capabilities/quality/__init__.py tests/unit/capabilities/quality/test_deliverable_v2.py
++.venv\Scripts\python.exe -m ruff format --check src/efficiency_platform_agent/capabilities/quality/deliverable_v2.py src/efficiency_platform_agent/capabilities/quality/__init__.py tests/unit/capabilities/quality/test_deliverable_v2.py
++.venv\Scripts\python.exe -m mypy src/efficiency_platform_agent/capabilities/quality/deliverable_v2.py src/efficiency_platform_agent/capabilities/quality/__init__.py tests/unit/capabilities/quality/test_deliverable_v2.py
++```
++
++结果依次为：`12 passed, 47 subtests passed in 2.22s`；源码编译退出码 `0`；`All checks passed!`；`3 files already formatted`；`Success: no issues found in 3 source files`。
++
++### V1 投影边界
++
++- 集合摘要只取 `summary.message`，降级只取组装完成的 `set_v2.degraded`。
++- 交付正文只取确定性 `copy_text`；只有 `platform_content` 投影已有 hashtags 与 format_notes。
++- 引用只映射 URL、标题和来源；warning 只映射交付物现有 code。
++- 不调用 V1 assembler，不从正文生成来源质量、热点排名、动作、hashtag 或新 warning。
++
++### 文件快照清单
++
++| 文件 | SHA256 / 状态 |
++|---|---|
++| `src/efficiency_platform_agent/capabilities/quality/deliverable_v2.py` | `1BCD83E1B3DE9DE8BF4C1A6B5CEC132F386057EBE5C7BCC1AE5F180CE1C67742` |
++| `src/efficiency_platform_agent/capabilities/quality/__init__.py` | `1B571FBB8BEAE98CBE847AD92298BC11B77017DECB27E8E3F69FDBB7EAAD11A6` |
++| `tests/unit/capabilities/quality/test_deliverable_v2.py` | `1F2BB70E2C22D1C5A3F37A0B47B3A8C30C878E45A3DA6600E207E3D20F9F80C2` |
++| 本进度账本 | 已追加 Task 2；Task 1 历史未覆盖 |
++| `docs/superpowers/progress/sdd/agent-task-2-report.md` | 已创建独立实施报告 |
++
++### 边界与遗留
++
++- Task 1 的 V2 契约与 `delivery_kind.py` 均未修改；未接入模型、Provider、网络、数据库、Java/UI 或生产运行时。
++- 未执行任何 Git 命令，也未创建提交。
++- Task 2 无阻断担忧；全量回归保留两条既有依赖 warning，后续由对应组件任务治理。
+

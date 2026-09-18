@@ -1,5 +1,6 @@
 """严格校验前端成品并标记平台格式与独立性问题。"""
 
+import re
 from collections.abc import Iterable, Mapping
 from urllib.parse import urlsplit
 
@@ -47,6 +48,9 @@ class DeliverableAssembler:
                 or not item.platform.strip()
             ):
                 raise ValueError("DELIVERABLE_EMPTY_CONTENT")
+            hashtags = item.hashtags or _hashtags_from_body(item.body)
+            if hashtags != item.hashtags:
+                item = item.model_copy(update={"hashtags": hashtags})
             warnings = list(item.warnings)
             if quality_unresolved:
                 warnings.append("QUALITY_REPORT_WARNING")
@@ -132,3 +136,12 @@ class DeliverableAssembler:
             else QualityStatus.PASSED,
             0,
         )
+
+
+_BODY_HASHTAG = re.compile(r"(?<!\w)#([^\s#，。！？,.;:：；]{1,50})")
+
+
+def _hashtags_from_body(body: str) -> list[str]:
+    """把正文中明确书写的标签提升为结构化标签，保持首次出现顺序。"""
+
+    return list(dict.fromkeys(f"#{match.group(1)}" for match in _BODY_HASHTAG.finditer(body)))

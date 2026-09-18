@@ -98,6 +98,9 @@ class DeepSeekModelProvider(ModelProvider):
         if not isinstance(options, dict):
             options = {}
         options.pop("model", None)
+        # logical_model 是 Agent Runtime 的路由元数据，不是 OpenAI-compatible
+        # SDK 参数；若透传会在发起网络请求前触发客户端参数错误。
+        options.pop("logical_model", None)
         options["timeout"] = min(request.timeout_ms, self.timeout_ms) / 1000
         try:
             responses = getattr(self.client, "responses", None)
@@ -118,8 +121,14 @@ class DeepSeekModelProvider(ModelProvider):
             raise
         except Exception as error:  # noqa: BLE001, 厂商异常不能越过 S2 边界
             status = _field(error, "status_code")
-            if isinstance(status, int) and status == 401:
+            if isinstance(status, int) and status in {400, 422}:
+                code, retryable = "PROVIDER_BAD_REQUEST", False
+            elif isinstance(status, int) and status == 401:
                 code, retryable = "PROVIDER_AUTHENTICATION", False
+            elif isinstance(status, int) and status == 403:
+                code, retryable = "PROVIDER_FORBIDDEN", False
+            elif isinstance(status, int) and status == 404:
+                code, retryable = "PROVIDER_NOT_FOUND", False
             elif isinstance(status, int) and status == 429:
                 code, retryable = "PROVIDER_RATE_LIMITED", True
             elif isinstance(status, int) and status >= 500:

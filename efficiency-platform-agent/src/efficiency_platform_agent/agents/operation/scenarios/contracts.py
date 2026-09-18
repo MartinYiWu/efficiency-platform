@@ -22,6 +22,7 @@ from efficiency_platform_agent.agents.operation.contracts.task import (
     OperationRequest,
     OperationTaskSpec,
 )
+from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
 
 _ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
@@ -51,6 +52,7 @@ class ScenarioSubmission:
     task_spec: OperationTaskSpec
     profile_candidates: tuple[object, ...]
     evidence_pack: EvidencePack | None
+    referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
 
     def __post_init__(self) -> None:
         if self.contract_version != "scenario-submission/1":
@@ -71,6 +73,7 @@ class ScenarioSubmission:
         for candidate in self.profile_candidates:
             if not hasattr(candidate, "profile_id"):
                 raise TypeError("profile_candidates只能包含ProfileCandidate")
+        _validate_references(self.referenced_inputs, self.request)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +87,7 @@ class ScenarioSupervisorRequest:
     operation_context: OperationContext
     operation_plan: OperationPlan
     evidence_pack: EvidencePack | None
+    referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
 
     def __post_init__(self) -> None:
         if self.contract_version != "scenario-supervisor-request/1":
@@ -95,6 +99,21 @@ class ScenarioSupervisorRequest:
             raise ValueError("上下文与任务身份不一致")
         if self.operation_plan.task_id != self.task_spec.task_id:
             raise ValueError("计划与任务身份不一致")
+        _validate_references(self.referenced_inputs, self.request)
+
+
+def _validate_references(references, request: OperationRequest) -> None:
+    """场景边界重新检查身份，拒绝通过其他提交入口混入引用。"""
+    if not isinstance(references, tuple) or len(references) > 1:
+        raise ValueError("SCENARIO_REFERENCE_INVALID")
+    for reference in references:
+        if not isinstance(reference, ReferencedRankedInput):
+            raise TypeError("referenced_inputs必须是类型化排名引用")
+        if (
+            reference.tenant_id != request.request.tenant_id
+            or reference.user_id != request.request.user_id
+        ):
+            raise ValueError("SCENARIO_IDENTITY_MISMATCH")
 
 
 @dataclass(frozen=True, slots=True)

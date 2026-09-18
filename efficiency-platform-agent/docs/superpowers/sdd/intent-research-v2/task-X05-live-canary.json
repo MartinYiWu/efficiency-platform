@@ -1,0 +1,2181 @@
+{
+  "schema_version": "research-v2-live-canary/1",
+  "status": "PASS",
+  "tenant_id": "tenant-x05-canary",
+  "acceptance_session_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+  "valid_request_count": 20,
+  "case_counts": {
+    "yesterday_ai": 4,
+    "last_week_topic": 4,
+    "exact_five": 4,
+    "rewrite_wechat": 4,
+    "ordinary_chat": 4
+  },
+  "source_collection_cache_verified": true,
+  "source_collection_count": 1,
+  "source_collection_cache_hits": 11,
+  "observations": [
+    {
+      "request_id": "x05-r1-yesterday_ai",
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r1-last_week_topic",
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r1-exact_five",
+      "case_id": "exact_five",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r1-rewrite_wechat",
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r1-ordinary_chat",
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": false,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r2-yesterday_ai",
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r2-last_week_topic",
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r2-exact_five",
+      "case_id": "exact_five",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r2-rewrite_wechat",
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r2-ordinary_chat",
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": false,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r3-yesterday_ai",
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r3-last_week_topic",
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r3-exact_five",
+      "case_id": "exact_five",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r3-rewrite_wechat",
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r3-ordinary_chat",
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": false,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r4-yesterday_ai",
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r4-last_week_topic",
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r4-exact_five",
+      "case_id": "exact_five",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r4-rewrite_wechat",
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": true,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    },
+    {
+      "request_id": "x05-r4-ordinary_chat",
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "real_model_verified": true,
+      "real_source_verified": false,
+      "citation_coverage": 1.0,
+      "source_policy_violations": [],
+      "budget_overspent": false
+    }
+  ],
+  "hard_stop_probe": {
+    "trigger": "SOURCE_POLICY_VIOLATION",
+    "new_dispatch_rejected": true,
+    "calls_before": 35,
+    "calls_after": 35,
+    "no_external_call_after_stop": true,
+    "evidence_preserved": true
+  },
+  "runner_records": [
+    {
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 606,
+        "output_tokens": 2955,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 25995,
+      "output": {
+        "summary": "根据给定来源，昨天（2026-09-15）的 AI 动态主要来自 Google：Google 发布 Gemini 3.8 Live 与 Gemini 3.8 Live Extended Thinking；介绍开发者如何用 Gemini 3.8 Live 和 3.5 Transcribe 构建实时语音应用；Google.org 公布 AI for Government Innovation 入选的 15 家组织；并推出 AI for Societal Impact 专题。注意：来源仅限给定 Google 博客文章，未覆盖其他 AI 行业动态，信息可能不完整。",
+        "items": [
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "上周",
+        "start": "2026-09-06T16:00:00+00:00",
+        "end": "2026-09-13T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 132,
+        "output_tokens": 137,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1652,
+      "output": {
+        "summary": "未提供任何来源（sources为空），因此无法收集或总结上周大模型推理优化主题的公开动态。根据要求，不能新增URL或引入给定来源之外的信息。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "exact_five",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": 5,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 613,
+        "output_tokens": 5041,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 23586,
+      "output": {
+        "summary": "基于给定来源共整理5条AI行业动态。注意：若将“昨天”严格理解为同一自然日，并以来源中最新日期2026-09-16为基准，则2026-09-15仅有4条，单日严格不足5条；以下按给定来源全部5条列出（其中1条发布于2026-09-16，4条发布于2026-09-15）。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 610,
+        "output_tokens": 2707,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 13393,
+      "output": {
+        "summary": "Google近期AI动态速览：青少年态度、实时语音、公共服务与AI普惠\n\n近期，Google Blog发布了几条AI相关动态。其一，Google与RXN的研究发现，青少年对AI表现出思考与好奇。其二，开发者可以基于最新音频模型构建实时语音应用，包括Gemini 3.8 Live、Gemini 3.8 Live Extended Thinking和3.5 Transcribe。其三，Gemini 3.8 Live与Gemini 3.8 Live Extended Thinking被介绍为迄今最先进的实时对话模型，专为自然对话打造。其四，Google.org Impact Challenge: AI for Government Innovation公布了15家入选组织，它们正在用AI变革公共服务。其五，Google汇集了“AI for Societal Impact”专题，展示专家和地方领导者如何利用AI突破，确保每个人都能分享AI机遇。\n\n以上内容依据Google Blog原文整理，事实来源为文末所列条目。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 120,
+        "output_tokens": 376,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 2749,
+      "output": {
+        "summary": "你好！我是一个AI助手。当前没有提供任何来源，因此无法基于来源提供信息。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 606,
+        "output_tokens": 5146,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 23773,
+      "output": {
+        "summary": "根据提供的来源，昨天（2026-09-15）的 AI 行业动态共 4 条，主要涉及 Gemini 实时语音模型、公共服务 AI 创新以及 AI 社会影响。2026-09-16 的文章未纳入，因为不属于昨天范围。",
+        "items": [
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "上周",
+        "start": "2026-09-06T16:00:00+00:00",
+        "end": "2026-09-13T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 132,
+        "output_tokens": 81,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1037,
+      "output": {
+        "summary": "未提供任何公开来源，无法收集并输出上周大模型推理优化主题的动态摘要。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "exact_five",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": 5,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 613,
+        "output_tokens": 5669,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 26457,
+      "output": {
+        "summary": "未提供当前日期；按来源中最新日期2026-09-16推断为今天，则昨天为2026-09-15，共筛选到4条AI行业动态，不足5条。若以2026-09-16为昨天则仅1条，同样不足5条。以下按2026-09-15为昨天列出4条。",
+        "items": [
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 610,
+        "output_tokens": 2506,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 11718,
+      "output": {
+        "summary": "AI动态｜Google 近期更新：从青少年 AI 观感到实时语音模型\n\n近期，Google 官方博客集中发布多项 AI 相关动态。9 月 16 日，Google 与 RXN 的研究发现，青少年对 AI 保持思考与好奇。9 月 15 日，Google 推出 Gemini 3.8 Live 和 Gemini 3.8 Live Extended Thinking，称其为迄今最先进的实时对话模型，面向自然对话；同日，开发者可借助 Gemini 3.8 Live、3.8 Live Extended Thinking 和 3.5 Transcribe 构建实时语音应用。公共服务方面，Google.org Impact Challenge: AI for Government Innovation 公布 15 家入选组织，它们正在用 AI 推动公共服务转型。此外，Google 还汇总了“AI for Societal Impact”专题，展示专家与地方领导者如何利用 AI 突破，让更多人共享 AI 机会。以上改写仅依据给定来源，未添加来源外信息；因来源多为标题与摘要，未展开更多细节。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 120,
+        "output_tokens": 138,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1595,
+      "output": {
+        "summary": "这是一条普通聊天消息，没有可供检索或引用的资料来源，因此没有可整理的内容条目。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 606,
+        "output_tokens": 3438,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 16408,
+      "output": {
+        "summary": "基于给定来源，按最新来源日期推断“昨天”为 2026-09-15（周二），筛选出 4 条 AI 相关动态，均来自 Google 官方博客。给定来源仅覆盖 Google 相关发布，未覆盖其他公司或更广泛的 AI 行业事件，因此不能视为完整行业动态；2026-09-16 发布的青少年 AI 观点研究未纳入。",
+        "items": [
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "上周",
+        "start": "2026-09-06T16:00:00+00:00",
+        "end": "2026-09-13T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 132,
+        "output_tokens": 184,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1293,
+      "output": {
+        "summary": "未提供任何来源（sources 为空），无法收集或核实上周大模型推理优化主题的公开动态，也不能生成带来源的摘要。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "exact_five",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": 5,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 613,
+        "output_tokens": 2564,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 12038,
+      "output": {
+        "summary": "以来源中最新日期 2026-09-16 为今日计算，昨天为 2026-09-15；该日 AI 行业动态仅有 4 条，不足严格要求的 5 条，以下为全部可用条目。",
+        "items": [
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 610,
+        "output_tokens": 2131,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 10655,
+      "output": {
+        "summary": "本文根据 Google 官方博客近期发布的 5 条动态整理，聚焦 AI 的产品、研究与社会应用。9 月 15 日至 16 日的更新包括：Google 与 RXN 的研究发现青少年对 AI 保持思考与好奇；Google 发布 Gemini 3.8 Live 和 Gemini 3.8 Live Extended Thinking，称其为迄今最先进的实时对话模型，并介绍开发者如何用 Gemini 3.8 Live、3.8 Live Extended Thinking 与 3.5 Transcribe 构建实时语音应用；Google.org Impact Challenge: AI for Government Innovation 公布 15 家入选组织，推动 AI 变革公共服务；Google 还汇总了“AI for Societal Impact”专题，展示专家与地方领导者借助 AI 突破让更多人共享机会。以上内容仅依据给定来源整理，未补充外部信息；详细事实与出处见下方条目。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 120,
+        "output_tokens": 240,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1697,
+      "output": {
+        "summary": "当前为普通聊天，未提供任何来源，因此不生成条目。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "yesterday_ai",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 4,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 606,
+        "output_tokens": 3845,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 19866,
+      "output": {
+        "summary": "未提供当前日期；按给定来源中的最新发布日期 2026-09-16 作为“今天”推算，“昨天”为 2026-09-15。据此筛选出 4 条该日发布的 AI 相关动态，集中于 Gemini 实时语音模型、开发者工具及 AI 公共服务/社会影响。需要说明：来源仅覆盖 Google 官方博客的少量动态，不能代表完整 AI 行业；2026-09-16 的青少年 AI 研究未纳入昨日范围。",
+        "items": [
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "last_week_topic",
+      "status": "PARTIAL",
+      "resolved_window": {
+        "label": "上周",
+        "start": "2026-09-06T16:00:00+00:00",
+        "end": "2026-09-13T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 132,
+        "output_tokens": 203,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1778,
+      "output": {
+        "summary": "未提供任何来源（sources 为空），无法依据给定来源收集上周大模型推理优化主题的公开动态，因此 items 为空。请补充 sources 后再试。",
+        "items": []
+      }
+    },
+    {
+      "case_id": "exact_five",
+      "status": "PASS",
+      "resolved_window": {
+        "label": "昨天",
+        "start": "2026-09-15T16:00:00+00:00",
+        "end": "2026-09-16T16:00:00+00:00",
+        "timezone": "Asia/Shanghai"
+      },
+      "source_attempts": [
+        {
+          "attempt_id": "attempt-9f00d983afc8cfbb570624e887bb93b2",
+          "action_id": "x04-live-190b314d7aedd806",
+          "source_id": "fixture_official_feed",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:31.823118Z",
+          "finished_at": "2026-09-17T02:33:34.372091Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 12,
+            "downloaded_bytes": 5812
+          }
+        },
+        {
+          "attempt_id": "attempt-1431e3106f110174ce015759f05ec64f",
+          "action_id": "x04-live-2bfe213ac62ab78a",
+          "source_id": "fixture_github_releases",
+          "status": "success",
+          "started_at": "2026-09-17T02:33:34.373018Z",
+          "finished_at": "2026-09-17T02:33:37.466358Z",
+          "returned_count": 10,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 1,
+            "returned_items": 10,
+            "downloaded_bytes": 63760
+          }
+        },
+        {
+          "attempt_id": "attempt-bdc6e67270c2569b8822fa58b0f54224",
+          "action_id": "x04-live-35fa5593abbca0b9",
+          "source_id": "fixture_hacker_news",
+          "status": "truncated",
+          "started_at": "2026-09-17T02:33:37.466525Z",
+          "finished_at": "2026-09-17T02:33:43.675523Z",
+          "returned_count": 12,
+          "filtered_count": 0,
+          "error_code": null,
+          "coverage": "unknown",
+          "cursor": null,
+          "http_status": 200,
+          "rate_limit_remaining": null,
+          "retry_after_seconds": null,
+          "lease_id": "live-acceptance-878cdd689e2018d91e9af6acd5b8b76a",
+          "usage": {
+            "requests": 13,
+            "returned_items": 12,
+            "downloaded_bytes": 9088
+          }
+        }
+      ],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": 5,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 613,
+        "output_tokens": 4705,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 22797,
+      "output": {
+        "summary": "根据给定来源共收集到5条AI行业动态，已严格按来源不新增URL列出。需说明：这些来源发布日期跨2026-09-15（4条）和2026-09-16（1条），若将“昨天”严格限定为其中某一天，则单日不足5条；以下为给定来源中的5条AI相关动态。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "rewrite_wechat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [
+        {
+          "source_id": "fixture_official_feed",
+          "title": "5 things to know about teens' views on AI today",
+          "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+          "published_at": "Wed, 16 Sep 2026 15:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+          "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+          "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+          "published_at": "Tue, 15 Sep 2026 17:00:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "15 organizations transforming public service with AI",
+          "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+          "published_at": "Tue, 15 Sep 2026 16:30:00 +0000"
+        },
+        {
+          "source_id": "fixture_official_feed",
+          "title": "AI for Societal Impact",
+          "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+          "published_at": "Tue, 15 Sep 2026 16:00:00 +0000"
+        }
+      ],
+      "requested_count": null,
+      "delivered_count": 5,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 610,
+        "output_tokens": 1707,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 8330,
+      "output": {
+        "summary": "近期 Google 官方博客集中发布了几条 AI 相关动态：9 月 16 日，一项与 RXN 合作的调研显示，青少年对 AI 既善于思考又充满好奇；9 月 15 日，Google 介绍 Gemini 3.8 Live 与 Gemini 3.8 Live Extended Thinking，称其为目前最先进的实时对话模型，并发布开发者构建实时语音应用的指南，涉及 Gemini 3.8 Live、3.8 Live Extended Thinking 和 3.5 Transcribe；同日，Google.org Impact Challenge: AI for Government Innovation 公布 15 家入选组织；此外还有“AI for Societal Impact”专题，展示专家和地方领导者如何利用 AI 突破，让更多人共享 AI 带来的机会。各条动态的事实来源见下方条目。",
+        "items": [
+          {
+            "title": "5 things to know about teens' views on AI today",
+            "url": "https://blog.google/innovation-and-ai/technology/families/teens-ai-research-findings/",
+            "excerpt": "Findings from our research with RXN show teens are thoughtful and curious about AI."
+          },
+          {
+            "title": "Build real-time voice applications with Gemini 3.8 Live and 3.5 Transcribe",
+            "url": "https://blog.google/innovation-and-ai/technology/developers-tools/build-real-time-voice-applications-gemini-audio/",
+            "excerpt": "A look at how developers can build with our latest audio models, Gemini 3.8 Live, 3.8 Live Extended Thinking, and 3.5 Transcribe."
+          },
+          {
+            "title": "Introducing Gemini 3.8 Live and 3.8 Live Extended Thinking",
+            "url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-8-live-gemini-3-8-live-extended-thinking/",
+            "excerpt": "Gemini 3.8 Live and Gemini 3.8 Live Extended Thinking are our most advanced live dialogue models yet, built for natural conversation."
+          },
+          {
+            "title": "15 organizations transforming public service with AI",
+            "url": "https://blog.google/company-news/outreach-and-initiatives/google-org/ai-government-innovation-recipients/",
+            "excerpt": "Introducing the organizations selected for the Google.org Impact Challenge: AI for Government Innovation."
+          },
+          {
+            "title": "AI for Societal Impact",
+            "url": "https://blog.google/innovation-and-ai/technology/ai/ai-for-societal-impact/",
+            "excerpt": "Explore this collection to see how experts and local leaders are using AI breakthroughs to ensure everyone can share the opportunity of AI."
+          }
+        ]
+      }
+    },
+    {
+      "case_id": "ordinary_chat",
+      "status": "PASS",
+      "resolved_window": null,
+      "source_attempts": [],
+      "sources": [],
+      "requested_count": null,
+      "delivered_count": 0,
+      "citation_coverage": 1.0,
+      "model_usage": {
+        "input_tokens": 120,
+        "output_tokens": 89,
+        "cost_microunits": 0,
+        "cost_observed": false
+      },
+      "latency_ms": 1254,
+      "output": {
+        "summary": "当前没有可用的来源信息，无法据此生成任何条目；这是一次普通聊天请求，因此 items 为空。",
+        "items": []
+      }
+    }
+  ],
+  "execution_mode": "live-single-tenant",
+  "model_id": "deepseek-v4-flash",
+  "approved_budget_microunits": 8000000,
+  "used_cost_microunits": 0,
+  "cost_observed": false,
+  "budget_usage": {
+    "calls": 35,
+    "input_tokens": 8324,
+    "output_tokens": 43862,
+    "bytes": 78660,
+    "cost_microunits": 0,
+    "unknown": false
+  },
+  "production_deployment_performed": false
+}

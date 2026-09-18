@@ -1,0 +1,164 @@
+# Task 6 正式输出物化、来源闭包与 V2 交付差异包
+
+状态：独立复核 FAIL 后修复及离线组合验证完成，待独立重新复核；负责人：Agent 端维护负责人；更新时间：2026-09-17。
+适用范围：免费公开源本地实时研究 Task 6；关联：[实施计划](../../superpowers/plans/2026-09-17-免费公开源本地实时V2研究闭环-实施计划.md)、[Task 5 差异包](Task5-文件级差异包.md)。
+
+## 文件范围与实施前快照
+
+新增 `orchestration/research_v2/materializer.py` 与 `tests/orchestration/research_v2/test_live_materializer.py`。
+修改研究 Graph/state/StageRunner 的输出控制位和空结果出口、V2 研究与运营交付契约、研究 Markdown renderer、运营总 Agent 与研究 Specialist 的字段映射，以及两个受影响的研究测试文件。源码路径均位于 `src/efficiency_platform_agent/`。
+
+原文件完整快照位于 `task6-before/`，命名为路径分隔符替换为双下划线后加 `.snapshot`；两个新增文件原先不存在。
+首轮 `delivery.py`、`output_verifier.py`、`research_v2_adapter.py` 和两个既有能力测试仅保留快照；本次复核修复另修改 `delivery.py`，其余仍未修改。
+没有修改事实库、预算实现、ToolRuntime、网络配额、Provider、Prompt、依赖或来源准入配置。
+
+必要范围扩展及原因：
+
+- `contracts/research_v2.py` 与 `contracts/deliverables.py`：既有契约缺少来源正文范围与摘录追溯字段，新增可选字段；旧包仍默认 unverified，V1 契约不变。
+- `agents/operation/specialists/model_backed_research.py`：RED 证明正式 V2 排名源与条目被固定为 unverified，来源类型固定 public_page，必须消费权威包的显式核验结果。
+- `orchestration/research_v2/{state,graph,stage_runner}.py`：输出生成降级需要显式 `output_degraded`，否则无研究缺口的 fallback 会被判 COMPLETE；已核验 NO_MATCHES 原先跳过输出链，新增确定性空交付出口。
+- `tests/unit/harness/test_research_v2_provider_adapter.py` 和集成测试内 Store：修复 Task 3 后测试替身仍只有二参 get_brief 的接口漂移，增加可选 run_id 并核对 tenant/task/run，不放宽正式端口。
+
+以上扩展已在本次主任务协调中确认；永久非 Git，以快照、此差异包和主进度账本完成审查。
+
+## 实现说明
+
+`LocalLiveResearchOutcomeMaterializer` 同时实现既有 `ResearchStageRunner.run_stage`（只处理 compose/verify/render）与 `ResearchOutcomeMaterializer.materialize`。
+构造参数为 `key/store/brief/binding/deadline_monotonic/cancellation_signal`，Task 7 必须复用同一 Run 的原始注入对象；默认不调用输出模型。
+
+- 读取完整 tenant/user/conversation/run/task/revision key；Brief、Graph digest、policy、lease、budget version、活动事实状态必须匹配。跨身份 key 无法读取当前事实。
+- 所有事件、主张、证据、文档与质量报告 ID 验证唯一性及映射键/实体 ID 一致性。消费 Task 5 的 qualified_events/qualified_claims/qualified_evidence 和 quality 产物，禁止补采或创建研究事实。
+- 逐条复核 EvidenceValidator 的文档 hash、字符范围、原摘录、获取方式与事件成员关系；数字必须出现在引用摘录中，每条主张至少有全文或平台正文支持，摘要不得单独物化为合格事件。质量硬门失败且没有解释缺口时失败关闭，不能只凭空 gap 数组升为 COMPLETE。
+- 复用 DeliveryPackBuilder、OutputVerifier 与 render_markdown。模型不填写引用 URL；URL、document_id、excerpt、content_hash、获取方式、发布时间、来源家族和内容范围从事实表派生。
+- compose 保存确定性草稿，verify 保存对应输出决策，render 保存正式 DeliveryPack。materialize 再次验证当前草稿、决策和事实重建包完全一致，并核对 Graph 的 domain_status/stop_reason；篡改、缺失、重复、未验证输出均拒绝。
+- 可选 draft_generator 只作为原绑定上下文内的候选端口；没有在本任务装配真实输出模型。异常或未通过 verifier 时仅输出确定性简报，并传播 `output_degraded`、PARTIAL、OUTPUT_GENERATION_FAILED，不能宣称 COMPLETE。实际交付文本始终由已验证事实确定性渲染，候选额外措辞不能产生事实。
+- 软预算停止后不调用该可选生成端口；确定性输出不新增预算租约、模型/HTTP 调用或 ToolRuntime。取消、硬截止在读事实及输出核验前后检查，抛出既有取消/超时语义，不映射为成功领域状态。
+- 明确显示原时间窗、要求数量、实际数量、缺口和逐项来源正文范围。Task 5 没有重要性或热度评分事实，limitations 明示展示沿用已核验事件顺序，未生成此类评分；不因编号格式制造评分结论。
+- NO_MATCHES 只有上游已核验完整空计划时才经 compose→verify→render；正式 RSS 空结果的历史覆盖为 unknown，回归仍为 FAILED、delivery=None。
+- 既有 observer 将权威包交给研究 Specialist；rank/item_id/source_refs/Citation.supports_item_ids 保留闭包。新增来源 metadata 投影到标准 CitationV2；仅 output_verified 且引用明确 verified 时，条目及 provenance.verified_source_count 才显示核验结果。旧 V2 包的缺省核验状态仍为 unverified。
+
+## TDD 红绿证据
+
+全部请求、DNS、连接器与模型均为离线边界替身，生产代码没有 Fake/fixture import。
+
+| 用例批次 | RED | GREEN |
+|---|---|---|
+| Materializer 正式模块、隔离、闭包、数字/摘要、输出和终态 | `24 failed in 3.14s`，模块缺失 | 首次实现 `23 passed`，调整未验证输出拒绝的错误码优先级后纳入完整聚焦通过 |
+| 运营排名显式核验状态 | 基线旧 Store 签名先导致空交付；修复测试漂移后有效 RED：`1 failed`，unverified != verified | 后续聚焦与集成全部通过 |
+| 当前草稿被篡改和已验证空结果出口 | `2 failed, 3 passed, 26 deselected in 6.31s` | 纳入完整聚焦通过 |
+| 来源家族 ID 必须来自既有 resolver | `1 failed, 30 deselected in 3.24s` | 纳入完整聚焦通过 |
+| 排序事实限制说明与真实来源类型 | `2 failed in 3.37s` | `2 passed in 2.80s` |
+| hard_gates_passed=false 不得因无 gap 伪造 COMPLETE | `1 failed, 31 deselected in 3.17s` | `2 passed, 30 deselected in 3.46s`（含篡改包回归） |
+
+正式图 5 条要求/3 条实际结果测试贯穿 Task 5 研究阶段和 Task 6 三个输出阶段，仅发生 5 次离线 HTTP，保留原窗与有限补采，最终 PARTIAL、交付 3 条。
+NO_MATCHES 的输出路由单测使用显式已核验空事实；真实组合测试中 RSS unknown 空覆盖保持 FAILED，未冒称为真实来源 NO_MATCHES 验收。
+
+## 本次验证
+
+项目根 PowerShell：
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/orchestration/research_v2/test_live_materializer.py tests/unit/capabilities/research_v2/test_delivery.py tests/unit/capabilities/research_v2/test_output_verifier.py tests/integration/test_operation_deliverable_v2.py tests/api/test_operation_delivery_v2_events.py -q --tb=short
+.venv\Scripts\python.exe -m pytest tests/orchestration/research_v2 tests/unit/capabilities/research_v2 tests/unit/harness/test_research_v2_provider_adapter.py tests/unit/harness/test_research_local_runtime.py tests/integration/research_v2 tests/integration/test_operation_deliverable_v2.py tests/api/test_operation_delivery_v2_events.py tests/architecture -q --tb=short
+.venv\Scripts\python.exe -m ruff check src tests scripts
+.venv\Scripts\python.exe -m mypy src/efficiency_platform_agent
+.venv\Scripts\python.exe -m compileall -q src tests scripts
+```
+
+最终指定聚焦：`71 passed in 31.03s`，退出码 0。
+组合门首次：`361 passed, 9 skipped, 124 subtests passed in 44.59s`；最终补强后：`362 passed, 9 skipped, 124 subtests passed in 47.93s`，退出码 0。
+全仓 Ruff：`All checks passed!`；mypy：`Success: no issues found in 303 source files`；compileall 退出码 0 无输出。
+跳过项是既有集成环境门禁，不代表真实共享 DB/服务/模型验收。
+
+文档写入后 `.venv\Scripts\python.exe -m pytest tests/governance/test_documentation_contract.py -q --tb=short`：`20 passed, 122 subtests passed in 4.48s`，退出码 0；12 个变更源码/测试文件的 `ruff format --check`：`12 files already formatted`。
+
+## 首轮文件 SHA-256（复核修复前）
+
+| 文件（源码前缀省略） | SHA-256 |
+|---|---|
+| `orchestration/research_v2/materializer.py` | `32C0EFDCFE69FB857FB007756412D4A1B12381FA16FD0E4332FD483D758EADD6` |
+| `orchestration/research_v2/graph.py` | `C642F13249ED93D525C6F182E1491CCD4C60479FA273BD2FDE7F213A728C59CD` |
+| `orchestration/research_v2/state.py` | `9DB1807DB977E2A01D94A852209BC3162E1A7F421833BE5F033C6BFFC3D4CE1B` |
+| `orchestration/research_v2/stage_runner.py` | `DFEB1F610FF0174267F096E0990BCFB69F05F91559CCB1EF7AF2E39F3BD75500` |
+| `contracts/research_v2.py` | `419459366827328BEA693686F910541BF0F9789CE2C93B45FC087825A55DCD5B` |
+| `contracts/deliverables.py` | `E5B9115BAE3E2FC4DAFF96126F2E3E42B782B08C211D0C5003E5056A443EB040` |
+| `capabilities/research/v2/renderer.py` | `A15488C1694807796A30D47B0D49C6DB50BDF2C4B403FD0D859ACA1CD228B985` |
+| `agents/operation/operation_agent.py` | `3D89D8E486442A39CE47D6B1A34D47D863FA8FEA8F776789919C8A4ED6517B0D` |
+| `agents/operation/specialists/model_backed_research.py` | `9D7691AEA168F057AA0DC3E559D8A3E4BC7D7DF2E7DD2DBD62DEAB54710CA76D` |
+| `tests/orchestration/research_v2/test_live_materializer.py` | `99FE719C7A4309D2D0482FE26E8B9DC127BBCF3E825B47AFD49A08FA4B47A931` |
+| `tests/integration/test_operation_deliverable_v2.py` | `32AD85A12D7C624039DD4540731733492B03D8797B1BF0C8B9DDD384629FEC4B` |
+| `tests/unit/harness/test_research_v2_provider_adapter.py` | `1665EBBD833A5715E27CD7459730C84BC5C5B9A040DDEEB3A320C6084DE82A3A` |
+
+原快照 hash 可直接对同目录 `task6-before` 文件复核；未创建 Git 元数据。接口替身补充快照的 hash 为 `79D5CBAB3558C03786FCE849F3CDEF147F6860775CBC3449543E07696E795698`。
+
+## 独立复核 FAIL 后修复
+
+复核前快照保存在 `task6-review-before/`；新增 `tests/orchestration/research_v2/test_live_materializer_review.py`。修复只涉及物化器、既有 delivery builder、两个 V2 契约与两处运营映射，没有修改采集、预算、身份或 ToolRuntime 边界。
+
+有效 RED 命令：
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/orchestration/research_v2/test_live_materializer_review.py -q --tb=short
+```
+
+实现前 `6 failed in 11.78s`，实现后同组 `6 passed in 9.86s`。逐项如下：
+
+| 复核问题 | RED 证据 | 修复与 GREEN |
+|---|---|---|
+| P1 未核验 HTML 标题含“99 tools / defeated”却成为 verified 排名事实 | 正式解析 HTML 的 `<title>` 与正文不一致，正式全链交付仍带不支持事实 | 事件标题只取已核验 claim；过长 claim 使用无事实的中性标签，不截断制造句义。引用标题固定中性标签，原始网页标题只留 Run facts，不继承正文核验标签；正式 StageRunner→Materializer→OperationAgent 回归通过 |
+| P2 完整正文污染摘要、排序事实声称 importance | lead、selection_summary 和集合 summary 含整个 `# 研究结果` 和引用 URL | DeliveryPack 新增可选短 `summary` 和 `ranking_basis=evidence_order`；正式运营映射只取短摘要，完整正文留 content。标准排名基准增加 evidence_order，正式来源限制进入交付 warnings；旧包缺省仍保留兼容回退，不因默认值变 verified |
+| P2 NO_MATCHES 掩盖输出失败 | stop_reason=OUTPUT_DEGRADED，但 display_status=succeeded | 保留 NO_MATCHES 领域事实；展示降级、Operation PARTIAL、summary.complete=false / degraded=true，并显式 RESEARCH_OUTPUT_DEGRADED。已知完整空计划为输出边界事实测试，未伪造 RSS 历史覆盖 |
+| P2 可选生成器无限等待 | 硬截止与取消两项测试均仍 pending | 同父预算上下文创建生成任务，与原取消信号和绝对单调截止竞速；终止取消任务，禁止迟到结果写回，也不无限等待吞掉取消的回调。两项均在限定时间退出且无交付落库 |
+| 数量契约 exact=1 却接受 3 | 正式图获得三项合格事实仍物化三项 | exact / at_most 超过冻结 target 时在物化前稳定拒绝 RESEARCH_OUTPUT_COUNT_EXCEEDED；不静默改写上游质量事实，不产生超额交付 |
+
+两项正式全链探针只使用离线 RSS/HTML、DNS、HTTP 连接器及统一模型边界替身；其余均为真实 StageRunner、解析器、事实库、Graph Service、Materializer、ResearchProviderAdapter、Supervisor 和 OperationAgent。标题探针仅两次离线 HTTP；没有重新访问或重采集。
+
+修复后验证（项目根 PowerShell）：
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/orchestration/research_v2/test_live_materializer.py tests/orchestration/research_v2/test_live_materializer_review.py tests/unit/capabilities/research_v2/test_delivery.py tests/unit/capabilities/research_v2/test_output_verifier.py tests/integration/test_operation_deliverable_v2.py tests/api/test_operation_delivery_v2_events.py -q --tb=short
+.venv\Scripts\python.exe -m pytest tests/orchestration/research_v2 tests/unit/capabilities/research_v2 tests/unit/harness/test_research_v2_provider_adapter.py tests/unit/harness/test_research_local_runtime.py tests/integration/research_v2 tests/integration/test_operation_deliverable_v2.py tests/api/test_operation_delivery_v2_events.py tests/architecture -q --tb=short
+.venv\Scripts\python.exe -m pytest tests/contracts/test_deliverable_v2_contracts.py tests/unit/capabilities/quality/test_deliverable_v2.py -q --tb=short
+.venv\Scripts\python.exe -m ruff check src tests scripts
+.venv\Scripts\python.exe -m mypy src/efficiency_platform_agent
+.venv\Scripts\python.exe -m compileall -q src tests scripts
+```
+
+指定聚焦 `77 passed in 38.86s`；完整组合门 `368 passed, 9 skipped, 124 subtests passed in 53.71s`；契约/展示兼容回归 `34 passed in 0.46s`；全仓 Ruff、mypy 303 源码与 compileall 全部通过。9 项跳过仍受既有环境门禁，不作为真实集成验收。
+
+文档更新后治理门 `20 passed, 122 subtests passed in 3.75s`；所有 14 个 Task 6 变更源码/测试 `ruff format --check` 为 `14 files already formatted`，退出码均为 0。
+
+### 复核修复后 SHA-256
+
+| 文件（源码前缀省略） | SHA-256 |
+|---|---|
+| `orchestration/research_v2/materializer.py` | `E233B2BF204EE24D72F7E2340BE185396BE48BEABDD42F1782ADF6A36CFD88F7` |
+| `contracts/research_v2.py` | `00CAFB9AA21CB1DD5991F79CAEC3CED7D46AE63F163FE99D2826A9F590ADE524` |
+| `contracts/deliverables.py` | `E4B181D3FB39514EA275792EEFB49A08B477D818E42DBBBD08F208C36E30F30D` |
+| `capabilities/research/v2/delivery.py` | `48989D14C7358D8CEDF69B931285209DA1B837572AE429C56C5071AB6ED814B4` |
+| `agents/operation/operation_agent.py` | `63180E2ECF46E41A612C2F0AAE13EEE37CC40B067B13AC46BF394DAA661B2FC8` |
+| `agents/operation/specialists/model_backed_research.py` | `84C253C4E23AFFFBFBABCC3D0379FA04054BB16554B1A5E75D51E740CA927FB4` |
+| `tests/orchestration/research_v2/test_live_materializer_review.py` | `E5EF3E132EFBCF4FCDEAA8224F3E2719A3D4FADE18CDB35D73799F58C62D466A` |
+
+## 第二次复核：信息性排序限制不构成降级
+
+第二次复核发现固定“未生成重要性或热度评分”被写入 `item.warnings`，使原本正常 COMPLETE 的集合经通用 `any(item.warnings)` 规则变为 degraded=true。本轮只改 `materializer.py`、`model_backed_research.py` 和复核测试；修改前四文件快照位于 `task6-warning-before/`。
+
+- RED：正式 StageRunner→Materializer→OperationAgent 探针中 pack=COMPLETE/succeeded、Operation=COMPLETE、summary.complete=true，但 collection.degraded=true；短摘要也没有信息性排序说明。定向结果 `2 failed, 1 passed, 5 deselected in 12.81s`，输出失败对照保持降级。
+- 修复：信息性排序说明仍保留于 `pack.limitations` 与完整正文，同时加入既有短 summary，经 lead / selection_summary / 集合摘要展示。仅真实 `outcome.gaps` 映射为 item warnings，不再把整个 limitations 列表当作失败事实。
+- 通用展示/降级规则、标准契约、来源核验、采集、预算及身份不改。真实 PARTIAL、验证质量 warning 和 OUTPUT_DEGRADED 仍由原规则保持降级，未清空真实错误或降低门禁。
+- GREEN：复核测试 `8 passed in 14.27s`；正常 COMPLETE 明确断言 pack/Operation/summary/degraded 一致、集合与条目 warning 均为空且信息说明可见；新增正式全链输出失败对照为 PARTIAL、OUTPUT_DEGRADED、summary.complete=false、degraded=true，现有 NO_MATCHES 输出降级回归仍通过。
+- 聚焦加契约/展示回归 `113 passed in 45.44s`；完整组合含全部架构 `370 passed, 9 skipped, 124 subtests passed in 59.93s`；文档治理 `20 passed, 122 subtests passed in 3.60s`。全仓 Ruff、mypy 303 源码、compileall 与三文件格式检查通过，退出码均为 0。9 个跳过项仍受既有集成环境门禁，不代表真实集成验收。
+
+本轮 SHA-256：
+
+| 文件（源码前缀省略） | SHA-256 |
+|---|---|
+| `orchestration/research_v2/materializer.py` | `0F8C87C13896DB51DE84B0A06B2F8CB69BDD48657F14866C91B518DE0E8B26FA` |
+| `agents/operation/specialists/model_backed_research.py` | `F68B8FDAAEF9899FC5AA4F9DD2B025CC9F4068D025486DE747E50B2E809E43EB` |
+| `tests/orchestration/research_v2/test_live_materializer_review.py` | `D8A75719D5DFB2C168AB68309328441457A81C08897F2B628A129306C27E4EC2` |
+
+## 交接边界
+
+待主任务进行独立重新复核。Task 7 才负责正式会话组合根，默认使用此物化器的确定性输出，并将同一实例传给 Task 5 的 output_stages 与 Service 的 materializer。
+本任务未读取 `.env`，未执行 Git、真实模型/公网请求、服务启停、UI/Java、数据库/DDL 或部署；不声明 Task 7～9、真实两轮会话或 production 就绪。

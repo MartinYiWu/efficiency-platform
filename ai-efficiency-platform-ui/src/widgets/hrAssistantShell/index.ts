@@ -1,0 +1,1 @@
+export { HrAssistantShell } from './HrAssistantShell';

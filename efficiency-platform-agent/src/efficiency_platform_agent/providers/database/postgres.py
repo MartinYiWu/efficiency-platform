@@ -7,6 +7,8 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from psycopg.types.json import Jsonb
+
 
 class InvalidPostgresSchema(ValueError):
     """目标 Schema 不符合 S7 隔离命名规则。"""
@@ -19,6 +21,7 @@ class PostgresConcurrencyError(RuntimeError):
 
 
 SCHEMA_PATTERN = re.compile(r"^s7_acceptance_[a-f0-9]{8}$")
+AGENT_RUNTIME_SCHEMA_PATTERN = re.compile(r"^agent_runtime(?:_[a-f0-9]{8})?$")
 
 
 def validate_schema(schema: str) -> str:
@@ -26,6 +29,16 @@ def validate_schema(schema: str) -> str:
     if not isinstance(schema, str) or SCHEMA_PATTERN.fullmatch(schema) is None:
         raise InvalidPostgresSchema("Schema 必须匹配 s7_acceptance_[a-f0-9]{8}")
     return schema
+
+
+def validate_agent_owned_schema(schema: str) -> str:
+    """允许 S7 隔离 schema 或正式 Agent Runtime 独立 schema。"""
+
+    if SCHEMA_PATTERN.fullmatch(schema) or AGENT_RUNTIME_SCHEMA_PATTERN.fullmatch(
+        schema
+    ):
+        return schema
+    raise InvalidPostgresSchema("Schema 不属于 Agent 独立命名空间")
 
 
 async def _execute(connection: Any, sql: str, params: tuple[object, ...] = ()) -> Any:
@@ -39,9 +52,15 @@ async def _execute(connection: Any, sql: str, params: tuple[object, ...] = ()) -
 class PostgresProvider:
     """Agent 自有 PostgreSQL Schema 的参数化基础适配器。"""
 
-    def __init__(self, connection: Any, schema: str) -> None:
+    def __init__(
+        self, connection: Any, schema: str, *, allow_runtime_schema: bool = False
+    ) -> None:
         self.connection = connection
-        self.schema = validate_schema(schema)
+        self.schema = (
+            validate_agent_owned_schema(schema)
+            if allow_runtime_schema
+            else validate_schema(schema)
+        )
 
     async def save_run(
         self,
@@ -63,7 +82,7 @@ class PostgresProvider:
             run_id,
             tenant_id,
             request_id,
-            dict(payload),
+            Jsonb(dict(payload)),
             version,
             tenant_id,
         )
@@ -92,7 +111,7 @@ class PostgresProvider:
             "(event_id, run_id, tenant_id, sequence, payload) "
             "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (event_id) DO UPDATE SET "
             "payload = EXCLUDED.payload WHERE tenant_id = %s",
-            (event_id, run_id, tenant_id, sequence, dict(payload), tenant_id),
+            (event_id, run_id, tenant_id, sequence, Jsonb(dict(payload)), tenant_id),
         )
 
     async def list_events(
@@ -144,16 +163,16 @@ class PostgresProvider:
             self.connection,
             f"INSERT INTO {self.schema}.checkpoints "
             "(thread_id, tenant_id, checkpoint_ns, checkpoint_id, state) "
-            "VALUES (%s, %s, %s, %s, %s) ON CONFLICT (thread_id, checkpoint_ns) "
-            "DO UPDATE SET checkpoint_id = EXCLUDED.checkpoint_id, state = EXCLUDED.state "
-            "WHERE tenant_id = %s",
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (tenant_id, thread_id, checkpoint_ns) "
+            "DO UPDATE SET checkpoint_id = EXCLUDED.checkpoint_id, "
+            "state = EXCLUDED.state",
             (
                 thread_id,
                 tenant_id,
                 checkpoint_ns,
                 checkpoint_id,
-                dict(state),
-                tenant_id,
+                Jsonb(dict(state)),
             ),
         )
 
@@ -171,5 +190,6 @@ __all__ = [
     "InvalidPostgresSchema",
     "PostgresConcurrencyError",
     "PostgresProvider",
+    "validate_agent_owned_schema",
     "validate_schema",
 ]

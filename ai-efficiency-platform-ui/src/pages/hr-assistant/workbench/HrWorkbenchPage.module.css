@@ -1,0 +1,308 @@
+.page {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+  color: #0f172a;
+}
+.welcome {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+.pageTitle {
+  margin: 0 0 12px !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+}
+.greeting {
+  margin: 0 0 6px !important;
+  font-size: 18px !important;
+}
+.dateText,
+.todoCopy :global(.ant-typography-secondary) {
+  color: #64748b;
+  font-size: 13px;
+}
+.welcomeActions {
+  display: flex;
+  gap: 12px;
+}
+.quickGrid,
+.metricGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.quickAction {
+  display: flex !important;
+  height: 92px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px !important;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 12px !important;
+}
+.quickAction:hover {
+  border-color: #bfdbfe !important;
+  background: #f8fbff !important;
+}
+.quickIcon {
+  display: inline-grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: #2563eb;
+  font-size: 20px;
+  background: #eff6ff;
+  border-radius: 10px;
+}
+.quickCopy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.quickCopy span:first-child {
+  color: #0f172a;
+  font-weight: 600;
+}
+.quickCopy span:last-child {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.quickArrow {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.metricCard,
+.todosCard,
+.positionsCard,
+.activitiesCard,
+.emptyCard {
+  border-color: #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 6%);
+}
+.metricCard :global(.ant-card-body) {
+  padding: 20px;
+}
+.metricLabel {
+  color: #475569;
+}
+.metricValue,
+.warningValue {
+  margin-top: 6px;
+}
+.metricValue :global(.ant-statistic-content-value) {
+  color: #0f172a;
+  font-size: 32px;
+  font-weight: 700;
+}
+.warningValue :global(.ant-statistic-content-value) {
+  color: #f59e0b;
+  font-size: 32px;
+  font-weight: 700;
+}
+.positiveComparison {
+  color: #16a34a;
+  font-size: 12px;
+}
+.warningComparison {
+  color: #f59e0b;
+  font-size: 12px;
+}
+.contentGrid {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(560px, 1.35fr);
+  align-items: start;
+}
+.activitiesCard {
+  grid-column: 1 / -1;
+}
+
+.positionsCard,
+.tableScroll {
+  min-width: 0;
+}
+.cardTitle {
+  margin: 0 !important;
+  font-size: 16px !important;
+}
+.todoCount {
+  display: inline-grid;
+  min-width: 22px;
+  height: 22px;
+  place-items: center;
+  color: #fff;
+  font-size: 12px;
+  background: #f59e0b;
+  border-radius: 99px;
+}
+.todoList {
+  display: grid;
+  align-content: start;
+}
+.todoItem {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.todoItem:last-child {
+  border-bottom: 0;
+}
+.warningDot,
+.infoDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.warningDot {
+  background: #f59e0b;
+}
+.infoDot {
+  background: #2563eb;
+}
+.todoCopy {
+  display: grid;
+  gap: 4px;
+}
+.todoCopy :global(.ant-typography:last-child) {
+  color: #64748b;
+  font-size: 12px;
+}
+.tableScroll {
+  overflow-x: auto;
+}
+.positionTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.positionTable th {
+  padding: 10px 8px;
+  color: #64748b;
+  font-weight: 500;
+  text-align: left;
+  background: #f8fafc;
+}
+.positionTable td {
+  padding: 12px 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.positionTable td:first-child {
+  color: #0f172a;
+  font-weight: 600;
+}
+.stronglyRecommended {
+  color: #16a34a;
+}
+.recommended {
+  color: #2563eb;
+}
+.reviewSuggested,
+.filteredWarning {
+  color: #f59e0b;
+  font-weight: 600;
+}
+.notRecommended {
+  color: #94a3b8;
+}
+.activityList {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.activityList li {
+  display: grid;
+  grid-template-columns: 54px 38px minmax(0, 1fr);
+  gap: 8px;
+  padding: 10px 0;
+  color: #475569;
+  border-bottom: 1px solid #f1f5f9;
+}
+.activityList li:last-child {
+  border-bottom: 0;
+}
+.activityList time {
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.emptyCard :global(.ant-card-body) {
+  padding: 52px 32px;
+}
+.onboardingSteps {
+  display: grid;
+  max-width: 880px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 28px auto 16px;
+  text-align: left;
+}
+.onboardingSteps div {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+.onboardingSteps span {
+  color: #64748b;
+  font-size: 13px;
+}
+@media (max-width: 1199px) {
+  .quickGrid,
+  .metricGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .contentGrid {
+    grid-template-columns: 1fr;
+  }
+  .activitiesCard {
+    grid-column: auto;
+  }
+}
+@media (max-width: 767px) {
+  .welcome {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .welcomeActions {
+    width: 100%;
+  }
+  .welcomeActions :global(.ant-btn) {
+    flex: 1;
+  }
+  .quickGrid,
+  .metricGrid,
+  .onboardingSteps {
+    grid-template-columns: 1fr;
+  }
+  .quickAction {
+    height: 76px;
+  }
+  .todoItem {
+    grid-template-columns: 8px minmax(0, 1fr);
+  }
+  .todoItem :global(.ant-btn) {
+    grid-column: 2;
+    justify-self: start;
+    padding-left: 0;
+  }
+  .activityList li {
+    grid-template-columns: 48px 34px minmax(0, 1fr);
+  }
+}

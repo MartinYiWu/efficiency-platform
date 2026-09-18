@@ -1,9 +1,24 @@
 """模型 Runtime 的 RED/GREEN 契约测试。"""
 
+import asyncio
+
 import pytest
 
-from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
-from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.capabilities.model.runtime import (
+    ModelBudgetContext,
+    ModelLeaseContext,
+    ModelRuntime,
+)
+from efficiency_platform_agent.core.budget import BudgetGuard, RemainingBudget
+from efficiency_platform_agent.core.budget_execution import (
+    BudgetExecutionBinding,
+    bind_budget_execution,
+)
+from efficiency_platform_agent.core.budget_lease import (
+    BudgetLimits,
+    BudgetScope,
+    InMemoryBudgetLeaseRepository,
+)
 from efficiency_platform_agent.core.diagnostics import DiagnosticRecord
 from efficiency_platform_agent.core.model import ModelDemand, ModelTier
 from efficiency_platform_agent.core.run import (
@@ -36,6 +51,44 @@ def result(text: str) -> ProviderResult:
         ProviderMessage("assistant", text),
         ProviderUsage(2, 3, 0, 0, 5),
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_uses_task_local_live_acceptance_lease_when_not_explicit() -> None:
+    registry = ModelProviderRegistry()
+    registry.register(
+        "fake_strong", FakeModelProvider("fake_strong", [result("bound")])
+    )
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=2,
+            max_bytes=0,
+            max_cost_microunits=100,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "acceptance-1", "live_acceptance", "all")
+    binding = BudgetExecutionBinding(
+        repository,
+        scope,
+        "lease-live-1",
+        "a" * 64,
+    )
+
+    with bind_budget_execution(binding):
+        execution = await ModelRuntime(ModelPolicyRouter(), registry).complete(
+            ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+            request(),
+            remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+        )
+
+    snapshot = await repository.snapshot(scope)
+    assert execution.result.message is not None
+    assert execution.result.message.content == "bound"
+    assert snapshot.used.calls == 1
+    assert snapshot.used.cost_microunits == 5
+    assert binding.version == snapshot.version
 
 
 class _DiagnosticRecorder:
@@ -76,6 +129,21 @@ class _ExplodingStreamingProvider:
         if False:
             yield ProviderStreamChunk()
         raise RuntimeError("不得进入诊断日志的异常正文")
+
+
+class _TerminalCompletingProvider(FakeModelProvider):
+    def __init__(
+        self,
+        repository: InMemoryBudgetLeaseRepository,
+        scope: BudgetScope,
+    ) -> None:
+        super().__init__("fake_strong", [result("late")])
+        self._repository = repository
+        self._scope = scope
+
+    async def complete(self, request: ProviderRequest) -> ProviderResult:
+        await self._repository.mark_scope_terminal(self._scope, "cancelled")
+        return await super().complete(request)
 
 
 @pytest.mark.asyncio
@@ -231,8 +299,7 @@ async def test_stream_complete_records_provider_resolution_failure() -> None:
     assert execution.result.error is not None
     assert execution.result.error.code == "PROVIDER_FAILURE"
     assert [record.event_name for record in recorder.records] == [
-        "model_invocation_started",
-        "model_invocation_failed",
+        "model_invocation_failed"
     ]
     assert recorder.records[-1].error_type == "KeyError"
 
@@ -365,3 +432,257 @@ async def test_iteration_budget_is_consumed_before_a_second_candidate_without_gu
     assert execution.result.error.code == "BUDGET_EXHAUSTED"
     assert len(execution.attempts) == 1
     assert balanced._index == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_model_calls_keep_budget_contexts_isolated() -> None:
+    registry = ModelProviderRegistry()
+    registry.register(
+        "fake_strong",
+        FakeModelProvider("fake_strong", [result("one"), result("two")]),
+    )
+    runtime = ModelRuntime(ModelPolicyRouter(), registry, clock=lambda: 1_001)
+    budget = ExecutionBudget(2, 0, 100, 100, 10_000, 100)
+    first_guard = BudgetGuard()
+    second_guard = BudgetGuard()
+    first_context = ModelBudgetContext(
+        first_guard,
+        budget,
+        first_guard.start(budget, now_epoch_ms=1_000),
+    )
+    second_context = ModelBudgetContext(
+        second_guard,
+        budget,
+        second_guard.start(budget, now_epoch_ms=1_000),
+    )
+    model_demand = ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10)
+
+    async def invoke(context: ModelBudgetContext):
+        return await runtime.complete(
+            model_demand,
+            request(),
+            remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+            budget_context=context,
+        )
+
+    await asyncio.gather(invoke(first_context), invoke(second_context))
+    assert first_context.state.consumed.iterations == 1
+    assert second_context.state.consumed.iterations == 1
+    assert first_context.state.consumed.input_tokens == 2
+    assert second_context.state.consumed.input_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_parent_lease_rejection_prevents_model_dispatch() -> None:
+    registry = ModelProviderRegistry()
+    provider = FakeModelProvider("fake_strong", [result("must-not-run")])
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=0, max_bytes=0, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    execution = await ModelRuntime(ModelPolicyRouter(), registry).complete(
+        ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+        lease_context=ModelLeaseContext(repository, scope, "model-call", 0),
+    )
+    assert execution.result.error is not None
+    assert execution.result.error.code == "BUDGET_EXHAUSTED"
+    assert provider._index == 0
+    assert repository.dispatched_invocation_count == 0
+
+
+@pytest.mark.asyncio
+async def test_successful_model_attempt_uses_parent_lease_once() -> None:
+    registry = ModelProviderRegistry()
+    provider = FakeModelProvider("fake_strong", [result("ok")])
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=100,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    lease_context = ModelLeaseContext(repository, scope, "model-call", 0)
+    execution = await ModelRuntime(ModelPolicyRouter(), registry).complete(
+        ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+        lease_context=lease_context,
+    )
+    snapshot = await repository.snapshot(scope)
+    assert execution.result.message is not None
+    assert snapshot.used.calls == 1
+    assert snapshot.used.input_tokens == 2
+    assert snapshot.used.output_tokens == 3
+    assert snapshot.used.cost_microunits == 5
+    assert snapshot.reserved.calls == 0
+    assert lease_context.version == snapshot.version
+
+
+@pytest.mark.asyncio
+async def test_model_lease_is_the_only_budget_path() -> None:
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", FakeModelProvider("fake_strong", [result("ok")]))
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=1, max_bytes=0, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    budget = ExecutionBudget(2, 0, 100, 100, 10_000, 100)
+    guard = BudgetGuard()
+    context = ModelBudgetContext(
+        guard,
+        budget,
+        guard.start(budget, now_epoch_ms=1_000),
+    )
+    with pytest.raises(ValueError, match="唯一预算计账路径"):
+        await ModelRuntime(ModelPolicyRouter(), registry).complete(
+            ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+            request(),
+            remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+            budget_context=context,
+            lease_context=ModelLeaseContext(repository, scope, "model-call", 0),
+        )
+
+
+@pytest.mark.asyncio
+async def test_late_model_success_is_audit_only_and_not_delivered() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=100,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    registry = ModelProviderRegistry()
+    registry.register(
+        "fake_strong", _TerminalCompletingProvider(repository, scope)
+    )
+    execution = await ModelRuntime(ModelPolicyRouter(), registry).complete(
+        ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+        lease_context=ModelLeaseContext(repository, scope, "model-call", 0),
+    )
+    assert execution.result.message is None
+    assert execution.result.error is not None
+    assert execution.result.error.code == "CANCELLED"
+    assert execution.usage.output_tokens == 3
+    assert repository.audit_records[-1].delivery_allowed is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_parent_model_leases_retry_fresh_cas_version() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=2,
+            max_bytes=0,
+            max_cost_microunits=200,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    registry = ModelProviderRegistry()
+    provider = FakeModelProvider("fake_strong", [result("one"), result("two")])
+    registry.register("fake_strong", provider)
+    runtime = ModelRuntime(ModelPolicyRouter(), registry)
+    model_demand = ModelDemand(
+        "s2.model/1", ModelTier.STRONG, False, False, 2, 10
+    )
+
+    async def invoke(prefix: str):
+        return await runtime.complete(
+            model_demand,
+            request(),
+            remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+            lease_context=ModelLeaseContext(repository, scope, prefix, 0),
+        )
+
+    first, second = await asyncio.gather(invoke("first"), invoke("second"))
+    snapshot = await repository.snapshot(scope)
+    assert first.result.error is None
+    assert second.result.error is None
+    assert provider._index == 2
+    assert snapshot.used.calls == 2
+    assert snapshot.reserved.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_constructor_budget_accumulates_across_model_calls() -> None:
+    registry = ModelProviderRegistry()
+    provider = FakeModelProvider("fake_strong", [result("one"), result("must-not-run")])
+    registry.register("fake_strong", provider)
+    budget = ExecutionBudget(1, 0, 100, 100, 10_000, 100)
+    guard = BudgetGuard()
+    runtime = ModelRuntime(
+        ModelPolicyRouter(),
+        registry,
+        budget_guard=guard,
+        budget=budget,
+        budget_state=guard.start(budget, now_epoch_ms=1_000),
+        clock=lambda: 1_001,
+    )
+    model_demand = ModelDemand(
+        "s2.model/1", ModelTier.STRONG, False, False, 2, 10
+    )
+
+    first = await runtime.complete(
+        model_demand,
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+    )
+    second = await runtime.complete(
+        model_demand,
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+    )
+    assert first.result.error is None
+    assert second.result.error is not None
+    assert second.result.error.code == "BUDGET_EXHAUSTED"
+    assert provider._index == 1
+    assert runtime.budget_state is not None
+    assert runtime.budget_state.consumed.iterations == 1
+
+
+@pytest.mark.asyncio
+async def test_model_overrun_error_preserves_observed_usage() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=0,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", FakeModelProvider("fake_strong", [result("late")]))
+    execution = await ModelRuntime(ModelPolicyRouter(), registry).complete(
+        ModelDemand("s2.model/1", ModelTier.STRONG, False, False, 2, 10),
+        request(),
+        remaining_budget=RemainingBudget(2, 0, 100, 100, 100, 1_000),
+        lease_context=ModelLeaseContext(
+            repository,
+            scope,
+            "model-overrun",
+            0,
+            reserve_cost_microunits=0,
+        ),
+    )
+    snapshot = await repository.snapshot(scope)
+    assert execution.result.error is not None
+    assert execution.result.error.code == "BUDGET_EXHAUSTED"
+    assert execution.result.usage.cost_microunits == 5
+    assert execution.usage.cost_microunits == 5
+    assert snapshot.used.cost_microunits == 5
+    assert repository.audit_records[-1].actual.cost_microunits == 5

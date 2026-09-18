@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
+from efficiency_platform_agent.agents.operation.contracts.deliverables import (
+    QualityStatus,
+)
 from efficiency_platform_agent.agents.operation.execution import (
     OperationExecution,
     OperationUsage,
@@ -31,10 +35,19 @@ from efficiency_platform_agent.agents.operation.specialists.model_backed import 
 from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
     DeliverableAssembler,
 )
+from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
+    assemble_set_v2,
+)
 from efficiency_platform_agent.capabilities.research.contracts import (
     ResearchProviderPort,
 )
-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV1
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV1,
+    DeliverableSetV2,
+    DeliveryProvenanceV2,
+    DeliverySummaryV2,
+    WarningV2,
+)
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
 
 
@@ -48,16 +61,34 @@ class OperationAgent:
         ],
         quality_gate: ScenarioQualityGate | None = None,
         research_provider: ResearchProviderPort | None = None,
+        deliverable_set_contract_version: str = "deliverable-set/1",
+        governed_research_v2: bool = False,
     ):
+        if deliverable_set_contract_version not in {
+            "deliverable-set/1",
+            "deliverable-set/2",
+        }:
+            raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
+        self._deliverable_set_contract_version = deliverable_set_contract_version
+        self._governed_research_v2 = governed_research_v2
         self.supervisor_factory = supervisor_factory
         self.research_provider = research_provider
         self.scenarios = InMemoryScenarioPackRegistry(build_s6_manifests())
         self.assembler = DeliverableAssembler()
-        self.quality_gate = quality_gate or RuntimeScenarioQualityGate()
+        self.quality_gate = quality_gate or RuntimeScenarioQualityGate(
+            "deliverable/2"
+            if deliverable_set_contract_version == "deliverable-set/2"
+            else "deliverable/1"
+        )
+
+    @property
+    def deliverable_set_contract_version(self) -> str:
+        """组合根冻结的版本，不允许执行过程中切换。"""
+        return self._deliverable_set_contract_version
 
     async def handle(
         self, submission: ScenarioSubmission, *, run_id: str | None = None
-    ) -> DeliverableSetV1:
+    ) -> DeliverableSetV1 | DeliverableSetV2:
         """兼容仅消费成品集合的调用方，生命周期仍由外层 Graph 管理。"""
         result = await self.execute(submission, run_id=run_id)
         if result.deliverables is None:
@@ -69,10 +100,50 @@ class OperationAgent:
     ) -> OperationExecution:
         """执行一次场景，所有暂态依赖和用量均按当前 Run 隔离。"""
         usage = OperationUsage()
-        supervisor = self.supervisor_factory(run_id, usage)
+        if (
+            self.deliverable_set_contract_version == "deliverable-set/2"
+            and (
+                submission.task_spec.requires_research
+                or submission.scenario_id == "industry_digest"
+            )
+            and not submission.task_spec.requires_user_input
+            and not self._governed_research_v2
+        ):
+            return OperationExecution(
+                None, CompletionStatus.FAILED, usage.snapshot(), "RESEARCH_UNAVAILABLE"
+            )
+        resolved_run_id = run_id or submission.submission_id
+        supervisor = self.supervisor_factory(resolved_run_id, usage)
         result = await ScenarioPackService(
             self.scenarios, supervisor, self.quality_gate
         ).run(submission)
+        research_key = (submission.task_spec.tenant_id, submission.task_spec.task_id)
+        facts = usage.research_results.get(research_key)
+        # 空结果只可由当前研究请求和 Run 的可信领域终态恢复，warning 没有授权能力。
+        no_matches = (
+            self.deliverable_set_contract_version == "deliverable-set/2"
+            and self._governed_research_v2
+            and result.scenario_id == "industry_digest"
+            and result.deliverable_bundle is None
+            and result.error_code == "SCENARIO_BUNDLE_INCOMPLETE"
+            and facts is not None
+            and usage.research_request_ids.get(research_key)
+            == f"research-{submission.task_spec.task_id}"
+            and facts[0].trusted_context.run_id == resolved_run_id
+            and facts[0].trusted_context.tenant_id == submission.task_spec.tenant_id
+            and facts[0].trusted_context.task_id == submission.task_spec.task_id
+            and facts[1].outcome == "NO_MATCHES"
+            and not facts[1].usable_event_ids
+            and facts[1].delivery is not None
+            and facts[1].delivery.outcome == "NO_MATCHES"
+            and facts[1].delivery.brief_digest == facts[0].canonical_digest()
+            and facts[1].delivery.delivered_event_count == 0
+            and not facts[1].delivery.events
+        )
+        if no_matches:
+            result = replace(
+                result, completion_status=CompletionStatus.COMPLETE, error_code=None
+            )
         mapping = (
             {
                 check_id: result.quality_report.report_id
@@ -102,9 +173,8 @@ class OperationAgent:
                 mapping,
             )
         if (
-            result.deliverable_bundle is None
-            or result.completion_status is CompletionStatus.FAILED
-        ):
+            result.deliverable_bundle is None and not no_matches
+        ) or result.completion_status is CompletionStatus.FAILED:
             return OperationExecution(
                 None,
                 result.completion_status,
@@ -113,6 +183,119 @@ class OperationAgent:
                 result,
                 mapping,
             )
+        if self.deliverable_set_contract_version == "deliverable-set/2":
+            status = result.completion_status
+            warnings = []
+            if result.quality_report and result.quality_report.final_status in {
+                QualityStatus.WARNING,
+                QualityStatus.UNKNOWN,
+            }:
+                warnings.append(
+                    WarningV2(
+                        code="QUALITY_REPORT_WARNING",
+                        message="场景质量检查存在待确认项。",
+                    )
+                )
+            provenance = None
+            revision = 0
+            payloads = (
+                [plain(item.payload) for item in result.deliverable_bundle.deliverables]
+                if result.deliverable_bundle
+                else []
+            )
+            message = f"已生成 {len(payloads)} 份独立交付物。"
+            if result.missing_scope:
+                message += "未完成：" + "、".join(result.missing_scope) + "。"
+                warnings.append(
+                    WarningV2(code="SPECIALIST_PARTIAL_FAILURE", message=message)
+                )
+            if facts is not None:
+                brief, outcome = facts
+                delivery = outcome.delivery
+                if outcome.outcome == "FAILED" or delivery is None:
+                    return OperationExecution(
+                        None,
+                        CompletionStatus.FAILED,
+                        usage.snapshot(),
+                        "RESEARCH_UNAVAILABLE",
+                        result,
+                        mapping,
+                    )
+                revision = brief.intent_revision
+                message = delivery.summary or delivery.content
+                urls = {
+                    citation.url
+                    for event in delivery.events
+                    for citation in event.citations
+                }
+                retained = len(delivery.events)
+                # 研究端口仅暴露已交付事件，以下计数只描述该受控集合，不猜测采集前数量。
+                provenance = DeliveryProvenanceV2(
+                    source_count=len(urls),
+                    verified_source_count=len(
+                        {
+                            citation.url
+                            for event in delivery.events
+                            for citation in event.citations
+                            if delivery.output_verified
+                            and citation.verification_status == "verified"
+                        }
+                    ),
+                    candidate_count=retained,
+                    merged_event_count=retained,
+                    retained_count=retained,
+                    eliminated_count=0,
+                    collection_window_start=brief.time_window.start,
+                    collection_window_end=brief.time_window.end,
+                    ranking_basis=delivery.ranking_basis or brief.ranking_mode,
+                )
+                if outcome.outcome == "PARTIAL":
+                    status = CompletionStatus.PARTIAL
+                    warnings.append(
+                        WarningV2(
+                            code="RESEARCH_TARGET_NOT_REACHED",
+                            message=(
+                                "；".join(gap.detail for gap in outcome.gaps)
+                                or f"要求 {brief.count_policy.target} 条，已接纳 {retained} 条；停止原因：{outcome.stop_reason}"
+                            )[:1000],
+                        )
+                    )
+                if delivery.display_status == "degraded_succeeded":
+                    status = CompletionStatus.PARTIAL
+                    if outcome.stop_reason == "OUTPUT_DEGRADED":
+                        warnings.append(
+                            WarningV2(
+                                code="RESEARCH_OUTPUT_DEGRADED",
+                                message="输出生成降级；研究领域结果保持不变，交付未完整完成。",
+                            )
+                        )
+            value = assemble_set_v2(
+                DeliverableSetV2(
+                    run_id=run_id or submission.submission_id,
+                    intent_revision=revision,
+                    summary=DeliverySummaryV2(
+                        message=message,
+                        result_count=(
+                            provenance.retained_count
+                            if facts is not None and provenance
+                            else len(payloads)
+                        ),
+                        complete=status is CompletionStatus.COMPLETE,
+                    ),
+                    deliverables=payloads,
+                    provenance=provenance,
+                    degraded=status is CompletionStatus.PARTIAL,
+                    warnings=warnings,
+                )
+            )
+            return OperationExecution(
+                value,
+                status,
+                usage.snapshot(),
+                scenario_result=result,
+                quality_check_report_ids=mapping,
+            )
+        assert result.deliverable_bundle is not None
         deliverables = self.assembler.assemble(
             [plain(item.payload) for item in result.deliverable_bundle.deliverables],
             missing_scope=result.missing_scope,

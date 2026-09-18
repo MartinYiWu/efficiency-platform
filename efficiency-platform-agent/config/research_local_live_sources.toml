@@ -1,0 +1,203 @@
+# 本地实时来源；旧 fixture 证据不改写。全部关闭，等待历史/内容准入补齐。
+config_version = "local-live-sources/1"
+
+[[sources]]
+source_id = "google_blog_rss"
+adapter_id = "rss_atom"
+config_version = "local-live-sources/1"
+roles = ["primary", "discovery"]
+topics = ["technology", "AI"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "google"
+ownership_group = "google"
+allowed_hosts = ["blog.google"]
+access_mode = "rss"
+history_mode = "latest_only"
+pagination = false
+enabled = false
+[sources.rate_policy]
+requests = 1
+period_seconds = 3
+concurrency = 1
+[sources.content_policy]
+storage_mode = "excerpt_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "仅登记 RSS 元数据、URL 和短摘录；文章正文读取与全文保存均未批准；历史覆盖未验证。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://blog.google/feed/"
+verified_at = 2026-09-17T01:50:26Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-google-blog-rss-20260917"
+status = "VERIFIED"
+last_verified_at = 2026-09-17T01:50:26Z
+approved_by = "existing-x04-limited-admission"
+intended_uses = ["research"]
+schema_verified = true
+history_verified = false
+permission_verified = true
+reason_codes = ["EXCERPT_ONLY", "ARTICLE_BODY_NOT_APPROVED", "HISTORY_UNVERIFIED"]
+
+[[sources]]
+source_id = "langgraph_releases_atom"
+adapter_id = "rss_atom"
+config_version = "local-live-sources/1"
+roles = ["primary", "discovery"]
+topics = ["AI", "software_release"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "langchain-ai/langgraph"
+ownership_group = "langchain"
+allowed_hosts = ["github.com"]
+access_mode = "atom"
+history_mode = "latest_only"
+pagination = false
+enabled = false
+[sources.rate_policy]
+requests = 1
+period_seconds = 3
+concurrency = 1
+[sources.content_policy]
+storage_mode = "excerpt_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "仅登记仓库 Release 元数据、URL、短摘录；正文与资产许可未核验；发布者声明不证明软件效果。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api"
+verified_at = 2026-09-17T01:50:26Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-langgraph-releases-20260917"
+status = "VERIFIED"
+last_verified_at = 2026-09-17T01:50:26Z
+approved_by = "existing-x04-limited-admission"
+intended_uses = ["research"]
+schema_verified = true
+history_verified = false
+permission_verified = true
+reason_codes = ["EXCERPT_ONLY", "RELEASE_BODY_NOT_APPROVED", "HISTORY_UNVERIFIED"]
+
+[[sources]]
+source_id = "hacker_news_api"
+adapter_id = "hacker_news"
+config_version = "local-live-sources/1"
+roles = ["discovery", "heat"]
+topics = ["technology", "AI"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "hacker_news"
+ownership_group = "ycombinator"
+allowed_hosts = ["hacker-news.firebaseio.com"]
+access_mode = "api"
+history_mode = "latest_only"
+pagination = false
+enabled = false
+[sources.rate_policy]
+requests = 1
+period_seconds = 1
+concurrency = 1
+[sources.content_policy]
+storage_mode = "metadata_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "仅条目 ID、时间、热度、标题和规范 URL；用户正文/评论及第三方文章正文未准入；热度不证明事实。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://github.com/HackerNews/API"
+verified_at = 2026-09-17T01:50:26Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-hacker-news-api-20260917"
+status = "VERIFIED"
+last_verified_at = 2026-09-17T01:50:26Z
+approved_by = "existing-x04-limited-admission"
+intended_uses = ["research"]
+schema_verified = true
+history_verified = false
+permission_verified = true
+reason_codes = ["METADATA_ONLY", "PLATFORM_TEXT_NOT_APPROVED", "HISTORY_UNVERIFIED"]
+
+[[sources]]
+source_id = "arxiv_api"
+adapter_id = "arxiv"
+config_version = "local-live-sources/1"
+roles = ["primary", "discovery"]
+topics = ["AI", "research"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "arxiv"
+ownership_group = "arxiv"
+allowed_hosts = ["export.arxiv.org"]
+access_mode = "api"
+history_mode = "unknown"
+pagination = true
+enabled = false
+[sources.rate_policy]
+requests = 1
+period_seconds = 3
+concurrency = 1
+[sources.content_policy]
+storage_mode = "excerpt_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "候选元数据及摘要；摘要不是全文，PDF/源码须另行逐篇许可核验；端点未探测。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://info.arxiv.org/help/api/tou.html"
+verified_at = 2026-09-17T13:00:00Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-arxiv-api-pending-20260917"
+status = "UNVERIFIED"
+intended_uses = ["research"]
+schema_verified = false
+history_verified = false
+permission_verified = false
+reason_codes = ["ENDPOINT_UNPROBED", "ABSTRACT_ONLY", "HISTORY_UNVERIFIED"]
+
+[[sources]]
+source_id = "gdelt_doc_api"
+adapter_id = "gdelt"
+config_version = "local-live-sources/1"
+roles = ["discovery"]
+topics = ["news"]
+languages = ["en", "zh"]
+regions = ["global"]
+publisher_id = "gdelt"
+ownership_group = "gdelt"
+allowed_hosts = ["api.gdeltproject.org"]
+access_mode = "api"
+history_mode = "unknown"
+pagination = false
+enabled = false
+[sources.rate_policy]
+requests = 1
+period_seconds = 5
+concurrency = 1
+[sources.content_policy]
+storage_mode = "metadata_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "候选 GDELT 元数据与发现 URL，须归属 GDELT；不授权第三方主机或原文；端点未探测。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://www.gdeltproject.org/about.html"
+verified_at = 2026-09-17T13:00:00Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-gdelt-doc-pending-20260917"
+status = "UNVERIFIED"
+intended_uses = ["research"]
+schema_verified = false
+history_verified = false
+permission_verified = false
+reason_codes = ["ENDPOINT_UNPROBED", "METADATA_ONLY", "HISTORY_UNVERIFIED"]

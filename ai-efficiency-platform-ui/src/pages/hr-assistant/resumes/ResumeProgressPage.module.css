@@ -1,0 +1,251 @@
+.page {
+  display: grid;
+  gap: 14px;
+  color: #334155;
+}
+
+.tableWrap {
+  min-width: 980px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+}
+.tableRow {
+  display: grid;
+  grid-template-columns: 2.1fr 0.9fr 1.1fr 0.65fr 0.75fr 1.2fr 0.55fr 1.25fr;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+.tableRow:first-child {
+  min-height: 36px;
+  color: #475569;
+  background: #f8fafc;
+}
+.tableRow:last-child {
+  border-bottom: 0;
+}
+.tableRow > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+.header h1 {
+  margin: 0 !important;
+  font-size: 25px !important;
+}
+.header > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.progressCard {
+  display: grid;
+  grid-template-columns: 2.2fr repeat(5, 1fr);
+  padding: 22px 26px;
+  background: linear-gradient(112deg, #eef6ff, #f7f4ff);
+  border: 1px solid #bfd4ff;
+  border-radius: 8px;
+}
+.completedCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 26px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+}
+.completedCard > :global(.anticon) {
+  font-size: 38px;
+  color: #16a34a;
+}
+.completedCard h2 {
+  margin: 0 0 4px !important;
+  color: #166534;
+}
+.completedCard > div:nth-child(2) {
+  flex: 1;
+}
+.completedCard > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.mainProgress {
+  display: grid;
+  gap: 8px;
+  padding-right: 28px;
+}
+.mainProgress strong {
+  font-size: 42px;
+  color: #1677ff;
+}
+.mainProgress small {
+  font-size: 15px;
+  color: #334155;
+}
+.mainProgress span {
+  color: #64748b;
+}
+.stat {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  border-left: 1px solid #d5deef;
+}
+.stat b {
+  font-size: 26px;
+}
+.log {
+  padding: 14px 16px;
+  background: #1e293b;
+  color: #e2e8f0;
+  border-radius: 8px;
+  font-family: Consolas, monospace;
+}
+.log > div {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #475569;
+}
+.log p {
+  margin: 5px 0;
+  font-size: 13px;
+}
+.log time {
+  display: inline-block;
+  width: 74px;
+  color: #94a3b8;
+}
+.details {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+.detailsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.details h2 {
+  margin: 0 !important;
+  font-size: 18px !important;
+}
+.file {
+  white-space: nowrap;
+}
+.file :global(.anticon) {
+  margin-right: 8px;
+  color: #ef4444;
+}
+.statusDone {
+  color: #16a34a;
+}
+.statusConfirm {
+  color: #f59e0b;
+}
+.statusWorking {
+  color: #1677ff;
+}
+.statusFailed {
+  color: #ef4444;
+}
+.statusWaiting {
+  color: #64748b;
+}
+.confirmBar,
+.failBar,
+.mergeBar {
+  padding: 9px 14px;
+  border-radius: 5px;
+}
+.tableDetail {
+  margin: 0 8px 4px;
+}
+.confirmBar {
+  color: #d97706;
+  background: #fff7ed;
+}
+.failBar {
+  color: #dc2626;
+  background: #fef2f2;
+}
+.mergeBar {
+  color: #2563eb;
+  background: #eff6ff;
+}
+footer {
+  padding: 14px 16px;
+  color: #64748b;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+}
+@media (max-width: 1280px) {
+  .progressCard {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .mainProgress {
+    grid-column: span 3;
+    padding-right: 0;
+  }
+  .stat {
+    border-left: 0;
+  }
+  .details {
+    overflow-x: auto;
+  }
+}
+@media (max-width: 767px) {
+  .header,
+  .detailsHead {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .header > div:last-child {
+    flex-wrap: wrap;
+  }
+  .completedCard {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .progressCard {
+    grid-template-columns: repeat(2, 1fr);
+    padding: 18px;
+  }
+  .mainProgress {
+    grid-column: span 2;
+  }
+  .log {
+    overflow: auto;
+  }
+  .log p {
+    min-width: 560px;
+  }
+  .detailsHead :global(.ant-segmented) {
+    overflow: auto;
+  }
+  .details :global(.ant-table) {
+    min-width: 780px;
+  }
+}

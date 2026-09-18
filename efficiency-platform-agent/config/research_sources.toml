@@ -1,0 +1,42 @@
+# 研究来源配置版本；这里只声明候选，不构成真实来源准入。
+config_version = "research-sources/3-official-materials"
+
+[[sources]]
+# Google Blog 官方 RSS；2026-09-17 经授权只读探测通过。
+source_id = "fixture_official_feed"
+adapter_id = "rss_atom"
+enabled = true
+cost_mode = "free"
+admission_status = "VERIFIED"
+
+[[sources]]
+# arXiv 元数据/摘要候选；官方材料确认免费与频率规则，未做端点实测，保持关闭。
+source_id = "fixture_arxiv"
+adapter_id = "arxiv"
+enabled = false
+cost_mode = "free"
+admission_status = "UNVERIFIED"
+
+[[sources]]
+# GDELT URL 发现候选；官方材料确认数据免费，第三方正文不在授权内，保持关闭。
+source_id = "fixture_gdelt"
+adapter_id = "gdelt"
+enabled = false
+cost_mode = "free"
+admission_status = "UNVERIFIED"
+
+[[sources]]
+# GitHub Releases；登记仓库端点经授权只读探测通过，仍受匿名配额硬限制。
+source_id = "fixture_github_releases"
+adapter_id = "rss_atom"
+enabled = true
+cost_mode = "free"
+admission_status = "VERIFIED"
+
+[[sources]]
+# Hacker News 发现入口；2026-09-17 经授权只读探测通过。
+source_id = "fixture_hacker_news"
+adapter_id = "hacker_news"
+enabled = true
+cost_mode = "free"
+admission_status = "VERIFIED"

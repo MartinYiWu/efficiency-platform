@@ -1,13 +1,28 @@
 """运营主链真实组件的离线集成，模型边界使用明确的固定替身。"""
 
 import json
+from contextlib import nullcontext
 from dataclasses import replace
+from importlib import import_module
+from importlib.util import find_spec
+from types import SimpleNamespace
 
 import pytest
 
+from efficiency_platform_agent.agents.operation.contracts.profiles import (
+    ChannelProfile,
+    ProfileFact,
+    ProfileFactState,
+)
+from efficiency_platform_agent.agents.operation.contracts.task import (
+    OperationDomain,
+    SourceScope,
+)
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
 from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
 from efficiency_platform_agent.core.run import (
+    JsonObject,
+    ProviderError,
     ProviderMessage,
     ProviderResult,
     ProviderUsage,
@@ -121,7 +136,10 @@ def build_agent(provider):
 
     registry = ModelProviderRegistry()
     registry.register("offline", provider)
-    return build_operation_agent(ModelRuntime(Selector(), registry))
+    return build_operation_agent(
+        ModelRuntime(Selector(), registry),
+        deliverable_set_contract_version="deliverable-set/1",
+    )
 
 
 def build_research_agent(provider):
@@ -133,10 +151,26 @@ def build_research_agent(provider):
     registry.register("offline", provider)
     research = ResearchProvider()
     agent = build_operation_agent(
-        ModelRuntime(Selector(), registry), research_provider=research
+        ModelRuntime(Selector(), registry),
+        research_provider=research,
+        deliverable_set_contract_version="deliverable-set/1",
     )
     agent._test_research_provider = research
     return agent
+
+
+def operation_progress_binding(events):
+    """按期望的窄端口绑定测试记录器；模块尚未实现时先产生明确 RED。"""
+
+    assert find_spec("efficiency_platform_agent.runtime.operation_progress") is not None
+    progress = import_module("efficiency_platform_agent.runtime.operation_progress")
+
+    async def record(event, phase, payload):
+        events.append((event, phase, dict(payload)))
+
+    binder = getattr(progress, "bind_operation_progress", None)
+    assert binder is not None
+    return binder(record) if callable(binder) else nullcontext()
 
 
 async def test_research_specialist_uses_provider_sources_and_model_output():
@@ -146,6 +180,63 @@ async def test_research_specialist_uses_provider_sources_and_model_output():
     assert result.deliverables[0].citations[0].url == "https://example.com/source"
     assert result.degraded is False
     assert provider.calls[0]["citations"][0]["url"] == "https://example.com/source"
+
+
+async def test_real_research_and_quality_boundaries_report_progress() -> None:
+    """研究波次和质量门禁必须从实际执行边界报告阶段。"""
+
+    progress_events = []
+    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+
+    with operation_progress_binding(progress_events):
+        await build_research_agent(ContentProvider()).handle(source)
+
+    assert [
+        phase for event, phase, _payload in progress_events if event == "phase_started"
+    ] == ["collecting_sources", "checking_evidence", "checking_delivery"]
+    assert [event for event, _phase, _payload in progress_events].count(
+        "quality_checked"
+    ) == 1
+
+
+def test_mixed_wave_progress_counts_only_matching_successful_outcomes() -> None:
+    """混合波次的研究与创作计数必须按任务类型隔离并只计成功结果。"""
+
+    from efficiency_platform_agent.core.multi_agent import TaskExecutionStatus
+    from efficiency_platform_agent.orchestration.supervisor import (
+        _wave_progress_counts,
+    )
+
+    ready_nodes = (
+        SimpleNamespace(task_id="research", task_type="operation.research"),
+        SimpleNamespace(task_id="wechat", task_type="operation.channel_content"),
+        SimpleNamespace(task_id="toutiao", task_type="operation.channel_content"),
+    )
+    outcomes = (
+        SimpleNamespace(task_id="research", status=TaskExecutionStatus.FAILED),
+        SimpleNamespace(task_id="wechat", status=TaskExecutionStatus.SUCCEEDED),
+        SimpleNamespace(task_id="toutiao", status=TaskExecutionStatus.SUCCEEDED),
+    )
+
+    assert _wave_progress_counts(ready_nodes, outcomes, research=True) == (0, 1)
+    assert _wave_progress_counts(ready_nodes, outcomes, research=False) == (2, 2)
+
+
+async def test_failed_research_wave_does_not_claim_completed_success() -> None:
+    """研究 Specialist 失败后不得发送 research_completed 成功事件。"""
+
+    progress_events = []
+    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+
+    with operation_progress_binding(progress_events):
+        execution = await build_research_agent(
+            ContentProvider(failure="research")
+        ).execute(source)
+
+    assert execution.deliverables is None
+    assert not any(
+        event == "research_completed" for event, _phase, _payload in progress_events
+    )
 
 
 async def test_large_server_search_usage_keeps_industry_digest_generation_alive():
@@ -168,6 +259,7 @@ async def test_large_server_search_usage_keeps_industry_digest_generation_alive(
     agent = build_operation_agent(
         ModelRuntime(Selector(), registry),
         research_provider=LargeUsageResearch(),
+        deliverable_set_contract_version="deliverable-set/1",
     )
     source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
 
@@ -208,11 +300,51 @@ async def test_unverified_provider_source_remains_citation_with_warning():
     registry = ModelProviderRegistry()
     registry.register("offline", provider)
     agent = build_operation_agent(
-        ModelRuntime(Selector(), registry), research_provider=UnverifiedResearch()
+        ModelRuntime(Selector(), registry),
+        research_provider=UnverifiedResearch(),
+        deliverable_set_contract_version="deliverable-set/1",
     )
     result = await agent.handle(source)
     assert result.deliverables[0].citations[0].url == "https://example.com/source"
     assert "EVIDENCE_UNVERIFIED" in result.deliverables[0].warnings
+
+
+async def test_successful_collection_with_no_relevant_sources_returns_controlled_report():
+    class EmptySuccessfulResearch(ResearchProvider):
+        async def research(self, request):
+            from efficiency_platform_agent.capabilities.research.contracts import (
+                ResearchResult,
+                ResearchStatus,
+            )
+
+            return ResearchResult(
+                "research-result/1",
+                request.request_id,
+                request.task_id,
+                request.tenant_id,
+                ResearchStatus.EMPTY,
+                (),
+                ("RESEARCH_SOURCES_UNAVAILABLE",),
+                None,
+            )
+
+    from efficiency_platform_agent.harness.operation_agent_factory import (
+        build_operation_agent,
+    )
+
+    provider = ContentProvider()
+    registry = ModelProviderRegistry()
+    registry.register("offline", provider)
+    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+    result = await build_operation_agent(
+        ModelRuntime(Selector(), registry),
+        research_provider=EmptySuccessfulResearch(),
+        deliverable_set_contract_version="deliverable-set/1",
+    ).handle(source)
+
+    assert result.degraded
+    assert result.deliverables[0].citations == []
+    assert "RESEARCH_SOURCES_UNAVAILABLE" in result.deliverables[0].warnings
 
 
 def submission():
@@ -240,6 +372,52 @@ async def test_three_platforms_generate_three_independent_deliverables():
     assert result.degraded
 
 
+async def test_authoritative_channel_profile_reaches_model_deliverable():
+    """已选中的渠道 Profile 必须进入成品权威引用，不能被调度层丢弃。"""
+
+    source = submission()
+    source = replace(
+        source,
+        task_spec=replace(
+            source.task_spec,
+            domains=source.task_spec.domains | frozenset({OperationDomain.CHANNEL}),
+        ),
+        profile_candidates=(
+            ChannelProfile(
+                contract_version="profile/1",
+                profile_id="channel-user-request",
+                tenant_id=source.task_spec.tenant_id,
+                channel_id="multi-channel",
+                rules_version="1.0.0",
+                rules=JsonObject((("platforms", ("xiaohongshu",)),)),
+                facts=(
+                    ProfileFact(
+                        "fact-channel-user-request",
+                        "channel",
+                        JsonObject((("platforms", ("xiaohongshu",)),)),
+                        SourceScope.USER_INPUT,
+                        "request.test",
+                        ProfileFactState.CANDIDATE,
+                        None,
+                        None,
+                    ),
+                ),
+                semantic_version="1.0.0",
+            ),
+        ),
+    )
+    requirement = replace(
+        source.request.requested_deliverables[0], channel_ids=("xiaohongshu",)
+    )
+    source = replace(
+        source, request=replace(source.request, requested_deliverables=(requirement,))
+    )
+
+    result = await build_agent(ContentProvider()).handle(source)
+
+    assert result.degraded is False
+
+
 async def test_one_specialist_failure_preserves_other_platforms():
     result = await build_agent(ContentProvider(failure="toutiao")).handle(submission())
     assert len(result.deliverables) == 2
@@ -250,6 +428,99 @@ async def test_one_specialist_failure_preserves_other_platforms():
 async def test_unknown_model_fields_fail_closed():
     with pytest.raises(ValueError, match="OPERATION_ALL_SPECIALISTS_FAILED"):
         await build_agent(ContentProvider(extra=True)).handle(submission())
+
+
+async def test_invalid_model_schema_is_repaired_once_before_failing_run():
+    """JSON 模式不支持完整 Schema 时，首次结构错误应触发一次受控重生成。"""
+
+    class InvalidThenValidProvider(ContentProvider):
+        async def complete(self, request):
+            result = await super().complete(request)
+            if len(self.calls) == 1:
+                payload = json.loads(result.message.content)
+                payload["unknown_field"] = "must be rejected"
+                return replace(
+                    result,
+                    message=ProviderMessage("assistant", json.dumps(payload)),
+                )
+            return result
+
+    provider = InvalidThenValidProvider()
+    requirement = replace(
+        submission().request.requested_deliverables[0], channel_ids=("xiaohongshu",)
+    )
+    source = submission()
+    source = replace(
+        source, request=replace(source.request, requested_deliverables=(requirement,))
+    )
+
+    result = await build_agent(provider).handle(source)
+
+    assert result.degraded is True  # 固定样本仍没有渠道 Profile。
+    assert len(provider.calls) == 2
+
+
+async def test_model_free_text_warning_cannot_set_runtime_degraded_state():
+    """模型自述的普通限制不具备系统告警权威性。"""
+
+    class FreeTextWarningProvider(ContentProvider):
+        async def complete(self, request):
+            result = await super().complete(request)
+            payload = json.loads(result.message.content)
+            payload["warnings"] = ["未联网搜索，参数请自行确认"]
+            return replace(
+                result,
+                message=ProviderMessage("assistant", json.dumps(payload)),
+            )
+
+    result = await build_agent(FreeTextWarningProvider()).handle(submission())
+
+    assert all(
+        "未联网搜索" not in warning
+        for deliverable in result.deliverables
+        for warning in deliverable.warnings
+    )
+
+
+async def test_schema_repair_survives_one_truncated_retry_response():
+    """结构修复调用遇到一次流截断时，可在三次总预算内继续完成。"""
+
+    class InvalidThenTruncatedThenValidProvider(ContentProvider):
+        async def complete(self, request):
+            result = await super().complete(request)
+            if len(self.calls) == 1:
+                payload = json.loads(result.message.content)
+                payload["unknown_field"] = "must be rejected"
+                return replace(
+                    result,
+                    message=ProviderMessage("assistant", json.dumps(payload)),
+                )
+            if len(self.calls) == 2:
+                return replace(
+                    result,
+                    message=None,
+                    error=ProviderError(
+                        "PROVIDER_RESPONSE_TRUNCATED",
+                        "provider",
+                        False,
+                        "响应未正常结束",
+                    ),
+                )
+            return result
+
+    provider = InvalidThenTruncatedThenValidProvider()
+    requirement = replace(
+        submission().request.requested_deliverables[0], channel_ids=("xiaohongshu",)
+    )
+    source = submission()
+    source = replace(
+        source, request=replace(source.request, requested_deliverables=(requirement,))
+    )
+
+    result = await build_agent(provider).handle(source)
+
+    assert result.deliverables
+    assert len(provider.calls) == 3
 
 
 def test_assembler_rejects_unknown_nested_citation_field():
@@ -318,10 +589,7 @@ async def test_research_keeps_only_verified_evidence_citations():
     )
     result = await build_research_agent(ContentProvider()).handle(source)
     assert result.deliverables[0].citations
-    assert (
-        result.deliverables[0].citations[0].url
-        == "https://example.com/source"
-    )
+    assert result.deliverables[0].citations[0].url == "https://example.com/source"
 
 
 async def test_research_injects_verified_citation_when_model_omits_citations():
@@ -366,42 +634,47 @@ async def test_registered_operation_graph_uses_existing_graph_runtime():
         )
     )
     runtime = GraphRuntime(registry)
-    result = await runtime.execute(
-        StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
-        {
-            "run_id": "run-task-e",
-            "tenant_id": source.task_spec.tenant_id,
-            "user_id": source.task_spec.user_id,
-            "request_id": source.request.request.request_id,
-            "strategy_payload_schema_version": "operation-strategy-payload/1",
-            "strategy_payload": JsonObject(
-                (
+    progress_events = []
+    with operation_progress_binding(progress_events):
+        result = await runtime.execute(
+            StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
+            {
+                "run_id": "run-task-e",
+                "tenant_id": source.task_spec.tenant_id,
+                "user_id": source.task_spec.user_id,
+                "request_id": source.request.request.request_id,
+                "strategy_payload_schema_version": "operation-strategy-payload/1",
+                "strategy_payload": JsonObject(
                     (
-                        "operation_request",
-                        JsonObject(
-                            (
-                                ("operation_id", source.request.operation_id),
+                        (
+                            "operation_request",
+                            JsonObject(
                                 (
-                                    "request",
-                                    JsonObject(
-                                        (
+                                    ("operation_id", source.request.operation_id),
+                                    (
+                                        "request",
+                                        JsonObject(
                                             (
-                                                "request_id",
-                                                source.request.request.request_id,
-                                            ),
-                                            ("tenant_id", source.task_spec.tenant_id),
-                                            ("user_id", source.task_spec.user_id),
-                                            ("input_text", "新品三平台文案"),
-                                        )
+                                                (
+                                                    "request_id",
+                                                    source.request.request.request_id,
+                                                ),
+                                                (
+                                                    "tenant_id",
+                                                    source.task_spec.tenant_id,
+                                                ),
+                                                ("user_id", source.task_spec.user_id),
+                                                ("input_text", "新品三平台文案"),
+                                            )
+                                        ),
                                     ),
-                                ),
-                            )
+                                )
+                            ),
                         ),
-                    ),
-                )
-            ),
-        },
-    )
+                    )
+                ),
+            },
+        )
     assert result.next_status is RunStatus.SUCCEEDED
     assert result.usage.input_tokens == 30
     assert result.usage.output_tokens == 60
@@ -413,6 +686,90 @@ async def test_registered_operation_graph_uses_existing_graph_runtime():
         len(dict(dict(result.output.items)["deliverable_set"].items)["deliverables"])
         == 3
     )
+    assert [
+        phase for event, phase, _payload in progress_events if event == "phase_started"
+    ] == ["understanding_request", "creating_content", "checking_delivery"]
+
+
+async def test_registered_research_content_graph_reports_all_real_phase_boundaries():
+    """真实解析、研究、内容波次和质量门禁组合后形成完整五阶段。"""
+
+    from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
+    from efficiency_platform_agent.core.run import JsonObject
+    from efficiency_platform_agent.orchestration.builders.operation_runtime import (
+        build_operation_multi_agent_registration,
+    )
+    from efficiency_platform_agent.orchestration.registry import GraphRegistry
+    from efficiency_platform_agent.orchestration.runtime import GraphRuntime
+    from efficiency_platform_agent.routing.strategy_router import StrategySelection
+
+    source = submission()
+    source = replace(
+        source,
+        task_spec=replace(source.task_spec, requires_research=True),
+    )
+
+    async def resolve(_request, _state):
+        return source
+
+    registry = GraphRegistry()
+    registry.register(
+        build_operation_multi_agent_registration(
+            build_research_agent(ContentProvider()), resolve
+        )
+    )
+    progress_events = []
+    with operation_progress_binding(progress_events):
+        result = await GraphRuntime(registry).execute(
+            StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
+            {
+                "run_id": "run-research-content",
+                "tenant_id": source.task_spec.tenant_id,
+                "user_id": source.task_spec.user_id,
+                "request_id": source.request.request.request_id,
+                "strategy_payload_schema_version": "operation-strategy-payload/1",
+                "strategy_payload": JsonObject(
+                    (
+                        (
+                            "operation_request",
+                            JsonObject(
+                                (
+                                    ("operation_id", source.request.operation_id),
+                                    (
+                                        "request",
+                                        JsonObject(
+                                            (
+                                                (
+                                                    "request_id",
+                                                    source.request.request.request_id,
+                                                ),
+                                                (
+                                                    "tenant_id",
+                                                    source.task_spec.tenant_id,
+                                                ),
+                                                ("user_id", source.task_spec.user_id),
+                                                ("input_text", "研究后生成三平台文案"),
+                                            )
+                                        ),
+                                    ),
+                                )
+                            ),
+                        ),
+                    )
+                ),
+            },
+        )
+
+    assert result.next_status is RunStatus.SUCCEEDED
+    assert [
+        phase for event, phase, _payload in progress_events if event == "phase_started"
+    ] == [
+        "understanding_request",
+        "collecting_sources",
+        "checking_evidence",
+        "creating_content",
+        "checking_delivery",
+    ]
 
 
 async def test_missing_research_provider_fails_transparently():
@@ -451,6 +808,7 @@ async def test_failed_research_is_not_reclassified_as_budget_exhausted():
     execution = await build_operation_agent(
         ModelRuntime(Selector(), ModelProviderRegistry()),
         research_provider=InsufficientResearch(),
+        deliverable_set_contract_version="deliverable-set/1",
     ).execute(source)
 
     assert execution.error_code == "RESEARCH_UNAVAILABLE"
@@ -514,8 +872,9 @@ async def test_fabricated_model_citations_are_rejected():
 async def test_failed_specialist_output_still_counts_provider_usage():
     result = await build_agent(ContentProvider(extra=True)).execute(submission())
     assert result.deliverables is None
-    assert result.usage.input_tokens == 30
-    assert result.usage.output_tokens == 60
+    # 每个平台首次输出非法后均受控重试一次，两次计费都必须保留。
+    assert result.usage.input_tokens == 60
+    assert result.usage.output_tokens == 120
 
 
 async def test_provider_failure_attempt_is_counted_in_partial_result():
@@ -589,6 +948,10 @@ async def test_run_view_receives_nonzero_model_usage():
     assert result.status.value == "succeeded"
     assert result.usage.input_tokens == 30
     assert result.usage.output_tokens == 60
+    events = await service.event_hub.replay(result.run_id, 0)
+    assert [
+        item.payload["phase"] for item in events if item.event == "phase_started"
+    ] == ["understanding_request", "creating_content", "checking_delivery"]
 
 
 async def test_unknown_platform_is_not_silently_dropped():
@@ -711,7 +1074,9 @@ async def test_running_cancellation_stops_dependent_specialists():
     provider_registry.register("offline", WaitingProvider())
     cancellation = InMemoryCancellationSignal()
     agent = build_operation_agent(
-        ModelRuntime(Selector(), provider_registry), cancellation=cancellation
+        ModelRuntime(Selector(), provider_registry),
+        cancellation=cancellation,
+        deliverable_set_contract_version="deliverable-set/1",
     )
     manifest = MULTI_PLATFORM_CONTENT_PACK_V1
     steps = manifest.plan_template.steps

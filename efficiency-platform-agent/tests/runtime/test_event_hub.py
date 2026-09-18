@@ -118,6 +118,16 @@ async def test_publish_rejects_non_monotonic_sequence() -> None:
         ({"message": "postgresql://user:password@db/runtime"}, "password"),
         ({"detail": "Traceback (most recent call last): internal"}, "internal"),
         ({"nested": {"exception": "provider-private-error"}}, "provider-private-error"),
+        (
+            {"nested": [{"model_candidates": ["private-model"]}]},
+            "private-model",
+        ),
+        ({"nested": {"tool_args": {"query": "private-query"}}}, "private-query"),
+        ({"nested": [{"raw-page": "private-page"}]}, "private-page"),
+        (
+            {"nested": {"items": [{"hidden_reasoning": "private-reason"}]}},
+            "private-reason",
+        ),
     ],
 )
 @pytest.mark.asyncio
@@ -130,3 +140,54 @@ async def test_publish_rejects_sensitive_payload_without_echoing_value(
         await hub.publish(event(1, payload=payload))
 
     assert sensitive_value not in str(captured.value)
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_nested_camel_case_model_candidates_key() -> None:
+    hub = EventHub()
+
+    with pytest.raises(ValueError, match="敏感信息"):
+        await hub.publish(
+            event(1, payload={"nested": {"modelCandidates": ["private"]}})
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_nested_camel_case_tool_args_key() -> None:
+    hub = EventHub()
+
+    with pytest.raises(ValueError, match="敏感信息"):
+        await hub.publish(
+            event(1, payload={"nested": [{"toolArgs": {"q": "private"}}]})
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_nested_camel_case_raw_page_key() -> None:
+    hub = EventHub()
+
+    with pytest.raises(ValueError, match="敏感信息"):
+        await hub.publish(event(1, payload={"nested": {"rawPage": "private"}}))
+
+
+@pytest.mark.asyncio
+async def test_publish_rejects_nested_pascal_case_hidden_reasoning_key() -> None:
+    hub = EventHub()
+
+    with pytest.raises(ValueError, match="敏感信息"):
+        await hub.publish(
+            event(1, payload={"nested": [{"HiddenReasoning": "private"}]})
+        )
+
+
+@pytest.mark.asyncio
+async def test_publish_allows_normal_business_text_containing_token_word() -> None:
+    """结构化 token 键受禁，但普通业务正文中的同名单词不应误伤。"""
+
+    hub = EventHub()
+
+    await hub.publish(
+        event(1, payload={"delta": "本周讨论 token economy 与用户激励机制。"})
+    )
+
+    assert (await hub.replay("run-1", 0))[0].payload["delta"].startswith("本周讨论")

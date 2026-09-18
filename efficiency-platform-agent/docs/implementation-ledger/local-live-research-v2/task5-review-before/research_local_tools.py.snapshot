@@ -1,0 +1,440 @@
+"""按 Run 显式装配研究工具；所有网络权限来自冻结的来源描述符。"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+import time
+from collections import deque
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from urllib.parse import urlsplit
+
+from efficiency_platform_agent.capabilities.research.v2.content_acquisition import (
+    validate_content_endpoint,
+)
+from efficiency_platform_agent.capabilities.research.v2.source_admission import (
+    SourceAdmission,
+)
+from efficiency_platform_agent.configuration.research_local_sources import (
+    LOCAL_SOURCE_ENDPOINTS,
+    validate_local_source_descriptors,
+)
+from efficiency_platform_agent.contracts.research_ports_v2 import SourceProvider
+from efficiency_platform_agent.contracts.research_sources_v2 import (
+    DiscoveryBatchV2,
+    DiscoveryRequestV2,
+    FetchedContentV2,
+    FetchRequestV2,
+    SourceDescriptorV2,
+)
+from efficiency_platform_agent.contracts.research_transport_v2 import (
+    AuthorizedTargetV2,
+    ResearchUrlSourcePolicyV2,
+    UrlTargetShapeV2,
+)
+from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.budget_execution import (
+    BudgetExecutionBinding,
+    current_budget_execution_binding,
+)
+from efficiency_platform_agent.core.run import RunContext
+from efficiency_platform_agent.providers.research._adapter_support import (
+    ResearchDocumentFetcher,
+)
+from efficiency_platform_agent.providers.research.arxiv import (
+    ArxivConfig,
+    ArxivProvider,
+)
+from efficiency_platform_agent.providers.research.feed import (
+    FeedSourceConfig,
+    FeedSourceProvider,
+)
+from efficiency_platform_agent.providers.research.gdelt import (
+    GdeltConfig,
+    GdeltProvider,
+)
+from efficiency_platform_agent.providers.research.hacker_news import (
+    HackerNewsConfig,
+    HackerNewsProvider,
+)
+from efficiency_platform_agent.providers.research.live_connector import (
+    AsyncioPinnedHttpConnector,
+    AsyncioTargetResolver,
+)
+from efficiency_platform_agent.providers.research.transport import (
+    FetchLease,
+    HttpBudgetContext,
+    PinnedHttpConnector,
+    PinnedResponse,
+    ResearchFetchError,
+    SafeHttpTransport,
+    TargetResolver,
+)
+from efficiency_platform_agent.security.url_policy import UrlPolicy
+from efficiency_platform_agent.tools.external.research import (
+    ExplicitDocumentFetcherRegistry,
+    ExplicitSourceProviderRegistry,
+    ResearchToolScopeError,
+    TrustedResearchToolScope,
+    research_tool_entries,
+)
+from efficiency_platform_agent.tools.runtime.registry import ToolRegistry
+from efficiency_platform_agent.tools.runtime.service import (
+    CancellationPort,
+    ToolRuntime,
+)
+
+# 1 MiB 原始内容经 base64 放大后仍为 2 MiB 工具限额预留充分元数据空间。
+LOCAL_BODY_BYTES = 1024 * 1024
+
+
+class LocalResearchNetworkLimits:
+    """组合根持有的进程内来源限流；多个 Run 必须注入同一实例。
+
+    只登记静态来源与 host，不含租户内容、查询、凭据或 Run 预算。
+    同一进程内更改限流策略失败关闭，避免刷新配额窗口绕过旧策略。
+    """
+
+    def __init__(self) -> None:
+        self._hosts: dict[str, asyncio.Lock] = {}
+        self._rates: dict[tuple[str, str], tuple[int, int]] = {}
+        self._timestamps: dict[tuple[str, str], deque[float]] = {}
+        self._concurrency = asyncio.Semaphore(4)
+
+    def register(self, descriptor: SourceDescriptorV2) -> None:
+        rate = (descriptor.rate_policy.requests, descriptor.rate_policy.period_seconds)
+        for host in descriptor.allowed_hosts:
+            key = (descriptor.source_id, host)
+            if key in self._rates and self._rates[key] != rate:
+                raise ValueError("LOCAL_SOURCE_RATE_POLICY_CHANGED")
+            self._rates[key] = rate
+            self._timestamps.setdefault(key, deque())
+            self._hosts.setdefault(host, asyncio.Lock())
+
+    @asynccontextmanager
+    async def slot(self, source_id: str, host: str) -> AsyncIterator[None]:
+        key = (source_id, host)
+        if key not in self._rates:
+            raise ResearchToolScopeError
+        async with self._hosts[host]:
+            requests, period = self._rates[key]
+            timestamps = self._timestamps[key]
+            while True:
+                now = time.monotonic()
+                while timestamps and timestamps[0] <= now - period:
+                    timestamps.popleft()
+                if len(timestamps) < requests:
+                    break
+                await asyncio.sleep(max(0, timestamps[0] + period - now))
+            async with self._concurrency:
+                timestamps.append(time.monotonic())
+                yield
+
+
+class _ContentGovernedProvider:
+    """发现输出仍服从内容许可；未准入的平台正文不进入事实库。"""
+
+    def __init__(
+        self, provider: SourceProvider, descriptor: SourceDescriptorV2
+    ) -> None:
+        self.provider, self.descriptor = provider, descriptor
+
+    async def discover(self, request: DiscoveryRequestV2) -> DiscoveryBatchV2:
+        batch = await self.provider.discover(request)
+        item = self.descriptor
+        candidates = []
+        for candidate in batch.candidates:
+            required = {"full": "article_body", "platform_text": "platform_text"}.get(
+                candidate.content_scope
+            )
+            if item.content_policy.storage_mode == "metadata_only" or (
+                required is not None and required not in item.admission.intended_uses
+            ):
+                candidate = candidate.model_copy(
+                    update={"content_scope": "none", "inline_content": None}
+                )
+            candidates.append(candidate)
+        return batch.model_copy(update={"candidates": tuple(candidates)})
+
+
+class _RunScope:
+    def __init__(
+        self,
+        binding: BudgetExecutionBinding,
+        context: RunContext,
+        descriptors: tuple[SourceDescriptorV2, ...],
+        now: Callable[[], datetime],
+        signal: CancellationPort | None,
+    ) -> None:
+        self.binding, self.context, self.now, self.signal = (
+            binding,
+            context,
+            now,
+            signal,
+        )
+        self.descriptors = {
+            item.source_id: item for item in descriptors if item.enabled
+        }
+
+    async def resolve(
+        self, context: RunContext, source_id: str
+    ) -> TrustedResearchToolScope:
+        if current_budget_execution_binding() is not self.binding or (
+            context.tenant_id,
+            context.run_id,
+            context.user_id,
+        ) != (self.context.tenant_id, self.context.run_id, self.context.user_id):
+            raise ResearchToolScopeError
+        if self.signal is not None and self.signal.is_requested():
+            raise asyncio.CancelledError
+        descriptor = self.descriptors.get(source_id)
+        if (
+            descriptor is None
+            or not SourceAdmission()
+            .evaluate(descriptor, descriptor.admission, self.now())
+            .allowed
+            or "research" not in descriptor.admission.intended_uses
+        ):
+            raise ResearchToolScopeError
+        # 当前目录不提供认证注入或跨 Run 免费配额账本，不能静默使用。
+        if (
+            descriptor.cost_policy.requires_authentication
+            or descriptor.cost_policy.mode != "free"
+        ):
+            raise ResearchToolScopeError
+        return TrustedResearchToolScope(
+            self.binding.lease_id, self.binding.authorization_scope_digest
+        )
+
+
+class _EndpointPolicy(UrlPolicy):
+    def __init__(self, descriptor: SourceDescriptorV2, *, discovery: bool) -> None:
+        self.descriptor, self.discovery = descriptor, discovery
+
+    def validate_shape(
+        self, url: str, source_policy: ResearchUrlSourcePolicyV2
+    ) -> UrlTargetShapeV2:
+        shape = super().validate_shape(url, source_policy)
+        item = self.descriptor
+        split = urlsplit(shape.url)
+        endpoint = urlsplit(LOCAL_SOURCE_ENDPOINTS[item.source_id])
+        if self.discovery:
+            allowed = split.path == endpoint.path
+            if item.adapter_id == "hacker_news":
+                allowed = (
+                    allowed
+                    or re.fullmatch(r"/v0/item/[0-9]+\.json", split.path) is not None
+                )
+            if item.adapter_id in {"rss_atom", "hacker_news"} and split.query:
+                allowed = False
+        else:
+            try:
+                validate_content_endpoint(item, url)
+            except ValueError:
+                raise ResearchFetchError(
+                    "CONTENT_REJECTED", "SOURCE_NOT_RUNTIME_ALLOWED"
+                ) from None
+            uses = item.admission.intended_uses
+            reasons = item.admission.reason_codes
+            allowed = item.content_policy.storage_mode != "metadata_only"
+            if item.adapter_id == "hacker_news":
+                allowed = (
+                    allowed
+                    and "platform_text" in uses
+                    and "PLATFORM_TEXT_NOT_APPROVED" not in reasons
+                    and re.fullmatch(r"/v0/item/[0-9]+\.json", split.path) is not None
+                    and not split.query
+                )
+            else:
+                allowed = (
+                    allowed
+                    and "article_body" in uses
+                    and not {
+                        "ARTICLE_BODY_NOT_APPROVED",
+                        "RELEASE_BODY_NOT_APPROVED",
+                    }.intersection(reasons)
+                )
+        if not allowed:
+            raise ResearchFetchError("CONTENT_REJECTED", "SOURCE_NOT_RUNTIME_ALLOWED")
+        return shape
+
+
+class _GovernedTransport(SafeHttpTransport):
+    """限流等待发生在预算预约与派发之前，避免终态之后开启新连接。"""
+
+    def __init__(
+        self,
+        connector: PinnedHttpConnector,
+        descriptor: SourceDescriptorV2,
+        scope: _RunScope,
+        network_limits: LocalResearchNetworkLimits,
+        policy: _EndpointPolicy,
+    ) -> None:
+        super().__init__(connector, url_policy=policy)
+        self.descriptor, self.scope = descriptor, scope
+        self.network_limits = network_limits
+
+    async def _request_with_budget(
+        self,
+        request: FetchRequestV2,
+        target: AuthorizedTargetV2,
+        lease: FetchLease,
+        *,
+        hop: int,
+        headers: Mapping[str, str],
+        timeout: float,
+    ) -> PinnedResponse:
+        async with self.network_limits.slot(self.descriptor.source_id, target.host):
+            await self.scope.resolve(self.scope.context, self.descriptor.source_id)
+            return await super()._request_with_budget(
+                request,
+                target,
+                lease,
+                hop=hop,
+                headers=headers,
+                timeout=timeout,
+            )
+
+
+class _BoundFetcher:
+    def __init__(
+        self,
+        descriptor: SourceDescriptorV2,
+        scope: _RunScope,
+        connector: PinnedHttpConnector,
+        resolver: TargetResolver,
+        network_limits: LocalResearchNetworkLimits,
+        *,
+        discovery: bool,
+    ) -> None:
+        self.descriptor, self.scope, self.resolver = descriptor, scope, resolver
+        self.policy = _EndpointPolicy(descriptor, discovery=discovery)
+        self.transport = _GovernedTransport(
+            connector, descriptor, scope, network_limits, self.policy
+        )
+        self.body_requests = 0
+        self.discovery = discovery
+
+    async def fetch(self, request: FetchRequestV2) -> FetchedContentV2:
+        trusted = await self.scope.resolve(self.scope.context, request.source_id)
+        if request.source_id != self.descriptor.source_id or (
+            request.tenant_id,
+            request.run_id,
+            request.lease_id,
+            request.authorization_scope_digest,
+        ) != (
+            self.scope.context.tenant_id,
+            self.scope.context.run_id,
+            trusted.lease_id,
+            trusted.authorization_scope_digest,
+        ):
+            raise ResearchToolScopeError
+        policy = ResearchUrlSourcePolicyV2(allowed_hosts=self.descriptor.allowed_hosts)
+        # 入口及每个重定向均遵循同一静态策略，绝不反射传入 URL 的主机。
+        self.policy.validate_shape(request.url, policy)
+        if not self.discovery:
+            if self.body_requests >= 30:
+                raise ResearchFetchError(
+                    "CONTENT_UNAVAILABLE", "FETCH_BUDGET_EXHAUSTED"
+                )
+            self.body_requests += 1
+        binding = self.scope.binding
+        prefix, version = await binding.next_invocation("http")
+        budget = HttpBudgetContext(binding.port, binding.scope, prefix, version)
+        try:
+            return await self.transport.fetch(
+                request,
+                FetchLease(
+                    source_policy=policy,
+                    resolver=self.resolver,
+                    remaining_budget=RemainingBudget(1, 4, 0, 0, 0, 10_000),
+                    max_wire_bytes=LOCAL_BODY_BYTES,
+                    max_decoded_bytes=LOCAL_BODY_BYTES,
+                    budget_context=budget,
+                ),
+            )
+        finally:
+            binding.update_version(budget.version)
+
+
+def build_local_research_tools(
+    *,
+    descriptors: tuple[SourceDescriptorV2, ...],
+    binding: BudgetExecutionBinding,
+    run_context: RunContext,
+    connector: PinnedHttpConnector | None = None,
+    resolver: TargetResolver | None = None,
+    cancellation_signal: CancellationPort | None = None,
+    network_limits: LocalResearchNetworkLimits,
+    now: Callable[[], datetime] = lambda: datetime.now(UTC),
+) -> ToolRuntime:
+    """组合根注入可信 Run；测试只替换连接器/DNS，所有治理保持真实。"""
+    if not isinstance(network_limits, LocalResearchNetworkLimits):
+        raise TypeError("LOCAL_NETWORK_LIMITS_REQUIRED")
+    if (binding.scope.tenant_id, binding.scope.run_id) != (
+        run_context.tenant_id,
+        run_context.run_id,
+    ) or binding.scope.source_account_id is not None:
+        raise ValueError("LOCAL_RESEARCH_BINDING_MISMATCH")
+    descriptors = validate_local_source_descriptors(descriptors)
+    for item in descriptors:
+        for endpoint in item.content_endpoints:
+            validate_content_endpoint(item, endpoint)
+    scope = _RunScope(binding, run_context, descriptors, now, cancellation_signal)
+    providers: dict[str, SourceProvider] = {}
+    fetchers: dict[str, ResearchDocumentFetcher] = {}
+    limits = network_limits
+    for item in descriptors:
+        if not item.enabled:
+            continue
+        decision = SourceAdmission().evaluate(item, item.admission, now())
+        if not decision.allowed:
+            raise ValueError(decision.reason_codes[0])
+        limits.register(item)
+        raw_connector = connector or AsyncioPinnedHttpConnector()
+        dns = resolver or AsyncioTargetResolver()
+        fetcher = _BoundFetcher(item, scope, raw_connector, dns, limits, discovery=True)
+        fetchers[item.source_id] = _BoundFetcher(
+            item, scope, raw_connector, dns, limits, discovery=False
+        )
+        if item.adapter_id == "rss_atom":
+            providers[item.source_id] = FeedSourceProvider(
+                FeedSourceConfig(
+                    item.source_id,
+                    LOCAL_SOURCE_ENDPOINTS[item.source_id],
+                    item.history_mode,
+                    "atom" if item.access_mode == "atom" else "rss",
+                ),
+                fetcher,
+            )
+        elif item.adapter_id == "hacker_news":
+            providers[item.source_id] = HackerNewsProvider(
+                HackerNewsConfig(item.source_id, max_concurrency=1, max_items=30),
+                fetcher,
+            )
+        elif item.adapter_id == "arxiv":
+            providers[item.source_id] = ArxivProvider(
+                ArxivConfig(item.source_id), fetcher
+            )
+        elif item.adapter_id == "gdelt":
+            providers[item.source_id] = GdeltProvider(
+                GdeltConfig(item.source_id), fetcher
+            )
+        else:
+            raise ValueError("LOCAL_SOURCE_ID_NOT_REGISTERED")
+        providers[item.source_id] = _ContentGovernedProvider(
+            providers[item.source_id], item
+        )
+    registry = ToolRegistry()
+    for spec, tool in research_tool_entries(
+        ExplicitSourceProviderRegistry(providers),
+        ExplicitDocumentFetcherRegistry(fetchers),
+        scope,
+    ):
+        registry.register(spec, tool)
+    return ToolRuntime(registry, cancellation_signal=cancellation_signal)
+
+
+__all__ = ["LocalResearchNetworkLimits", "build_local_research_tools"]

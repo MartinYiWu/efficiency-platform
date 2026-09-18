@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import httpx
 from fastapi import FastAPI
@@ -19,15 +19,22 @@ from efficiency_platform_agent.agents.conversation.general_agent import (
 )
 from efficiency_platform_agent.api.app import create_app
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
-from efficiency_platform_agent.capabilities.research.deepseek_web_search import (
-    DeepSeekWebSearchProvider,
+from efficiency_platform_agent.capabilities.research.public_sources import (
+    FreePublicResearchProvider,
 )
 from efficiency_platform_agent.configuration.integration import (
     IntegrationGate,
     S7IntegrationSettings,
 )
+from efficiency_platform_agent.configuration.research import ResearchPipelineSettings
+from efficiency_platform_agent.contracts.research_ports_v2 import ResearchServiceV2
 from efficiency_platform_agent.conversation.direct_submission import (
     DirectConversationSubmissionStore,
+)
+from efficiency_platform_agent.conversation.intent_v2_adapter import (
+    IntentV2ConversationAdapter,
+    IntentV2PreparationDelegate,
+    PipelineVersionSnapshotV2,
 )
 from efficiency_platform_agent.conversation.service import (
     ConversationService,
@@ -35,11 +42,16 @@ from efficiency_platform_agent.conversation.service import (
 )
 from efficiency_platform_agent.core.budget import BudgetGuard
 from efficiency_platform_agent.core.diagnostics import NoopDiagnosticRecorder
+from efficiency_platform_agent.core.enums import StrategyMode
 from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
 from efficiency_platform_agent.core.ports import ModelProvider
 from efficiency_platform_agent.core.run import ExecutionBudget
 from efficiency_platform_agent.harness.operation_agent_factory import (
     build_operation_agent,
+)
+from efficiency_platform_agent.harness.research_v2_adapter import (
+    ResearchBriefStoreV2,
+    ResearchV2ProviderAdapter,
 )
 from efficiency_platform_agent.observability.local_execution_log import (
     LocalExecutionLogger,
@@ -69,6 +81,15 @@ from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
 from efficiency_platform_agent.routing.strategy_router import StrategyRouter
 from efficiency_platform_agent.runtime.event_hub import EventHub
 
+from .live_acceptance import (
+    ConversationLiveAcceptanceRunner,
+    InMemoryLiveAcceptanceBudgetBinder,
+    LiveAcceptanceAuthorizationStore,
+    LiveAcceptanceBudgetBinder,
+    LiveAcceptanceService,
+)
+from .local_live_references import LocalLiveRankedReferenceValidator
+from .local_live_research_factory import build_local_live_research_components
 from .service import AgentRuntimeService
 
 # 运营多平台生成单节点允许 120 秒，HTTP Provider 上限必须与之对齐。
@@ -167,13 +188,102 @@ def build_local_agent_application(
     test_mode: bool = False,
     http_client: Any | None = None,
     research_provider: Any | None = None,
+    research_v2_settings: ResearchPipelineSettings | None = None,
+    intent_v2_delegate: IntentV2PreparationDelegate | None = None,
+    research_v2_source_registry: object | None = None,
+    research_v2_tool_runtime: object | None = None,
+    research_service_v2: object | None = None,
+    intent_v2_state_store: object | None = None,
+    research_v2_state_store: object | None = None,
+    live_acceptance_service: LiveAcceptanceService | None = None,
+    live_acceptance_authorizations: LiveAcceptanceAuthorizationStore | None = None,
+    live_acceptance_budget_binder: LiveAcceptanceBudgetBinder | None = None,
+    deliverable_set_contract_version: Literal["deliverable-set/1", "deliverable-set/2"]
+    | None = None,
 ) -> LocalAgentApplication:
     """默认装配真实 DeepSeek；Fake Provider 必须显式开启测试模式。"""
     if provider is not None and not test_mode:
         raise ValueError("自定义 Provider 仅允许显式测试模式")
     if research_provider is not None and not test_mode:
         raise ValueError("自定义 Research Provider 仅允许显式测试模式")
+    if live_acceptance_service is not None and any(
+        item is not None
+        for item in (
+            live_acceptance_authorizations,
+            live_acceptance_budget_binder,
+        )
+    ):
+        raise ValueError("LIVE_ACCEPTANCE_COMPOSITION_CONFLICT")
+    if (live_acceptance_authorizations is None) != (
+        live_acceptance_budget_binder is None
+    ):
+        raise ValueError("LIVE_ACCEPTANCE_COMPOSITION_INCOMPLETE")
+    effective_live_acceptance_binder = (
+        live_acceptance_service.budget_binder
+        if live_acceptance_service is not None
+        else live_acceptance_budget_binder
+    )
+    if not test_mode and isinstance(
+        effective_live_acceptance_binder,
+        InMemoryLiveAcceptanceBudgetBinder,
+    ):
+        raise RuntimeError("LIVE_ACCEPTANCE_PERSISTENCE_NOT_READY")
     resolved = settings or S7IntegrationSettings.from_env_file(env_file)
+    resolved_research_v2 = research_v2_settings or ResearchPipelineSettings()
+    auto_local_live = (
+        resolved_research_v2.local_live_ready and intent_v2_delegate is None
+    )
+    if auto_local_live and any(
+        item is not None
+        for item in (
+            research_v2_source_registry,
+            research_v2_tool_runtime,
+            research_service_v2,
+            intent_v2_state_store,
+            research_v2_state_store,
+        )
+    ):
+        raise RuntimeError("RESEARCH_V2_COMPOSITION_BINDING_MISMATCH")
+    if (
+        resolved_research_v2.v2_enabled
+        and not auto_local_live
+        and any(
+            item is None
+            for item in (
+                intent_v2_delegate,
+                research_v2_source_registry,
+                research_v2_tool_runtime,
+                research_service_v2,
+                intent_v2_state_store,
+                research_v2_state_store,
+            )
+        )
+    ):
+        raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+    if resolved_research_v2.v2_enabled and not auto_local_live:
+        bindings = (
+            ("source_registry", research_v2_source_registry),
+            ("tool_runtime", research_v2_tool_runtime),
+            ("research_service", research_service_v2),
+            ("intent_state_store", intent_v2_state_store),
+            ("research_state_store", research_v2_state_store),
+        )
+        if any(
+            getattr(intent_v2_delegate, name, None) is not dependency
+            for name, dependency in bindings
+        ):
+            raise RuntimeError("RESEARCH_V2_COMPOSITION_BINDING_MISMATCH")
+    pipeline_snapshot = PipelineVersionSnapshotV2(
+        intent_pipeline_version=resolved_research_v2.intent_pipeline_version,
+        research_pipeline_version=resolved_research_v2.research_pipeline_version,
+        research_replan_enabled=resolved_research_v2.research_replan_enabled,
+        research_source_allowlist=resolved_research_v2.research_source_allowlist,
+        research_policy_version=resolved_research_v2.research_policy_version,
+        state_backend=resolved_research_v2.state_backend,
+        runtime_mode=resolved_research_v2.runtime_mode,
+        rollout_mode=resolved_research_v2.rollout_mode,
+        rollout_tenant_allowlist=resolved_research_v2.rollout_tenant_allowlist,
+    )
     local_execution_logger = None if test_mode else LocalExecutionLogger()
     execution_logger = local_execution_logger or NoopDiagnosticRecorder()
     model_names = {
@@ -215,47 +325,22 @@ def build_local_agent_application(
     )
     if local_execution_logger is not None:
         local_execution_logger.log_capability("deepseek_chat", enabled=True)
-    budget = ExecutionBudget(40, 10, 64_000, 32_000, 300_000, 1_000_000)
-    research_client = None
-    research_enabled = resolved.gates.get(
-        IntegrationGate.DEEPSEEK_WEB_SEARCH.value, False
+    # 本地实时研究包含模型、工具和真实 HTTP 共用父配额；V1 保留原默认值。
+    local_live_mode = resolved_research_v2.runtime_mode == "local_live"
+    budget = ExecutionBudget(
+        40,
+        60 if local_live_mode else 10,
+        64_000,
+        32_000,
+        180_000 if local_live_mode else 300_000,
+        1_000_000,
     )
-    research_reason_code: str | None = None
-    if not research_enabled:
-        research_provider = None
-        research_reason_code = "RESEARCH_GATE_DISABLED"
-    if research_provider is None and research_enabled:
-        from openai import AsyncOpenAI
-
-        research_client = AsyncOpenAI(
-            api_key=_secret(resolved, "deepseek_api_key"),
-            base_url=_secret(resolved, "deepseek_base_url"),
-            max_retries=0,
-        )
-        research_provider = DeepSeekWebSearchProvider(
-            research_client,
-            model=model_names[ModelTier.BALANCED],
-            recorder=execution_logger,
-        )
-    if research_provider is None and research_reason_code is None:
-        research_reason_code = "RESEARCH_PROVIDER_NOT_CONFIGURED"
-    if local_execution_logger is not None:
-        local_execution_logger.log_capability(
-            "deepseek_web_search",
-            enabled=research_provider is not None,
-            reason_code=research_reason_code,
-        )
-    operation_agent = build_operation_agent(
-        model_runtime,
-        budget=budget,
-        cancellation=cancellation,
-        research_provider=research_provider,
-        diagnostic_recorder=execution_logger,
-        research_unavailable_code=(
-            research_reason_code or "RESEARCH_PROVIDER_NOT_CONFIGURED"
-        ),
-    )
-    submissions = ConversationSubmissionStore()
+    if resolved_research_v2.v2_enabled and not auto_local_live:
+        submissions = getattr(intent_v2_delegate, "submissions", None)
+        if not isinstance(submissions, ConversationSubmissionStore):
+            raise RuntimeError("RESEARCH_V2_SUBMISSION_STORE_MISMATCH")
+    else:
+        submissions = ConversationSubmissionStore()
     direct_submissions = DirectConversationSubmissionStore()
     event_hub = EventHub()
     runtime_service: AgentRuntimeService | None = None
@@ -275,9 +360,6 @@ def build_local_agent_application(
             output_publisher=publish_conversation_delta,
         )
     )
-    registry.register(
-        build_operation_multi_agent_registration(operation_agent, submissions.resolve)
-    )
     clock = _SystemClock()
     graph_runtime = GraphRuntime(
         registry,
@@ -288,7 +370,9 @@ def build_local_agent_application(
     runtime = AgentRuntimeService(
         repository=InMemoryRunRepository(),
         event_store=InMemoryRunEventStore(),
-        router=StrategyRouter(registry.available_modes()),
+        router=StrategyRouter(
+            frozenset({StrategyMode.DIRECT, StrategyMode.MULTI_AGENT})
+        ),
         graph_runtime=graph_runtime,
         budget_guard=BudgetGuard(),
         budget=budget,
@@ -299,6 +383,71 @@ def build_local_agent_application(
         diagnostic_recorder=execution_logger,
     )
     runtime_service = runtime
+    local_live_components = None
+    if auto_local_live:
+        local_live_components = build_local_live_research_components(
+            resolved_research_v2,
+            model_runtime=model_runtime,
+            runtime=runtime,
+            submissions=submissions,
+        )
+        intent_v2_delegate = local_live_components.delegate
+        research_service_v2 = local_live_components.research_service
+        research_v2_state_store = local_live_components.research_service
+    intent_v2_adapter = IntentV2ConversationAdapter(
+        pipeline_snapshot, intent_v2_delegate
+    )
+    if test_mode and resolved_research_v2.runtime_mode == "production":
+        intent_v2_adapter.assert_runtime_ready(production=False)
+    else:
+        intent_v2_adapter.assert_runtime_ready(
+            runtime_mode=resolved_research_v2.runtime_mode
+        )
+    research_client = None
+    research_enabled = resolved.gates.get(
+        IntegrationGate.DEEPSEEK_WEB_SEARCH.value, False
+    )
+    if resolved_research_v2.v2_enabled and research_enabled:
+        raise ValueError("RESEARCH_V2_LEGACY_SEARCH_FORBIDDEN")
+    research_reason_code: str | None = None
+    if resolved_research_v2.v2_enabled:
+        research_provider = ResearchV2ProviderAdapter(
+            cast(ResearchServiceV2, research_service_v2),
+            cast(ResearchBriefStoreV2, research_v2_state_store),
+        )
+    else:
+        if not research_enabled:
+            research_provider = None
+            research_reason_code = "RESEARCH_GATE_DISABLED"
+        if research_provider is None and research_enabled:
+            research_provider = FreePublicResearchProvider(recorder=execution_logger)
+    if research_provider is None and research_reason_code is None:
+        research_reason_code = "RESEARCH_PROVIDER_NOT_CONFIGURED"
+    resolved_deliverable_set_contract_version = deliverable_set_contract_version or (
+        "deliverable-set/2"
+        if isinstance(research_provider, ResearchV2ProviderAdapter)
+        else "deliverable-set/1"
+    )
+    if local_execution_logger is not None:
+        local_execution_logger.log_capability(
+            "free_public_research",
+            enabled=research_provider is not None,
+            reason_code=research_reason_code,
+        )
+    operation_agent = build_operation_agent(
+        model_runtime,
+        budget=budget,
+        cancellation=cancellation,
+        research_provider=research_provider,
+        diagnostic_recorder=execution_logger,
+        research_unavailable_code=(
+            research_reason_code or "RESEARCH_PROVIDER_NOT_CONFIGURED"
+        ),
+        deliverable_set_contract_version=resolved_deliverable_set_contract_version,
+    )
+    registry.register(
+        build_operation_multi_agent_registration(operation_agent, submissions.resolve)
+    )
     if local_execution_logger is not None:
         runtime.add_run_event_listener(local_execution_logger.on_run_event)
         runtime.add_run_state_listener(local_execution_logger.on_run_state)
@@ -309,13 +458,32 @@ def build_local_agent_application(
         resolver=ScenarioResolver(),
         submissions=submissions,
         direct_submissions=direct_submissions,
+        intent_v2_coordinator=intent_v2_adapter,
+        ranked_reference_validator=(
+            LocalLiveRankedReferenceValidator(local_live_components.state_store)
+            if local_live_components is not None
+            else None
+        ),
     )
+    resolved_live_acceptance_service = live_acceptance_service
+    if live_acceptance_authorizations is not None:
+        assert live_acceptance_budget_binder is not None
+        resolved_live_acceptance_service = LiveAcceptanceService(
+            authorizations=live_acceptance_authorizations,
+            budget_binder=live_acceptance_budget_binder,
+            runner=ConversationLiveAcceptanceRunner(conversation, runtime),
+        )
     app = create_app(
         runtime,
         event_hub=event_hub,
         conversation_service=conversation,
+        live_acceptance_service=resolved_live_acceptance_service,
     )
+    app.state.local_live_research_components = local_live_components
     app.state.local_test_mode = test_mode
+    app.state.research_v2_enabled = resolved_research_v2.v2_enabled
+    app.state.research_v2_production_ready = resolved_research_v2.production_ready
+    app.state.live_acceptance_enabled = resolved_live_acceptance_service is not None
     return LocalAgentApplication(
         app,
         runtime,

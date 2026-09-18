@@ -1,0 +1,58 @@
+{
+  "evidence_version": "x04-preflight-blocked/1",
+  "captured_at": "2026-09-17",
+  "command": "uv run python scripts/research_v2_preflight.py --execute",
+  "execution_mode": "local_fail_closed",
+  "external_io": false,
+  "status": "BLOCKED",
+  "config_version": "research-sources/3-official-materials",
+  "source_count": 5,
+  "eligible_source_count": 0,
+  "probed_source_count": 0,
+  "reason_codes": [
+    "NO_ELIGIBLE_SOURCE",
+    "AUTHORIZATION_REQUIRED"
+  ],
+  "source_reason_codes": {
+    "fixture_official_feed": [
+      "SOURCE_DISABLED",
+      "SOURCE_CONFIG_UNVERIFIED",
+      "SOURCE_RECORD_UNVERIFIED",
+      "SOURCE_RECORD_FIELD_MISSING:checked_at",
+      "SOURCE_RECORD_TIME_INVALID"
+    ],
+    "fixture_arxiv": [
+      "SOURCE_DISABLED",
+      "SOURCE_CONFIG_UNVERIFIED",
+      "SOURCE_RECORD_UNVERIFIED",
+      "SOURCE_RECORD_FIELD_MISSING:checked_at",
+      "SOURCE_RECORD_TIME_INVALID"
+    ],
+    "fixture_gdelt": [
+      "SOURCE_DISABLED",
+      "SOURCE_CONFIG_UNVERIFIED",
+      "SOURCE_RECORD_UNVERIFIED",
+      "SOURCE_RECORD_FIELD_MISSING:checked_at",
+      "SOURCE_RECORD_TIME_INVALID"
+    ],
+    "fixture_github_releases": [
+      "SOURCE_DISABLED",
+      "SOURCE_CONFIG_UNVERIFIED",
+      "SOURCE_RECORD_UNVERIFIED",
+      "SOURCE_RECORD_FIELD_MISSING:checked_at",
+      "SOURCE_RECORD_TIME_INVALID"
+    ],
+    "fixture_hacker_news": [
+      "SOURCE_DISABLED",
+      "SOURCE_CONFIG_UNVERIFIED",
+      "SOURCE_RECORD_UNVERIFIED",
+      "SOURCE_RECORD_FIELD_MISSING:checked_at",
+      "SOURCE_RECORD_TIME_INVALID"
+    ]
+  },
+  "claims": {
+    "real_source_verified": false,
+    "real_model_verified": false,
+    "production_ready": false
+  }
+}

@@ -1,0 +1,692 @@
+NON-GIT REVIEW PACKAGE
+Base: task-start filesystem snapshot
+Head: current filesystem after Agent Task 5
+
+FILE STAT
+src\efficiency_platform_agent\harness\service.py	60829 bytes	SHA256 8C9C54DBC7A97425251040039E43AE1A452F772EB8C2D0DC8E20BD718A1C8CD1
+
+DIFF src\efficiency_platform_agent\harness\service.py
+--- a/src\efficiency_platform_agent\harness\service.py
++++ b/src\efficiency_platform_agent\harness\service.py
+@@ -9,6 +9,10 @@
+ from time import perf_counter
+ from typing import Any, cast
+ 
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV1,
++    DeliverableSetV2,
++)
+ from efficiency_platform_agent.contracts.events import EventType, RunEventV1
+ from efficiency_platform_agent.contracts.requests import (
+     CancelRunRequestV1,
+@@ -21,7 +25,10 @@
+     RunViewV1,
+     UsageV1,
+ )
+-from efficiency_platform_agent.contracts.stream_events import StreamEventName
++from efficiency_platform_agent.contracts.stream_events import (
++    OperationVisiblePhase,
++    StreamEventName,
++)
+ from efficiency_platform_agent.core.budget import (
+     BudgetCharge,
+     BudgetExhaustedError,
+@@ -177,7 +184,9 @@
+     normalized = text.strip().lower()
+     if any(marker in normalized for marker in _NEGATED_RESEARCH_MARKERS):
+         return False
+-    return bool(normalized) and any(marker in normalized for marker in _RESEARCH_MARKERS)
++    return bool(normalized) and any(
++        marker in normalized for marker in _RESEARCH_MARKERS
++    )
+ 
+ 
+ def _phase_count(result: GraphExecutionResult, *, default: int = 1) -> int:
+@@ -235,6 +244,7 @@
+         self._realtime_output_run_tenants: dict[str, str] = {}
+         self._realtime_output_runs: set[str] = set()
+         self._assistant_started_runs: set[str] = set()
++        self._published_operation_phases: dict[str, set[OperationVisiblePhase]] = {}
+         self._run_event_listeners: list[
+             Callable[[RunEventRecord], Awaitable[None]]
+         ] = []
+@@ -328,7 +338,9 @@
+             run_id=record.run_id, request_id=original.request_id
+         ):
+             try:
+-                return await self._prepare_and_execute_pipeline(record, original, prepare)
++                return await self._prepare_and_execute_pipeline(
++                    record, original, prepare
++                )
+             except Exception as error:  # noqa: BLE001 - 准备阶段不得泄露模型异常
+                 self._record_exception(
+                     "pipeline_preparation_failed", "PIPELINE_PREPARATION_FAILED", error
+@@ -632,7 +644,9 @@
+     ) -> RunViewV1 | None:
+         """执行已排队 Run，并将后台边界异常归一化为失败状态。"""
+ 
+-        with bind_diagnostic_context(run_id=record.run_id, request_id=request.request_id):
++        with bind_diagnostic_context(
++            run_id=record.run_id, request_id=request.request_id
++        ):
+             try:
+                 return await self._execute_queued(record, request)
+             except Exception as error:  # noqa: BLE001 - 后台任务不得泄露未观察异常
+@@ -642,7 +656,9 @@
+                     getattr(error, "code", "BACKGROUND_EXECUTION_FAILED"),
+                     error,
+                     stage="background.execute",
+-                    strategy=(current.strategy if current is not None else record.strategy),
++                    strategy=(
++                        current.strategy if current is not None else record.strategy
++                    ),
+                 )
+                 return await self._settle_background_failure(record, request, error)
+ 
+@@ -661,7 +677,7 @@
+         run_id: str,
+         event: StreamEventName,
+         *,
+-        phase: str,
++        phase: OperationVisiblePhase,
+         count: int = 0,
+         duration_ms: int = 0,
+         degraded: bool = False,
+@@ -679,6 +695,17 @@
+             payload["error_code"] = error_code
+         await self.event_hub.publish_next(run_id, event, payload)
+ 
++    async def _publish_visible_operation_phase(
++        self, run_id: str, phase: OperationVisiblePhase
++    ) -> None:
++        """同一 Run 的每个用户可见阶段最多发布一次。"""
++
++        published = self._published_operation_phases.setdefault(run_id, set())
++        if phase in published:
++            return
++        await self.event_hub.publish_next(run_id, "phase_started", {"phase": phase})
++        published.add(phase)
++
+     async def _execute_queued_with_context(
+         self, record: RunRecord, request: CreateRunRequestV1
+     ) -> RunViewV1:
+@@ -744,25 +771,32 @@
+             )
+             self._realtime_output_run_tenants[record.run_id] = request.tenant_id
+             await self._event(record, "run_started")
+-            await self.event_hub.publish_next(
+-                record.run_id, "phase_started", {"phase": "scenario_execution"}
+-            )
+             operation_request = selection.mode is StrategyMode.MULTI_AGENT
+             research_request = operation_request and _operation_requires_research(
+                 request.input_text
+             )
+             phase_started_at = perf_counter()
++            if operation_request:
++                await self._publish_visible_operation_phase(
++                    record.run_id, "understanding_request"
++                )
+             if research_request:
++                await self._publish_visible_operation_phase(
++                    record.run_id, "collecting_sources"
++                )
+                 await self._publish_operation_phase(
+                     record.run_id,
+                     "research_started",
+-                    phase="research",
++                    phase="collecting_sources",
+                 )
+             elif operation_request:
++                await self._publish_visible_operation_phase(
++                    record.run_id, "creating_content"
++                )
+                 await self._publish_operation_phase(
+                     record.run_id,
+                     "content_generation_started",
+-                    phase="content_generation",
++                    phase="creating_content",
+                 )
+             state: dict[str, object] = {
+                 "run_id": record.run_id,
+@@ -810,32 +844,41 @@
+                 if operation_request and result.next_status is RunStatus.SUCCEEDED:
+                     elapsed_ms = int((perf_counter() - phase_started_at) * 1000)
+                     if research_request:
++                        await self._publish_visible_operation_phase(
++                            record.run_id, "checking_evidence"
++                        )
+                         await self._publish_operation_phase(
+                             record.run_id,
+                             "research_completed",
+-                            phase="research",
++                            phase="checking_evidence",
+                             count=1,
+                             duration_ms=elapsed_ms,
+                             degraded=result.degraded,
+                         )
++                        await self._publish_visible_operation_phase(
++                            record.run_id, "creating_content"
++                        )
+                         await self._publish_operation_phase(
+                             record.run_id,
+                             "content_generation_started",
+-                            phase="content_generation",
++                            phase="creating_content",
+                         )
+                     deliverable_count = _phase_count(result, default=1)
+                     await self._publish_operation_phase(
+                         record.run_id,
+                         "content_generation_completed",
+-                        phase="content_generation",
++                        phase="creating_content",
+                         count=deliverable_count,
+                         duration_ms=elapsed_ms,
+                         degraded=result.degraded,
+                     )
++                    await self._publish_visible_operation_phase(
++                        record.run_id, "checking_delivery"
++                    )
+                     await self._publish_operation_phase(
+                         record.run_id,
+                         "quality_checked",
+-                        phase="quality_check",
++                        phase="checking_delivery",
+                         count=deliverable_count,
+                         duration_ms=elapsed_ms,
+                         degraded=result.degraded,
+@@ -1027,6 +1070,7 @@
+         self._assistant_started_runs.discard(record.run_id)
+         if target is not RunStatus.WAITING_INPUT:
+             self._pipeline_usage.pop(record.run_id, None)
++            self._published_operation_phases.pop(record.run_id, None)
+         return view
+ 
+     async def get_run(self, run_id: str, tenant_id: str) -> RunViewV1:
+@@ -1349,10 +1393,37 @@
+                     )
+         deliverable_set = output.get("deliverable_set")
+         if isinstance(deliverable_set, Mapping):
++            delivery_version = output.get("delivery_contract_version")
++            try:
++                if delivery_version == "deliverable-set/2":
++                    validated = DeliverableSetV2.model_validate(
++                        dict(deliverable_set)
++                    ).model_dump(mode="json")
++                elif delivery_version == "deliverable-set/1":
++                    validated = DeliverableSetV1.model_validate(
++                        dict(deliverable_set)
++                    ).model_dump(mode="json")
++                elif delivery_version is None:
++                    # Task 4 之前的调用方没有版本分派字段，继续保留 V1 兼容路径。
++                    validated = dict(deliverable_set)
++                else:
++                    raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
++            except (TypeError, ValueError):
++                await self.event_hub.publish_next(
++                    record.run_id,
++                    "stream_error",
++                    {
++                        "code": "DELIVERABLE_SET_INVALID",
++                        "category": "presentation",
++                        "retryable": False,
++                        "safe_message": "交付结果校验失败",
++                    },
++                )
++                return True
+             await self.event_hub.publish_next(
+                 record.run_id,
+                 "deliverable",
+-                {"deliverable_set": dict(deliverable_set)},
++                {"deliverable_set": validated},
+             )
+         return presentation_degraded
+ 
+
+src\efficiency_platform_agent\contracts\stream_events.py	3523 bytes	SHA256 1EBD00D772D8B9ACDA61D6951FFAA5ED6920364687D26CD086B6A5C4E8649410
+
+DIFF src\efficiency_platform_agent\contracts\stream_events.py
+--- a/src\efficiency_platform_agent\contracts\stream_events.py
++++ b/src\efficiency_platform_agent\contracts\stream_events.py
+@@ -4,9 +4,9 @@
+ 
+ from copy import deepcopy
+ from math import isfinite
+-from typing import Annotated, Any, Literal
++from typing import Annotated, Any, Literal, get_args
+ 
+-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
++from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+ 
+ 
+ def _validated_json(value: Any) -> Any:
+@@ -45,6 +45,14 @@
+     "stream_error",
+     "stream_done",
+ ]
++OperationVisiblePhase = Literal[
++    "understanding_request",
++    "collecting_sources",
++    "checking_evidence",
++    "creating_content",
++    "checking_delivery",
++]
++_OPERATION_VISIBLE_PHASES = frozenset(get_args(OperationVisiblePhase))
+ 
+ 
+ class RunStreamEventV1(BaseModel):
+@@ -62,5 +70,35 @@
+         default_factory=dict, description="脱敏后的严格 JSON 事件数据。"
+     )
+ 
+-
+-__all__ = ["JsonValue", "RunStreamEventV1", "StreamEventName"]
++    @model_validator(mode="after")
++    def validate_visible_phase(self) -> RunStreamEventV1:
++        """禁止事件载荷透传内部阶段，并约束可选进度计数。"""
++
++        phase = self.payload.get("phase")
++        if phase is None:
++            return self
++        if not isinstance(phase, str) or phase not in _OPERATION_VISIBLE_PHASES:
++            raise ValueError("运营阶段必须是用户可见阶段")
++        progress: dict[str, int] = {}
++        for key in ("completed", "target"):
++            value = self.payload.get(key)
++            if value is None:
++                continue
++            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
++                raise ValueError(f"{key} 必须是非负整数")
++            progress[key] = value
++        if (
++            "completed" in progress
++            and "target" in progress
++            and progress["completed"] > progress["target"]
++        ):
++            raise ValueError("completed 不得大于 target")
++        return self
++
++
++__all__ = [
++    "JsonValue",
++    "OperationVisiblePhase",
++    "RunStreamEventV1",
++    "StreamEventName",
++]
+
+tests\api\test_operation_delivery_v2_events.py	10460 bytes	SHA256 F20C5697FC3AA6B2ABCD306DF9FD2772BAE8A593F4D3A705A92FCD97ECA53A4B
+
+DIFF tests\api\test_operation_delivery_v2_events.py
+--- a/tests\api\test_operation_delivery_v2_events.py
++++ b/tests\api\test_operation_delivery_v2_events.py
+@@ -0,0 +1,278 @@
++"""验证运营 V2 只通过既有 SSE 协议输出用户安全阶段与单一交付。"""
++
++from __future__ import annotations
++
++import pytest
++
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV1,
++    DeliverableSetV2,
++    DeliverableV1,
++    DeliverySummaryV2,
++    NextActionV2,
++    PlatformContentDeliverableV2,
++    PlatformContentV2,
++)
++from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
++from efficiency_platform_agent.contracts.stream_events import RunStreamEventV1
++from efficiency_platform_agent.core.budget import BudgetGuard
++from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
++from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, JsonValue
++from efficiency_platform_agent.core.runtime import UsageSnapshot
++from efficiency_platform_agent.harness.service import AgentRuntimeService
++from efficiency_platform_agent.orchestration.contracts import (
++    CheckpointView,
++    GraphExecutionResult,
++)
++from efficiency_platform_agent.persistence.in_memory import (
++    FixedClock,
++    InMemoryRunEventStore,
++    InMemoryRunRepository,
++    SequenceIdGenerator,
++)
++from efficiency_platform_agent.routing.strategy_router import StrategyRouter
++from efficiency_platform_agent.runtime.event_hub import EventHub
++
++
++def _json_value(value: object) -> JsonValue:
++    """把已校验模型输出冻结为 Graph 边界使用的不可变 JSON。"""
++
++    if isinstance(value, dict):
++        return JsonObject(
++            tuple((str(key), _json_value(item)) for key, item in value.items())
++        )
++    if isinstance(value, list):
++        return tuple(_json_value(item) for item in value)
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    raise TypeError("测试输出必须是严格 JSON")
++
++
++def _v2_delivery(run_id: str) -> DeliverableSetV2:
++    """构造包含受控后续动作的最小合法 V2 集合。"""
++
++    deliverable = PlatformContentDeliverableV2(
++        deliverable_id="deliverable-1",
++        platform="wechat",
++        title="AI 行业周报",
++        lead="本周值得关注的行业变化。",
++        content=PlatformContentV2(
++            body_markdown="## 本周观察\n\n这是可直接交付的正文。",
++            hashtags=["AI"],
++            format_notes=["保留二级标题"],
++        ),
++        copy_text="AI 行业周报\n\n本周值得关注的行业变化。",
++    )
++    return DeliverableSetV2(
++        run_id=run_id,
++        intent_revision=1,
++        summary=DeliverySummaryV2(
++            message="已完成 1 份内容。", result_count=1, complete=True
++        ),
++        deliverables=[deliverable],
++        next_actions=[
++            NextActionV2(
++                action_id="action-1",
++                action_type="rewrite_for_platform",
++                label="改写为小红书版本",
++                target_deliverable_id="deliverable-1",
++                intent_patch={"channels": ["xiaohongshu"]},
++                requires_user_input=True,
++            )
++        ],
++    )
++
++
++class OperationDeliveryGraph:
++    """返回 Task 4 运行时接口形状的最小运营图替身。"""
++
++    def __init__(self, contract_version: str, *, invalid_action: bool = False) -> None:
++        self.contract_version = contract_version
++        self.invalid_action = invalid_action
++
++    async def execute(self, _selection, state):
++        if self.contract_version == "deliverable-set/2":
++            result = _v2_delivery(state["run_id"])
++            content = result.summary.message
++        else:
++            result = DeliverableSetV1(
++                deliverables=[
++                    DeliverableV1(platform="wechat", title="标题", body="正文")
++                ],
++                summary="已完成 1 份内容。",
++            )
++            content = result.summary
++        deliverable_set = result.model_dump(mode="json")
++        if self.invalid_action:
++            deliverable_set["next_actions"][0]["action_type"] = "delete_records"
++        output = _json_value(
++            {
++                "delivery_contract_version": result.contract_version,
++                "content": content,
++                "deliverable_set": deliverable_set,
++            }
++        )
++        assert isinstance(output, JsonObject)
++        return GraphExecutionResult(
++            UsageSnapshot(3, 5, 0, estimated=True),
++            BudgetGuard().start(
++                ExecutionBudget(20, 4, 100, 100, 100, 100),
++                now_epoch_ms=state["budget_state"]["started_at_epoch_ms"],
++            ),
++            CheckpointView(state["run_id"], "s2:multi_agent:1", "cp-operation"),
++            (),
++            RunStatus.SUCCEEDED,
++            output,
++        )
++
++
++def _service(
++    contract_version: str = "deliverable-set/2", *, invalid_action: bool = False
++) -> AgentRuntimeService:
++    """构造只运行一个受控运营图的 Harness。"""
++
++    return AgentRuntimeService(
++        repository=InMemoryRunRepository(),
++        event_store=InMemoryRunEventStore(),
++        router=StrategyRouter(frozenset({StrategyMode.MULTI_AGENT})),
++        graph_runtime=OperationDeliveryGraph(
++            contract_version, invalid_action=invalid_action
++        ),
++        budget_guard=BudgetGuard(),
++        budget=ExecutionBudget(20, 4, 100, 100, 100, 100),
++        clock=FixedClock(1),
++        id_generator=SequenceIdGenerator(),
++        event_hub=EventHub(),
++    )
++
++
++def _request(request_id: str, text: str) -> CreateRunRequestV1:
++    """构造运营多 Agent 请求。"""
++
++    return CreateRunRequestV1(
++        request_id=request_id,
++        tenant_id="tenant-1",
++        user_id="user-1",
++        input_text=text,
++        requested_strategy=StrategyMode.MULTI_AGENT,
++        strategy_payload_schema_version="operation-strategy-payload/1",
++        strategy_payload={"operation_request": {"request": {}}},
++    )
++
++
++async def _run_stream(
++    text: str, *, contract_version: str = "deliverable-set/2"
++) -> list[RunStreamEventV1]:
++    """执行并回放一次完整运营事件流。"""
++
++    service = _service(contract_version)
++    queued = await service.create_and_schedule(
++        _request(f"request-{contract_version}", text)
++    )
++    await service.wait_for_background_tasks()
++    return await service.event_hub.replay(queued.run_id, 0)
++
++
++@pytest.mark.asyncio
++async def test_v2_stream_exposes_safe_phases_before_single_delivery() -> None:
++    """研究型请求只暴露五个用户阶段，并只交付一个 V2 集合事件。"""
++
++    events = await _run_stream("收集最近 AI 行业动态并撰写公众号内容")
++    phases = [item.payload["phase"] for item in events if item.event == "phase_started"]
++
++    assert phases == [
++        "understanding_request",
++        "collecting_sources",
++        "checking_evidence",
++        "creating_content",
++        "checking_delivery",
++    ]
++    names = [item.event for item in events]
++    assert names.count("deliverable") == 1
++    assert names.count("stream_done") == 1
++    assert names.index("phase_started") < names.index("deliverable")
++    assert names[-1] == "stream_done"
++    deliverable = next(item for item in events if item.event == "deliverable")
++    assert (
++        deliverable.payload["deliverable_set"]["contract_version"]
++        == "deliverable-set/2"
++    )
++    assert (
++        deliverable.payload["deliverable_set"]["next_actions"][0]["action_id"]
++        == "action-1"
++    )
++    assert not any("next_action" in item.event for item in events)
++    assert [item.sequence for item in events] == list(range(1, len(events) + 1))
++    serialized = "".join(item.model_dump_json() for item in events).lower()
++    for forbidden in ("prompt", "token", "model_candidates", "tool_args", "raw_page"):
++        assert forbidden not in serialized
++
++
++@pytest.mark.asyncio
++async def test_non_research_stream_skips_research_only_visible_phases() -> None:
++    """无研究请求不得为了动画伪造收集来源与证据检查。"""
++
++    events = await _run_stream("为新品撰写一篇公众号内容")
++
++    assert [
++        item.payload["phase"] for item in events if item.event == "phase_started"
++    ] == ["understanding_request", "creating_content", "checking_delivery"]
++
++
++@pytest.mark.asyncio
++async def test_v2_replay_resumes_without_duplicate_delivery_or_terminal_event() -> None:
++    """从游标续读时不重复唯一交付和唯一终态。"""
++
++    service = _service()
++    queued = await service.create_and_schedule(
++        _request("request-replay", "收集最近 AI 动态并撰写公众号内容")
++    )
++    await service.wait_for_background_tasks()
++    all_events = await service.event_hub.replay(queued.run_id, 0)
++    evidence_events = [
++        item
++        for item in all_events
++        if item.event == "phase_started"
++        and item.payload.get("phase") == "checking_evidence"
++    ]
++    assert len(evidence_events) == 1
++    cursor = evidence_events[0].sequence
++    resumed = await service.event_hub.replay(queued.run_id, cursor)
++
++    assert all(item.sequence > cursor for item in resumed)
++    assert [item.event for item in resumed].count("deliverable") == 1
++    assert [item.event for item in resumed].count("stream_done") == 1
++
++
++@pytest.mark.asyncio
++async def test_v1_delivery_remains_compatible_with_the_existing_event_name() -> None:
++    """显式 V1 Run 仍使用同一个 deliverable 事件，不引入第二套协议。"""
++
++    events = await _run_stream(
++        "为新品撰写一篇公众号内容", contract_version="deliverable-set/1"
++    )
++
++    deliveries = [item for item in events if item.event == "deliverable"]
++    assert len(deliveries) == 1
++    assert (
++        deliveries[0].payload["deliverable_set"]["contract_version"]
++        == "deliverable-set/1"
++    )
++
++
++@pytest.mark.asyncio
++async def test_v2_stream_rejects_invalid_next_action_before_delivery() -> None:
++    """SSE 发布边界必须再次拒绝绕过意图管线的非法动作。"""
++
++    service = _service(invalid_action=True)
++    queued = await service.create_and_schedule(
++        _request("request-invalid-action", "为新品撰写一篇公众号内容")
++    )
++    await service.wait_for_background_tasks()
++    events = await service.event_hub.replay(queued.run_id, 0)
++
++    assert not any(item.event == "deliverable" for item in events)
++    errors = [item for item in events if item.event == "stream_error"]
++    assert len(errors) == 1
++    assert errors[0].payload["code"] == "DELIVERABLE_SET_INVALID"
++    assert [item.event for item in events].count("stream_done") == 1
+
+tests\contracts\test_stream_event_contracts.py	4732 bytes	SHA256 8DCB9202EDD542CBB63FDC52F0789E0C0279324D16933B9659167B04C80ADD63
+
+DIFF tests\contracts\test_stream_event_contracts.py
+--- a/tests\contracts\test_stream_event_contracts.py
++++ b/tests\contracts\test_stream_event_contracts.py
+@@ -3,10 +3,12 @@
+ from __future__ import annotations
+ 
+ from datetime import UTC, datetime
++from typing import get_args
+ 
+ import pytest
+ from pydantic import ValidationError
+ 
++from efficiency_platform_agent.contracts import stream_events
+ from efficiency_platform_agent.contracts.deliverables import DeliverableV1
+ from efficiency_platform_agent.contracts.stream_events import RunStreamEventV1
+ 
+@@ -80,6 +82,50 @@
+     assert RunStreamEventV1.model_validate_json(event.model_dump_json()) == event
+ 
+ 
++@pytest.mark.parametrize(
++    "phase",
++    [
++        "understanding_request",
++        "collecting_sources",
++        "checking_evidence",
++        "creating_content",
++        "checking_delivery",
++    ],
++)
++def test_phase_started_accepts_only_user_visible_phase_values(
++    phase: str,
++) -> None:
++    assert phase in get_args(stream_events.OperationVisiblePhase)
++    event = RunStreamEventV1(
++        event="phase_started",
++        run_id="run-1",
++        sequence=1,
++        payload={"phase": phase, "completed": 0, "target": 1},
++    )
++
++    assert event.payload["phase"] == phase
++
++
++@pytest.mark.parametrize(
++    "payload",
++    [
++        {"phase": "scenario_execution"},
++        {"phase": "research"},
++        {"phase": "creating_content", "completed": True, "target": 1},
++        {"phase": "creating_content", "completed": -1, "target": 1},
++        {"phase": "creating_content", "completed": 0, "target": False},
++        {"phase": "creating_content", "completed": 2, "target": 1},
++    ],
++)
++def test_phase_started_rejects_internal_phase_and_unsafe_progress(
++    payload: dict[str, object],
++) -> None:
++    with pytest.raises(ValidationError):
++        RunStreamEventV1(
++            event="phase_started", run_id="run-1", sequence=1, payload=payload
++        )
++
++
+ def test_deliverable_requires_platform() -> None:
+     with pytest.raises(ValidationError):
+         DeliverableV1(title="标题", body="正文")
+
+docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md	24331 bytes	SHA256 76D6049977FB80A8F9C5C10DCE51384D6AA8AB0662743167CF20DA4809B25E1D
+
+DIFF docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+--- a/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
++++ b/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+@@ -292,3 +292,15 @@
+ - Task 4：complete（首轮复核发现 2 个 Important，TDD 修复后复审通过）。
+ - 最终规格复核通过，代码质量 Approved；无剩余 Critical/Important/Minor 问题。
+ - 旧 ResearchProvider 仅显式 V1、provenance 仅表示已接纳集合、测试依赖链 mypy 不属于生产源码门禁，均作为已披露且可接受边界保留。
++
++## Task 5：安全阶段、单一交付事件与受控后续动作
++
++状态：DONE_WITH_CONCERNS。完整证据与四文件 SHA256 见 [Task 5 实施报告](sdd/agent-task-5-report.md)。永久 non-Git，无提交。
++
++Task 5 沿用 `run.stream.event/1` 和原 `phase_started`、`deliverable`、`stream_done` 事件，不新增第二套流协议或动作执行事件。运营研究请求的用户阶段固定为 `understanding_request` → `collecting_sources` → `checking_evidence` → `creating_content` → `checking_delivery`；无研究请求跳过来源收集与证据检查，只输出理解、内容创作、交付检查。非运营策略不发布运营阶段，同一 Run 每个阶段最多一次。
++
++流事件契约拒绝内部/未知 `phase`；可选 `completed`、`target` 只允许非 bool 的非负整数，且完成数不得大于目标数。Task 4 声明版本的 V2/V1 集合在 SSE 发布前按对应 Pydantic 契约重校验；非法后续动作不会产生 `deliverable`，只产生固定 `DELIVERABLE_SET_INVALID` 呈现错误，原生命周期仍唯一输出 `stream_done`。`next_actions` 只存在于 `DeliverableSetV2` 内，不能绕过下一轮意图管线。
++
++RED：阶段/API 为 `3 failed, 1 passed`；契约为 `11 failed, 20 passed`；撤回重校验后非法动作边界为 `1 failed, 4 deselected`。GREEN：非法动作聚焦 `1 passed, 4 deselected`；brief 指定 API/SSE/重放/契约组合 `58 passed in 4.28s`。
++
++Ruff check、Ruff format、两生产文件 mypy 与源码编译均通过；AST 为 `12 passed, 47 subtests passed in 2.46s`。最终全量 `.venv\Scripts\python.exe -m pytest -q`：退出码 0，`1670 passed, 9 skipped, 2 warnings, 280 subtests passed in 54.47s`。两条 warning 为既有第三方弃用/未来行为提示。未执行真实 Provider、网络、数据库、前端联调或生产 SSE 验收，不声称生产上线完成。
+

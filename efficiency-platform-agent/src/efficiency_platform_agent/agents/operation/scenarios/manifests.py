@@ -42,8 +42,8 @@ QUALITY_CHECKS = frozenset(
 # 外部模型首字节和多平台并行生成存在网络抖动，平台阶段保留独立的 120 秒上限；
 # 总 Run 预算仍由组合根统一约束，避免单个平台无限等待。
 # 多平台平台正文和结构化 JSON 需要完整输出，避免 2,000 Token 旧上限截断。
-_BUDGET = ExecutionBudget(3, 1, 4000, 8000, 120000, 0)
-_RESEARCH_BUDGET = ExecutionBudget(3, 1, 4000, 8000, 240000, 0)
+_BUDGET = ExecutionBudget(4, 1, 4000, 8000, 120000, 0)
+_RESEARCH_BUDGET = ExecutionBudget(4, 1, 4000, 8000, 240000, 0)
 _TERMINATION = frozenset({"stop_on_failure"})
 
 

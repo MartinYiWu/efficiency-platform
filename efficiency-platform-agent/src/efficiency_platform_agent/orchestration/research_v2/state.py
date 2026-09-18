@@ -1,0 +1,110 @@
+"""Research V2 检查点只保存 ID、版本、计数和控制摘要。"""
+
+from __future__ import annotations
+
+from typing import Literal, TypedDict
+
+from efficiency_platform_agent.contracts.research_v2 import (
+    BudgetSnapshotV2,
+    ResearchBriefV2,
+    ResearchPolicySnapshotV2,
+)
+
+
+class ResearchGraphState(TypedDict, total=False):
+    schema_version: str
+    brief_digest: str
+    intent_revision: int
+    quality_policy_id: str
+    policy_version: str
+    budget_lease_id: str
+    budget_version: int
+    max_refill_rounds: int
+    refill_rounds: int
+    no_gain_rounds: int
+    initial_collection_done: bool
+    phase: str
+    planned_action_ids: list[str]
+    candidate_ids: list[str]
+    acquired_document_ids: list[str]
+    normalized_document_ids: list[str]
+    filtered_document_ids: list[str]
+    deduplicated_document_ids: list[str]
+    event_ids: list[str]
+    qualified_event_ids: list[str]
+    claim_ids: list[str]
+    evidence_ids: list[str]
+    quality_report_id: str | None
+    hard_gap_ids: list[str]
+    output_artifact_id: str | None
+    output_verified: bool
+    output_degraded: bool
+    output_recollect_requested: bool
+    complete_empty_plan: bool
+    plan_exhausted: bool
+    budget_exhausted: bool
+    soft_deadline_reached: bool
+    hard_deadline_reached: bool
+    cancelled: bool
+    fatal_error: bool
+    stop_reason: str | None
+    domain_status: Literal[
+        "COMPLETE", "PARTIAL", "NO_MATCHES", "FAILED", "NOT_EVALUATED"
+    ]
+    stage_events: list[str]
+
+
+def initial_research_state(
+    brief: ResearchBriefV2,
+    policy: ResearchPolicySnapshotV2,
+    budget: BudgetSnapshotV2,
+    *,
+    max_refill_rounds: int = 2,
+) -> ResearchGraphState:
+    if brief.quality_policy_id != policy.quality_policy_id:
+        raise ValueError("RESEARCH_GRAPH_POLICY_MISMATCH")
+    if brief.trusted_context.budget_lease_id != budget.lease_id:
+        raise ValueError("RESEARCH_GRAPH_BUDGET_MISMATCH")
+    return ResearchGraphState(
+        schema_version="research-graph-state/2",
+        brief_digest=brief.canonical_digest(),
+        intent_revision=brief.intent_revision,
+        quality_policy_id=policy.quality_policy_id,
+        policy_version=policy.policy_version,
+        budget_lease_id=budget.lease_id,
+        budget_version=budget.version,
+        max_refill_rounds=max_refill_rounds,
+        refill_rounds=0,
+        no_gain_rounds=0,
+        initial_collection_done=False,
+        phase="created",
+        planned_action_ids=[],
+        candidate_ids=[],
+        acquired_document_ids=[],
+        normalized_document_ids=[],
+        filtered_document_ids=[],
+        deduplicated_document_ids=[],
+        event_ids=[],
+        qualified_event_ids=[],
+        claim_ids=[],
+        evidence_ids=[],
+        quality_report_id=None,
+        hard_gap_ids=[],
+        output_artifact_id=None,
+        output_verified=False,
+        output_degraded=False,
+        output_recollect_requested=False,
+        complete_empty_plan=False,
+        plan_exhausted=False,
+        budget_exhausted=False,
+        soft_deadline_reached=False,
+        hard_deadline_reached=False,
+        cancelled=False,
+        fatal_error=False,
+        stop_reason=None,
+        domain_status="NOT_EVALUATED",
+        stage_events=[],
+    )
+
+
+__all__ = ["ResearchGraphState", "initial_research_state"]

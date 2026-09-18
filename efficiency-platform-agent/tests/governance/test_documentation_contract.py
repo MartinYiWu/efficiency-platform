@@ -541,6 +541,55 @@ class DocumentationContractTest(unittest.TestCase):
             with self.subTest(marker=marker):
                 self.assertIn(marker, report)
 
+    def test_intent_research_v2_completion_audit_matches_three_plans(self) -> None:
+        plans_root = PROJECT_ROOT / "docs/superpowers/plans"
+        plan_paths = {
+            "overall": plans_root
+            / "2026-09-16-Agent意图与研究闭环优化-实施计划.md",
+            "intent": plans_root
+            / "2026-09-16-Agent语义意图与多轮理解-实施计划.md",
+            "research": plans_root
+            / "2026-09-16-Agent免费多源研究闭环-实施计划.md",
+        }
+        unchecked_counts = {
+            name: len(
+                re.findall(
+                    r"^- \[ \] ",
+                    path.read_text(encoding="utf-8"),
+                    flags=re.MULTILINE,
+                )
+            )
+            for name, path in plan_paths.items()
+        }
+        self.assertEqual(
+            unchecked_counts,
+            {"overall": 0, "intent": 0, "research": 0},
+        )
+
+        audit_path = (
+            PROJECT_ROOT
+            / "docs/superpowers/sdd/intent-research-v2/三份实施计划完成度审计.md"
+        )
+        audit = audit_path.read_text(encoding="utf-8")
+        for marker in (
+            "三份计划未勾选项均为 0",
+            "X01：临时隔离 PostgreSQL",
+            "X04：三类免费公开源只读准入",
+            "X05：单测试租户 20 个有效请求",
+            "事件聚类量化证据",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, audit)
+
+        ledger = (
+            PROJECT_ROOT
+            / "docs/superpowers/sdd/intent-research-v2/实施进度账本.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "[三份实施计划完成度审计](三份实施计划完成度审计.md)",
+            ledger,
+        )
+
     def _governed_markdown_files(self) -> tuple[Path, ...]:
         roots = (
             PROJECT_ROOT / "README.md",

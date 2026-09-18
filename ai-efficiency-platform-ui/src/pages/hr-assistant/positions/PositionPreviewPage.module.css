@@ -1,0 +1,158 @@
+.page {
+  display: grid;
+  gap: 16px;
+  padding-bottom: 78px;
+}
+.header,
+.settings,
+.footer,
+.judgement {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.header h1 {
+  margin: 0 !important;
+  font-size: 24px !important;
+}
+.header > div:last-child,
+.footer > div {
+  display: flex;
+  gap: 12px;
+}
+.guide {
+  border-color: #cfe0ff !important;
+  background: linear-gradient(100deg, #eff6ff, #faf5ff);
+}
+.guide h2 {
+  font-size: 16px !important;
+}
+.guide p,
+.diagnosis p {
+  margin: 6px 0 0;
+  color: #64748b;
+}
+.settings {
+  justify-content: flex-start;
+}
+.settings label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.settings :global(.ant-select) {
+  width: 210px;
+}
+.distribution {
+  display: flex;
+  height: 40px;
+  overflow: hidden;
+  margin: 6px 0 16px;
+  border-radius: 8px;
+}
+.distribution span {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 12px;
+}
+.distribution span:nth-child(1) {
+  width: 10%;
+}
+.distribution span:nth-child(2) {
+  width: 30%;
+}
+.distribution span:nth-child(3) {
+  width: 40%;
+}
+.distribution span:nth-child(4) {
+  width: 20%;
+}
+.strong {
+  color: #16a34a !important;
+  background: #16a34a;
+}
+.recommend {
+  color: #2563eb !important;
+  background: #2563eb;
+}
+.review {
+  color: #f59e0b !important;
+  background: #f59e0b;
+}
+.muted {
+  color: #94a3b8 !important;
+  background: #94a3b8;
+}
+.diagnosis {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  color: #16803d;
+  background: #f0fdf4;
+  border-radius: 8px;
+}
+.diagnosis svg {
+  margin-top: 3px;
+}
+.calibration {
+  border-left: 3px solid #2563eb;
+}
+.judgement {
+  justify-content: flex-start;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.judgement strong {
+  width: 60px;
+}
+.judgement :global(.ant-select) {
+  width: 150px;
+}
+.agreement {
+  display: grid;
+  gap: 8px;
+  padding-top: 16px;
+}
+.footer {
+  position: fixed;
+  z-index: 11;
+  right: 0;
+  bottom: 0;
+  left: 220px;
+  padding: 12px 24px;
+  background: #fff;
+  border-top: 1px solid #e4ebf4;
+}
+@media (max-width: 1100px) {
+  .footer {
+    left: 72px;
+  }
+}
+@media (max-width: 767px) {
+  .header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .settings {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settings :global(.ant-select) {
+    width: 100%;
+  }
+  .distribution span {
+    font-size: 10px;
+  }
+  .footer {
+    left: 0;
+    padding: 10px 16px;
+  }
+  .footer > span {
+    display: none;
+  }
+  .judgement {
+    flex-wrap: wrap;
+  }
+}

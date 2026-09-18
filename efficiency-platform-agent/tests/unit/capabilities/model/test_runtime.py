@@ -6,12 +6,25 @@ import asyncio
 
 import pytest
 
-from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.capabilities.model.runtime import (
+    ModelBudgetContext,
+    ModelLeaseContext,
+    ModelRuntime,
+)
 from efficiency_platform_agent.core.budget import (
     BudgetCharge,
     BudgetGuard,
     BudgetState,
     RemainingBudget,
+)
+from efficiency_platform_agent.core.budget_execution import (
+    BudgetExecutionBinding,
+    bind_budget_execution,
+)
+from efficiency_platform_agent.core.budget_lease import (
+    BudgetLimits,
+    BudgetScope,
+    InMemoryBudgetLeaseRepository,
 )
 from efficiency_platform_agent.core.model import ModelDemand, ModelTier
 from efficiency_platform_agent.core.run import (
@@ -101,6 +114,27 @@ class ScriptedStreamingProvider:
             yield chunk
 
 
+class TerminalStreamingProvider(ScriptedStreamingProvider):
+    """在返回正文前把对应 Run 标记为取消终态。"""
+
+    def __init__(
+        self,
+        repository: InMemoryBudgetLeaseRepository,
+        scope: BudgetScope,
+    ) -> None:
+        super().__init__(
+            "fake_strong",
+            ((ProviderStreamChunk("late-secret", ProviderUsage(2, 1, 0, 0, 0)),),),
+        )
+        self.repository = repository
+        self.scope = scope
+
+    async def stream(self, request: ProviderRequest):
+        await self.repository.mark_scope_terminal(self.scope, "cancelled")
+        async for chunk in super().stream(request):
+            yield chunk
+
+
 class MutableCancellationSignal:
     """允许测试在首个可见 delta 后请求取消。"""
 
@@ -110,6 +144,276 @@ class MutableCancellationSignal:
     def wait_requested(self) -> bool:
         """返回当前取消状态。"""
         return self.requested
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["stream", "stream_complete"])
+async def test_stream_entrypoints_inherit_task_local_acceptance_lease(
+    entrypoint: str,
+) -> None:
+    provider = ScriptedStreamingProvider(
+        "fake_strong",
+        (
+            (
+                ProviderStreamChunk("你", ProviderUsage(2, 1, 0, 0, 3)),
+                ProviderStreamChunk(
+                    "好", ProviderUsage(2, 2, 0, 0, 5), "stop"
+                ),
+            ),
+        ),
+    )
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=2,
+            max_bytes=0,
+            max_cost_microunits=100,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "acceptance-1", "live_acceptance", "all")
+    binding = BudgetExecutionBinding(
+        repository,
+        scope,
+        "lease-live-1",
+        "a" * 64,
+    )
+    runtime = ModelRuntime(ModelPolicyRouter(), registry)
+    deltas: list[str] = []
+
+    with bind_budget_execution(binding):
+        if entrypoint == "stream":
+            chunks = [
+                chunk
+                async for chunk in runtime.stream(
+                    demand(),
+                    request(),
+                    remaining_budget=RemainingBudget(
+                        10, 10, 100, 100, 100, 1_000
+                    ),
+                )
+            ]
+            assert "".join(chunk.delta or "" for chunk in chunks) == "你好"
+        else:
+            execution = await runtime.stream_complete(
+                demand(),
+                request(),
+                remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+                on_delta=deltas.append,
+            )
+            assert execution.result.message is not None
+            assert deltas == ["你", "好"]
+
+    snapshot = await repository.snapshot(scope)
+    assert snapshot.used.calls == 1
+    assert snapshot.used.cost_microunits == 5
+    assert binding.version == snapshot.version
+
+
+@pytest.mark.asyncio
+async def test_stream_complete_settles_parent_lease_once() -> None:
+    provider = ScriptedStreamingProvider(
+        "fake_strong",
+        (
+            (
+                ProviderStreamChunk("你", ProviderUsage(2, 1, 0, 0, 3)),
+                ProviderStreamChunk(
+                    "好", ProviderUsage(2, 2, 0, 0, 5), "stop"
+                ),
+            ),
+        ),
+    )
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=100,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    context = ModelLeaseContext(repository, scope, "stream-model", 0)
+    received: list[str] = []
+
+    execution = await ModelRuntime(
+        ModelPolicyRouter(), registry
+    ).stream_complete(
+        demand(),
+        request(),
+        remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+        on_delta=received.append,
+        lease_context=context,
+    )
+
+    snapshot = await repository.snapshot(scope)
+    assert execution.result.message is not None
+    assert received == ["你", "好"]
+    assert provider.calls == 1
+    assert snapshot.used.calls == 1
+    assert snapshot.used.input_tokens == 2
+    assert snapshot.used.output_tokens == 2
+    assert snapshot.used.cost_microunits == 5
+    assert snapshot.reserved.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_stream_parent_lease_rejection_prevents_provider_dispatch() -> None:
+    provider = ScriptedStreamingProvider(
+        "fake_strong",
+        ((ProviderStreamChunk("不应调用", ProviderUsage(1, 1, 0, 0, 0)),),),
+    )
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=0, max_bytes=0, max_cost_microunits=0)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+
+    chunks = [
+        chunk
+        async for chunk in ModelRuntime(ModelPolicyRouter(), registry).stream(
+            demand(),
+            request(),
+            remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+            lease_context=ModelLeaseContext(
+                repository, scope, "stream-model", 0
+            ),
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert chunks[0].error is not None
+    assert chunks[0].error.code == "BUDGET_EXHAUSTED"
+    assert provider.calls == 0
+    assert repository.dispatched_invocation_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["stream", "stream_complete"])
+async def test_leased_stream_never_delivers_before_failed_settlement(
+    entrypoint: str,
+) -> None:
+    provider = ScriptedStreamingProvider(
+        "fake_strong",
+        ((ProviderStreamChunk("secret", ProviderUsage(2, 1, 0, 0, 5)),),),
+    )
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", provider)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=0,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    context = ModelLeaseContext(
+        repository,
+        scope,
+        f"failed-{entrypoint}",
+        0,
+        reserve_cost_microunits=0,
+    )
+    runtime = ModelRuntime(ModelPolicyRouter(), registry)
+    emitted: list[str] = []
+
+    if entrypoint == "stream":
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                demand(),
+                request(),
+                remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+                lease_context=context,
+            )
+        ]
+        emitted.extend(chunk.delta for chunk in chunks if chunk.delta)
+        assert chunks[-1].error is not None
+        assert chunks[-1].error.code == "BUDGET_EXHAUSTED"
+    else:
+        execution = await runtime.stream_complete(
+            demand(),
+            request(),
+            remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+            on_delta=emitted.append,
+            lease_context=context,
+        )
+        assert execution.result.error is not None
+        assert execution.result.error.code == "BUDGET_EXHAUSTED"
+
+    snapshot = await repository.snapshot(scope)
+    assert emitted == []
+    assert provider.calls == 1
+    assert snapshot.reserved.calls == 0
+    assert snapshot.used.calls == 1
+    assert snapshot.used.cost_microunits == 5
+    assert repository.audit_records[-1].actual.cost_microunits == 5
+    assert repository.audit_records[-1].over_limit is True
+    assert repository.audit_records[-1].outcome == "success"
+    assert repository.audit_records[-1].delivery_allowed is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entrypoint", ["stream", "stream_complete"])
+async def test_terminal_leased_stream_never_delivers_late_success(
+    entrypoint: str,
+) -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=0,
+            max_cost_microunits=0,
+            max_input_tokens=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "model")
+    provider = TerminalStreamingProvider(repository, scope)
+    registry = ModelProviderRegistry()
+    registry.register("fake_strong", provider)
+    runtime = ModelRuntime(ModelPolicyRouter(), registry)
+    context = ModelLeaseContext(
+        repository,
+        scope,
+        f"terminal-{entrypoint}",
+        0,
+        reserve_cost_microunits=0,
+    )
+    emitted: list[str] = []
+
+    if entrypoint == "stream":
+        chunks = [
+            chunk
+            async for chunk in runtime.stream(
+                demand(),
+                request(),
+                remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+                lease_context=context,
+            )
+        ]
+        emitted.extend(chunk.delta for chunk in chunks if chunk.delta)
+        assert chunks[-1].error is not None
+        assert chunks[-1].error.code == "CANCELLED"
+    else:
+        execution = await runtime.stream_complete(
+            demand(),
+            request(),
+            remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+            on_delta=emitted.append,
+            lease_context=context,
+        )
+        assert execution.result.error is not None
+        assert execution.result.error.code == "CANCELLED"
+
+    assert emitted == []
+    assert repository.audit_records[-1].delivery_allowed is False
 
 
 @pytest.mark.asyncio
@@ -293,17 +597,17 @@ async def test_stream_and_stream_complete_both_record_error_chunk_usage_snapshot
         """构造拥有独立预算状态的流式 Runtime。"""
         registry = ModelProviderRegistry()
         registry.register("fake_strong", provider)
-        return ModelRuntime(
-            ModelPolicyRouter(),
-            registry,
-            budget_guard=guard,
-            budget=budget,
-            budget_state=budget_state,
-            clock=FixedClock(),
-            monotonic_clock=lambda: 0.0,
+        return (
+            ModelRuntime(
+                ModelPolicyRouter(),
+                registry,
+                clock=FixedClock(),
+                monotonic_clock=lambda: 0.0,
+            ),
+            ModelBudgetContext(guard, budget, budget_state),
         )
 
-    stream_runtime = runtime_for(
+    stream_runtime, stream_context = runtime_for(
         ScriptedStreamingProvider("fake_strong", ((error_chunk,),)), state
     )
     chunks = [
@@ -312,9 +616,10 @@ async def test_stream_and_stream_complete_both_record_error_chunk_usage_snapshot
             demand(),
             request(),
             remaining_budget=RemainingBudget(10, 0, 100, 100, 100, 1_000),
+            budget_context=stream_context,
         )
     ]
-    complete_runtime = runtime_for(
+    complete_runtime, complete_context = runtime_for(
         ScriptedStreamingProvider("fake_strong", ((error_chunk,),)),
         BudgetState(BudgetCharge(), 1, 10_001),
     )
@@ -323,12 +628,13 @@ async def test_stream_and_stream_complete_both_record_error_chunk_usage_snapshot
         request(),
         remaining_budget=RemainingBudget(10, 0, 100, 100, 100, 1_000),
         on_delta=lambda _delta: None,
+        budget_context=complete_context,
     )
 
     assert chunks[0].error is not None
-    assert stream_runtime.budget_state.consumed.input_tokens == 7
-    assert stream_runtime.budget_state.consumed.output_tokens == 3
-    assert stream_runtime.budget_state.consumed.cost_microunits == 11
+    assert stream_context.state.consumed.input_tokens == 7
+    assert stream_context.state.consumed.output_tokens == 3
+    assert stream_context.state.consumed.cost_microunits == 11
     assert execution.usage.input_tokens == 7
     assert execution.usage.output_tokens == 3
     assert execution.usage.cost_microunits == 11

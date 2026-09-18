@@ -1,0 +1,238 @@
+.page {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  height: calc(100dvh - 112px);
+  gap: 18px;
+  overflow: hidden;
+}
+.heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+.heading h1 {
+  margin: 0 0 8px !important;
+  font-size: 25px !important;
+}
+.heading :global(.ant-typography) {
+  color: #64748b;
+}
+.headingActions,
+.metrics,
+.filterPanel,
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+.metric,
+.metricButton {
+  display: flex;
+  min-width: 0;
+  padding: 21px 24px;
+  align-items: center;
+  gap: 16px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #edf0f5;
+  border-radius: 9px;
+  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
+}
+.metricButton {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+}
+.metricButton .metric {
+  width: 100%;
+  border-color: #edf0f5;
+}
+.metric > span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  color: #fff;
+  font-size: 23px;
+  place-items: center;
+  border-radius: 50%;
+}
+.metric div {
+  display: grid;
+  gap: 4px;
+}
+.metric :global(.ant-typography) {
+  color: #475569;
+}
+.metric strong {
+  font-size: 27px;
+  line-height: 1;
+  color: #0f172a;
+}
+.blue {
+  background: #1677ff;
+}
+.purple {
+  background: #6d45e8;
+}
+.green {
+  background: #22a85b;
+}
+.orange {
+  background: #fa8c16;
+}
+.filterPanel {
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #edf0f5;
+  border-radius: 9px;
+  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
+}
+.filterPanel > :first-child {
+  width: 285px;
+}
+.filterPanel label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #475569;
+  white-space: nowrap;
+}
+.filterPanel label :global(.ant-select) {
+  width: 166px;
+}
+.tablePanel {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #edf0f5;
+  border-radius: 9px;
+  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
+}
+.tablePanel :global(.ant-table-wrapper) {
+  min-width: 0;
+  min-height: 0;
+}
+.tablePanel :global(.ant-table) {
+  min-width: 1150px;
+}
+.tablePanel :global(.ant-table-thead > tr > th) {
+  color: #334155;
+  font-weight: 600;
+  background: #fff;
+  border-bottom: 1px solid #e8edf3;
+}
+.tablePanel :global(.ant-table-tbody > tr > td) {
+  color: #334155;
+  border-bottom: 1px solid #eef2f6;
+}
+.tablePanel :global(.ant-table-pagination) {
+  margin: 16px 20px;
+}
+.configuredCell {
+  color: #16a34a;
+}
+.warningCell {
+  color: #f59e0b;
+}
+.warningCell :global(.anticon) {
+  margin-left: 5px;
+}
+.enabled,
+.incomplete,
+.disabled {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.25;
+}
+.enabled {
+  color: #16a34a;
+  background: #eaf9ef;
+}
+.incomplete {
+  color: #f59e0b;
+  background: #fff3e5;
+}
+.disabled {
+  color: #64748b;
+  background: #f1f5f9;
+}
+.actions {
+  gap: 1px;
+}
+.actions :global(.ant-btn) {
+  height: auto;
+  padding: 0 3px;
+}
+.emptyDescription {
+  max-width: 430px;
+  margin: 0 auto 12px !important;
+  color: #64748b !important;
+  line-height: 1.7;
+}
+@media (max-width: 1100px) {
+  .page {
+    height: auto;
+    min-height: calc(100dvh - 112px);
+    overflow: visible;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .filterPanel {
+    flex-wrap: wrap;
+  }
+  .filterPanel > :first-child {
+    width: 100%;
+  }
+}
+@media (max-width: 767px) {
+  .page {
+    gap: 16px;
+  }
+  .heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .headingActions {
+    width: 100%;
+  }
+  .headingActions :global(.ant-btn) {
+    flex: 1;
+  }
+  .metrics {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .metric {
+    padding: 15px;
+  }
+  .filterPanel {
+    padding: 14px;
+  }
+  .filterPanel label {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .filterPanel label :global(.ant-select) {
+    width: 72%;
+  }
+  .filterPanel > :first-child {
+    width: 100%;
+  }
+  .filterPanel > :last-child,
+  .filterPanel > :nth-last-child(2) {
+    flex: 1;
+  }
+}

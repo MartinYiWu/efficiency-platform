@@ -19,6 +19,9 @@ if TYPE_CHECKING:
         DocumentIngestionService,
     )
     from efficiency_platform_agent.conversation.service import ConversationService
+    from efficiency_platform_agent.harness.live_acceptance import (
+        LiveAcceptanceService,
+    )
     from efficiency_platform_agent.harness.service import AgentRuntimeService
     from efficiency_platform_agent.runtime.event_hub import EventHub
 
@@ -29,6 +32,7 @@ def create_app(
     document_service: DocumentIngestionService | None = None,
     event_hub: EventHub | None = None,
     conversation_service: ConversationService | None = None,
+    live_acceptance_service: LiveAcceptanceService | None = None,
 ) -> FastAPI:
     """创建绑定运行服务并可选挂载文档摄取服务的 FastAPI 应用。"""
     app = FastAPI(title="Efficiency Platform Agent Runtime", version="s2")
@@ -50,6 +54,11 @@ def create_app(
         app.include_router(build_conversation_router(conversation_service))
     if document_service is not None:
         app.include_router(build_upload_router(document_service))
+    if live_acceptance_service is not None:
+        from .live_acceptance_routes import build_live_acceptance_router
+
+        app.state.live_acceptance_service = live_acceptance_service
+        app.include_router(build_live_acceptance_router(live_acceptance_service))
     app.add_exception_handler(HarnessError, handle_harness_error)
     app.add_exception_handler(Exception, handle_unexpected_error)
 

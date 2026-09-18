@@ -1,0 +1,630 @@
+"""连接器中立的安全 HTTP 传输编排端口。"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import zlib
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Literal, Protocol
+from urllib.parse import urljoin
+
+from efficiency_platform_agent.contracts.research_sources_v2 import (
+    FetchedContentV2,
+    FetchRequestV2,
+)
+from efficiency_platform_agent.contracts.research_transport_v2 import (
+    AuthorizedTargetV2,
+    ResearchUrlSourcePolicyV2,
+    UrlTargetShapeV2,
+)
+from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.budget_lease import (
+    BudgetCharge as LeaseBudgetCharge,
+)
+from efficiency_platform_agent.core.budget_lease import (
+    BudgetLeaseError,
+    BudgetLeasePort,
+    BudgetScope,
+    LeaseConflictError,
+    Reservation,
+)
+
+_ALLOWED_MEDIA_TYPES = frozenset(
+    {
+        "application/atom+xml",
+        "application/json",
+        "application/rss+xml",
+        "application/xml",
+        "text/html",
+        "text/plain",
+        "text/xml",
+    }
+)
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_SAFE_RESPONSE_HEADERS = frozenset(
+    {
+        "cache-control",
+        "link",
+        "retry-after",
+        "x-ratelimit-limit",
+        "x-ratelimit-remaining",
+        "x-ratelimit-reset",
+    }
+)
+
+
+class ResearchFetchError(RuntimeError):
+    """研究获取的稳定、安全错误。"""
+
+    def __init__(
+        self,
+        code: str,
+        reason_code: str,
+        *,
+        http_status: int | None = None,
+        response_headers: tuple[tuple[str, str], ...] = (),
+        downloaded_bytes: int = 0,
+        request_count: int = 0,
+    ) -> None:
+        if code not in {
+            "CONTENT_REJECTED",
+            "CONTENT_UNAVAILABLE",
+            "SOURCE_SCHEMA_INVALID",
+        }:
+            raise ValueError("RESEARCH_FETCH_ERROR_INVALID")
+        super().__init__(code)
+        self.code = code
+        self.reason_code = reason_code
+        self.http_status = http_status
+        self.response_headers = response_headers
+        self.downloaded_bytes = downloaded_bytes
+        self.request_count = request_count
+
+
+class TargetResolver(Protocol):
+    async def resolve(self, host: str, port: int) -> tuple[str, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedResponse:
+    status_code: int
+    headers: Mapping[str, str]
+    body_chunks: tuple[bytes, ...]
+
+
+class PinnedHttpConnector(Protocol):
+    supports_ip_pinning: bool
+    supports_tls_server_name: bool
+    verifies_certificates: bool
+    uses_environment_proxy: bool
+
+    async def request(
+        self,
+        target: AuthorizedTargetV2,
+        *,
+        headers: Mapping[str, str],
+        connect_timeout: float,
+        request_timeout: float,
+        max_wire_bytes: int,
+    ) -> PinnedResponse: ...
+
+
+class TargetAuthorizer(Protocol):
+    def validate_shape(
+        self, url: str, source_policy: ResearchUrlSourcePolicyV2
+    ) -> UrlTargetShapeV2: ...
+
+    def authorize(
+        self,
+        url: str,
+        source_policy: ResearchUrlSourcePolicyV2,
+        resolved_ips: tuple[str, ...],
+    ) -> AuthorizedTargetV2: ...
+
+
+@dataclass(slots=True)
+class HttpBudgetContext:
+    """一次安全 Fetch 内逐 HTTP 请求共享的父预算租约上下文。"""
+
+    port: BudgetLeasePort
+    scope: BudgetScope
+    invocation_prefix: str
+    version: int
+
+    def __post_init__(self) -> None:
+        if not self.invocation_prefix.strip() or self.version < 0:
+            raise ValueError("HTTP_BUDGET_CONTEXT_INVALID")
+
+
+@dataclass(frozen=True, slots=True)
+class FetchLease:
+    source_policy: ResearchUrlSourcePolicyV2
+    resolver: TargetResolver
+    remaining_budget: RemainingBudget
+    max_wire_bytes: int = 2 * 1024 * 1024
+    max_decoded_bytes: int = 2 * 1024 * 1024
+    max_redirects: int = 3
+    connect_timeout_seconds: float = 3.0
+    request_timeout_seconds: float = 10.0
+    budget_context: HttpBudgetContext | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_wire_bytes <= 0 or self.max_decoded_bytes <= 0:
+            raise ValueError("FETCH_BYTE_LIMIT_INVALID")
+        if self.max_redirects < 0 or self.max_redirects > 3:
+            raise ValueError("FETCH_REDIRECT_LIMIT_INVALID")
+        if self.connect_timeout_seconds <= 0 or self.request_timeout_seconds <= 0:
+            raise ValueError("FETCH_TIMEOUT_INVALID")
+
+
+class SafeHttpTransport:
+    """逐跳授权的传输编排器；真实连接器必须显式注入且通过能力检查。"""
+
+    def __init__(
+        self,
+        connector: PinnedHttpConnector,
+        *,
+        url_policy: TargetAuthorizer,
+    ) -> None:
+        self.connector = connector
+        self.url_policy = url_policy
+
+    async def fetch(
+        self, request: FetchRequestV2, lease: FetchLease
+    ) -> FetchedContentV2:
+        self._verify_connector_capabilities()
+        timeout = min(
+            lease.request_timeout_seconds,
+            lease.remaining_budget.timeout_ms / 1000,
+        )
+        if timeout <= 0:
+            raise ResearchFetchError("CONTENT_UNAVAILABLE", "FETCH_DEADLINE_EXHAUSTED")
+        max_requests = min(
+            lease.max_redirects + 1, lease.remaining_budget.tool_calls
+        )
+        if max_requests <= 0:
+            raise ResearchFetchError("CONTENT_UNAVAILABLE", "FETCH_BUDGET_EXHAUSTED")
+        current_url = request.url
+        headers = _conditional_headers(request)
+        redirects = 0
+        redirect_wire_bytes = 0
+        requests_started = 0
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    if redirects + 1 > max_requests:
+                        raise ResearchFetchError(
+                            "CONTENT_UNAVAILABLE", "FETCH_REQUEST_BUDGET_EXHAUSTED"
+                        )
+                    target = await self._authorize(current_url, lease)
+                    requests_started = redirects + 1
+                    response = await self._request_with_budget(
+                        request,
+                        target,
+                        lease,
+                        hop=redirects + 1,
+                        headers=headers,
+                        timeout=timeout,
+                    )
+                    if not isinstance(response, PinnedResponse):
+                        raise ResearchFetchError(
+                            "SOURCE_SCHEMA_INVALID", "CONNECTOR_RESPONSE_INVALID"
+                        )
+                    if response.status_code in _REDIRECT_STATUSES:
+                        redirect_wire_bytes += _verify_wire_chunks(
+                            response.body_chunks, lease.max_wire_bytes
+                        )
+                        if redirect_wire_bytes > lease.max_wire_bytes:
+                            raise ResearchFetchError(
+                                "CONTENT_REJECTED", "WIRE_BODY_TOO_LARGE"
+                            )
+                        if redirects >= lease.max_redirects:
+                            raise ResearchFetchError(
+                                "CONTENT_REJECTED", "FETCH_REDIRECT_LIMIT"
+                            )
+                        location = _header(response.headers, "location")
+                        if not location:
+                            raise ResearchFetchError(
+                                "SOURCE_SCHEMA_INVALID", "REDIRECT_LOCATION_MISSING"
+                            )
+                        current_url = urljoin(target.url, location)
+                        redirects += 1
+                        continue
+                    return _build_content(
+                        request,
+                        target,
+                        response,
+                        lease,
+                        prior_wire_bytes=redirect_wire_bytes,
+                        request_count=redirects + 1,
+                    )
+        except ResearchFetchError as exc:
+            if exc.request_count == 0:
+                exc.request_count = requests_started
+            raise
+        except TimeoutError as exc:
+            raise ResearchFetchError(
+                "CONTENT_UNAVAILABLE",
+                "FETCH_TIMEOUT",
+                request_count=requests_started,
+            ) from exc
+        except Exception as exc:
+            raise ResearchFetchError(
+                "CONTENT_UNAVAILABLE",
+                "FETCH_TRANSPORT_FAILED",
+                request_count=requests_started,
+            ) from exc
+
+    async def _request_with_budget(
+        self,
+        request: FetchRequestV2,
+        target: AuthorizedTargetV2,
+        lease: FetchLease,
+        *,
+        hop: int,
+        headers: Mapping[str, str],
+        timeout: float,
+    ) -> PinnedResponse:
+        context = lease.budget_context
+        reservation = (
+            await _reserve_http_request(
+                context,
+                request.request_id,
+                hop,
+                lease.max_wire_bytes,
+            )
+            if context is not None
+            else None
+        )
+        try:
+            response = await self.connector.request(
+                target,
+                headers=headers,
+                connect_timeout=min(lease.connect_timeout_seconds, timeout),
+                request_timeout=timeout,
+                max_wire_bytes=lease.max_wire_bytes,
+            )
+        except asyncio.CancelledError:
+            if context is not None and reservation is not None:
+                await context.port.mark_scope_terminal(context.scope, "cancelled")
+                await _settle_http_request(context, reservation, None, "unknown")
+            raise
+        except Exception as exc:
+            if context is not None and reservation is not None:
+                await _settle_http_request(context, reservation, None, "unknown")
+            raise ResearchFetchError(
+                "CONTENT_UNAVAILABLE",
+                "FETCH_TRANSPORT_FAILED",
+                request_count=hop,
+            ) from exc
+        if not isinstance(response, PinnedResponse):
+            if context is not None and reservation is not None:
+                await _settle_http_request(context, reservation, None, "unknown")
+            raise ResearchFetchError(
+                "SOURCE_SCHEMA_INVALID", "CONNECTOR_RESPONSE_INVALID"
+            )
+        wire_bytes = _wire_bytes_for_budget(response)
+        if context is not None and reservation is not None:
+            delivery_allowed = await _settle_http_request(
+                context,
+                reservation,
+                wire_bytes,
+                "success" if wire_bytes is not None else "unknown",
+            )
+            if not delivery_allowed:
+                raise ResearchFetchError(
+                    "CONTENT_UNAVAILABLE",
+                    "FETCH_LATE_RESULT",
+                    http_status=response.status_code,
+                    response_headers=_safe_response_headers(response.headers),
+                    downloaded_bytes=wire_bytes or 0,
+                    request_count=hop,
+                )
+        return response
+
+    async def _authorize(
+        self, url: str, lease: FetchLease
+    ) -> AuthorizedTargetV2:
+        try:
+            shape = self.url_policy.validate_shape(url, lease.source_policy)
+        except ValueError as exc:
+            code = getattr(exc, "code", "CONTENT_REJECTED")
+            reason_code = getattr(exc, "reason_code", "URL_POLICY_REJECTED")
+            raise ResearchFetchError(code, reason_code) from exc
+        try:
+            resolved = await lease.resolver.resolve(shape.host, shape.port)
+        except Exception as exc:
+            raise ResearchFetchError(
+                "CONTENT_UNAVAILABLE", "DNS_RESOLUTION_FAILED"
+            ) from exc
+        try:
+            return self.url_policy.authorize(url, lease.source_policy, resolved)
+        except ValueError as exc:
+            code = getattr(exc, "code", "CONTENT_REJECTED")
+            reason_code = getattr(exc, "reason_code", "URL_POLICY_REJECTED")
+            raise ResearchFetchError(code, reason_code) from exc
+
+    def _verify_connector_capabilities(self) -> None:
+        if not (
+            getattr(self.connector, "supports_ip_pinning", False)
+            and getattr(self.connector, "supports_tls_server_name", False)
+            and getattr(self.connector, "verifies_certificates", False)
+            and not getattr(self.connector, "uses_environment_proxy", True)
+        ):
+            raise ResearchFetchError(
+                "CONTENT_REJECTED", "CONNECTOR_SECURITY_CAPABILITY_MISSING"
+            )
+
+
+def _conditional_headers(request: FetchRequestV2) -> dict[str, str]:
+    headers = {
+        "accept": (
+            "text/html, application/rss+xml, application/atom+xml, "
+            "application/xml, application/json, text/plain"
+        )
+    }
+    if request.etag:
+        headers["if-none-match"] = request.etag
+    if request.last_modified:
+        headers["if-modified-since"] = request.last_modified
+    return headers
+
+
+async def _reserve_http_request(
+    context: HttpBudgetContext,
+    request_id: str,
+    hop: int,
+    max_wire_bytes: int,
+) -> Reservation:
+    digest = hashlib.sha256(
+        f"{context.invocation_prefix}:{request_id}:{hop}".encode()
+    ).hexdigest()[:32]
+    invocation_id = f"research-http-{digest}"
+    for _ in range(8):
+        try:
+            reserved = await context.port.reserve(
+                context.scope,
+                invocation_id,
+                LeaseBudgetCharge(calls=1, bytes=max_wire_bytes),
+                context.version,
+            )
+            dispatched = await context.port.mark_dispatched(
+                reserved.reservation_id
+            )
+            context.version = dispatched.version
+            return dispatched
+        except LeaseConflictError:
+            snapshot = await context.port.snapshot(context.scope)
+            context.version = snapshot.version
+        except BudgetLeaseError as exc:
+            raise ResearchFetchError(
+                "CONTENT_UNAVAILABLE", "FETCH_BUDGET_EXHAUSTED"
+            ) from exc
+    raise ResearchFetchError("CONTENT_UNAVAILABLE", "FETCH_BUDGET_EXHAUSTED")
+
+
+async def _settle_http_request(
+    context: HttpBudgetContext,
+    reservation: Reservation,
+    wire_bytes: int | None,
+    outcome: Literal["success", "failed", "cancelled", "unknown"],
+) -> bool:
+    try:
+        snapshot = await context.port.settle(
+            reservation.reservation_id,
+            LeaseBudgetCharge(
+                calls=1,
+                bytes=wire_bytes or 0,
+                unknown=outcome == "unknown",
+            ),
+            outcome,
+        )
+    except BudgetLeaseError as exc:
+        raise ResearchFetchError(
+            "CONTENT_UNAVAILABLE", "FETCH_BUDGET_SETTLEMENT_FAILED"
+        ) from exc
+    context.version = snapshot.version
+    return snapshot.delivery_allowed
+
+
+def _wire_bytes_for_budget(response: PinnedResponse) -> int | None:
+    if not isinstance(response.body_chunks, tuple) or any(
+        not isinstance(chunk, bytes) for chunk in response.body_chunks
+    ):
+        return None
+    return sum(len(chunk) for chunk in response.body_chunks)
+
+
+def _build_content(
+    request: FetchRequestV2,
+    target: AuthorizedTargetV2,
+    response: PinnedResponse,
+    lease: FetchLease,
+    *,
+    prior_wire_bytes: int,
+    request_count: int,
+) -> FetchedContentV2:
+    response_wire_bytes = _verify_wire_chunks(
+        response.body_chunks, lease.max_wire_bytes
+    )
+    if prior_wire_bytes + response_wire_bytes > lease.max_wire_bytes:
+        raise ResearchFetchError("CONTENT_REJECTED", "WIRE_BODY_TOO_LARGE")
+    if response.status_code == 304:
+        return FetchedContentV2(
+            request_id=request.request_id,
+            candidate_id=request.candidate_id,
+            final_url=target.url,
+            media_type="application/x-not-modified",
+            body=b"",
+            downloaded_bytes=prior_wire_bytes + response_wire_bytes,
+            request_count=request_count,
+            fetched_at=datetime.now(UTC),
+            status_code=304,
+            etag=_header(response.headers, "etag"),
+            last_modified=_header(response.headers, "last-modified"),
+            response_headers=_safe_response_headers(response.headers),
+        )
+    status_reason = _status_reason(response.status_code)
+    if status_reason is not None:
+        raise ResearchFetchError(
+            "CONTENT_UNAVAILABLE",
+            status_reason,
+            http_status=response.status_code,
+            response_headers=_safe_response_headers(response.headers),
+            downloaded_bytes=prior_wire_bytes + response_wire_bytes,
+            request_count=request_count,
+        )
+    content_type = _header(response.headers, "content-type")
+    if not content_type:
+        raise ResearchFetchError("SOURCE_SCHEMA_INVALID", "CONTENT_TYPE_MISSING")
+    media_type = content_type.split(";", 1)[0].strip().lower()
+    if not _media_type_allowed(media_type):
+        raise ResearchFetchError("CONTENT_REJECTED", "CONTENT_TYPE_FORBIDDEN")
+    declared_length = _header(response.headers, "content-length")
+    if declared_length:
+        try:
+            parsed_length = int(declared_length)
+            if parsed_length < 0:
+                raise ValueError
+            if parsed_length > lease.max_wire_bytes:
+                raise ResearchFetchError("CONTENT_REJECTED", "WIRE_BODY_TOO_LARGE")
+        except ValueError as exc:
+            raise ResearchFetchError(
+                "SOURCE_SCHEMA_INVALID", "CONTENT_LENGTH_INVALID"
+            ) from exc
+    body, downloaded_bytes = _decode_limited(
+        response.body_chunks,
+        _header(response.headers, "content-encoding") or "identity",
+        max_wire_bytes=lease.max_wire_bytes,
+        max_decoded_bytes=lease.max_decoded_bytes,
+    )
+    return FetchedContentV2(
+        request_id=request.request_id,
+        candidate_id=request.candidate_id,
+        final_url=target.url,
+        media_type=media_type,
+        body=body,
+        downloaded_bytes=prior_wire_bytes + downloaded_bytes,
+        request_count=request_count,
+        fetched_at=datetime.now(UTC),
+        status_code=response.status_code,
+        etag=_header(response.headers, "etag"),
+        last_modified=_header(response.headers, "last-modified"),
+        response_headers=_safe_response_headers(response.headers),
+    )
+
+
+def _media_type_allowed(media_type: str) -> bool:
+    return media_type in _ALLOWED_MEDIA_TYPES or media_type.endswith(
+        ("+json", "+xml")
+    )
+
+
+def _status_reason(status_code: int) -> str | None:
+    if 200 <= status_code < 300:
+        return None
+    if status_code == 401:
+        return "SOURCE_AUTH_REQUIRED"
+    if status_code == 403:
+        return "SOURCE_FORBIDDEN"
+    if status_code == 429:
+        return "SOURCE_RATE_LIMITED"
+    if status_code == 408 or 500 <= status_code < 600:
+        return "SOURCE_TEMPORARY_FAILURE"
+    return "HTTP_STATUS_UNAVAILABLE"
+
+
+def _safe_response_headers(headers: Mapping[str, str]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted(
+            (key.lower(), value.strip())
+            for key, value in headers.items()
+            if key.lower() in _SAFE_RESPONSE_HEADERS
+        )
+    )
+
+
+def _decode_limited(
+    chunks: tuple[bytes, ...],
+    content_encoding: str,
+    *,
+    max_wire_bytes: int,
+    max_decoded_bytes: int,
+) -> tuple[bytes, int]:
+    encoding = content_encoding.strip().lower()
+    if encoding in {"", "identity"}:
+        decompressor = None
+    elif encoding == "gzip":
+        decompressor = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif encoding == "deflate":
+        decompressor = zlib.decompressobj()
+    else:
+        raise ResearchFetchError("CONTENT_REJECTED", "CONTENT_ENCODING_FORBIDDEN")
+    wire_size = 0
+    output = bytearray()
+    try:
+        for chunk in chunks:
+            if not isinstance(chunk, bytes):
+                raise ResearchFetchError(
+                    "SOURCE_SCHEMA_INVALID", "BODY_CHUNK_INVALID"
+                )
+            wire_size += len(chunk)
+            if wire_size > max_wire_bytes:
+                raise ResearchFetchError("CONTENT_REJECTED", "WIRE_BODY_TOO_LARGE")
+            decoded = chunk if decompressor is None else decompressor.decompress(
+                chunk, max_decoded_bytes - len(output) + 1
+            )
+            output.extend(decoded)
+            if len(output) > max_decoded_bytes or (
+                decompressor is not None and decompressor.unconsumed_tail
+            ):
+                raise ResearchFetchError(
+                    "CONTENT_REJECTED", "DECODED_BODY_TOO_LARGE"
+                )
+        if decompressor is not None:
+            output.extend(decompressor.flush(max_decoded_bytes - len(output) + 1))
+            if not decompressor.eof or decompressor.unused_data:
+                raise ResearchFetchError(
+                    "SOURCE_SCHEMA_INVALID", "COMPRESSED_BODY_INCOMPLETE"
+                )
+    except zlib.error as exc:
+        raise ResearchFetchError(
+            "SOURCE_SCHEMA_INVALID", "CONTENT_ENCODING_INVALID"
+        ) from exc
+    if len(output) > max_decoded_bytes:
+        raise ResearchFetchError("CONTENT_REJECTED", "DECODED_BODY_TOO_LARGE")
+    return bytes(output), wire_size
+
+
+def _verify_wire_chunks(chunks: tuple[bytes, ...], max_wire_bytes: int) -> int:
+    size = 0
+    for chunk in chunks:
+        if not isinstance(chunk, bytes):
+            raise ResearchFetchError("SOURCE_SCHEMA_INVALID", "BODY_CHUNK_INVALID")
+        size += len(chunk)
+        if size > max_wire_bytes:
+            raise ResearchFetchError("CONTENT_REJECTED", "WIRE_BODY_TOO_LARGE")
+    return size
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value.strip()
+    return None
+
+
+__all__ = [
+    "FetchLease",
+    "HttpBudgetContext",
+    "PinnedHttpConnector",
+    "PinnedResponse",
+    "ResearchFetchError",
+    "SafeHttpTransport",
+    "TargetAuthorizer",
+    "TargetResolver",
+]

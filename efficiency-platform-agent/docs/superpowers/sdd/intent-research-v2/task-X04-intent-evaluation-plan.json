@@ -1,0 +1,11 @@
+{
+  "schema_version": "intent-v2-evaluation-report/2",
+  "dataset_version": "2026-09-16.1",
+  "split": "frozen",
+  "dataset_count": 60,
+  "evaluation_run_count": 0,
+  "status": "NOT_EXECUTED",
+  "reason_codes": [
+    "PREDICTIONS_REQUIRED"
+  ]
+}

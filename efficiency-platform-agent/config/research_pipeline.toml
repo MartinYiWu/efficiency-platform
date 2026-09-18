@@ -1,0 +1,11 @@
+# X02 Agent 侧无敏感版本开关；默认保持 V1，真实启用必须另行批准。
+[pipeline]
+intent_pipeline_version = "intent-v1"
+research_pipeline_version = "research-v1"
+research_replan_enabled = false
+research_source_allowlist = []
+research_policy_version = "research-policy/disabled"
+state_backend = "memory"
+# 灰度默认零租户；误把两个版本开关改成 V2 时，空白名单会使配置校验失败。
+rollout_mode = "tenant_allowlist"
+rollout_tenant_allowlist = []

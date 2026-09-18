@@ -1,0 +1,37 @@
+{
+  "evidence_version": "x05-offline-rollout/1",
+  "captured_at": "2026-09-17",
+  "execution_mode": "offline",
+  "external_io": false,
+  "real_model_calls": 0,
+  "real_source_calls": 0,
+  "rollout_assertions": {
+    "default_v1": true,
+    "default_tenant_count": 0,
+    "active_v2_snapshot_preserved_after_disable": true,
+    "active_v2_success_branch_completed_after_disable": true,
+    "active_v2_waiting_input_branch_completed_after_disable": true,
+    "active_v2_cancel_branch_completed_after_disable": true,
+    "v1_snapshot_not_upgraded_after_reenable": true,
+    "replan_change_new_conversations_only": true,
+    "tenant_allowlist_enforced": true,
+    "v1_checkpoint_reads": 0,
+    "unverified_search_calls": 0,
+    "evidence_deleted": false
+  },
+  "verification": {
+    "focused_tests": 40,
+    "full_tests": 1514,
+    "subtests": 280,
+    "source_and_script_files_mypy": 279,
+    "governance_architecture_tests": 129,
+    "governance_architecture_subtests": 246,
+    "ruff": "PASS",
+    "compileall": "PASS"
+  },
+  "claims": {
+    "cross_process_rollback_verified": false,
+    "real_canary_verified": false,
+    "production_ready": false
+  }
+}

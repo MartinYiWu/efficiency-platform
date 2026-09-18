@@ -1,0 +1,835 @@
+"""I07 Intent V2 会话生命周期、幂等与 CAS 测试。"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime
+
+import pytest
+
+from efficiency_platform_agent.agents.operation.definition import (
+    OperationSpecialistCapabilityId,
+)
+from efficiency_platform_agent.agents.operation.scenarios.semantic_catalog import (
+    build_operation_semantic_catalog,
+)
+from efficiency_platform_agent.contracts.conversation import ConversationMessageV1
+from efficiency_platform_agent.contracts.intent_v2 import (
+    BudgetLeaseReferenceV2,
+    FieldOperation,
+    FieldValue,
+    GoalNodeV2,
+    IntentContextV2,
+    IntentFrameV2,
+    IntentParameterV2,
+    IntentPatchV2,
+    OutputRequirementsV2,
+    PermissionSnapshotV2,
+    SourceConstraintsV2,
+    SourceSpan,
+    TrustedMessageV2,
+)
+from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
+from efficiency_platform_agent.contracts.research_v2 import (
+    ResearchPolicySnapshotV2,
+    TrustedResearchContextV2,
+)
+from efficiency_platform_agent.contracts.temporal_v2 import CalendarPeriodExpression
+from efficiency_platform_agent.conversation.context import ConversationTurn
+from efficiency_platform_agent.conversation.intent_v2_adapter import (
+    IntentV2ConversationAdapter,
+    PipelineVersionSnapshotV2,
+)
+from efficiency_platform_agent.conversation.service import (
+    ConversationService,
+    ConversationSubmissionStore,
+)
+from efficiency_platform_agent.core.enums import StrategyMode
+from efficiency_platform_agent.core.runtime import UsageSnapshot
+from efficiency_platform_agent.harness.service import RunPipelinePreparation
+from efficiency_platform_agent.orchestration.intent_v2.binding import (
+    CapabilityBinderV2,
+    build_operation_parameter_schema_registry,
+)
+from efficiency_platform_agent.orchestration.intent_v2.decision import (
+    IntentDecisionPolicyV2,
+)
+from efficiency_platform_agent.orchestration.intent_v2.interpreter import (
+    IntentInterpretationV2Error,
+    IntentInterpretationV2Execution,
+)
+from efficiency_platform_agent.orchestration.intent_v2.patch_validation import (
+    IntentPatchValidator,
+)
+from efficiency_platform_agent.orchestration.intent_v2.pipeline import (
+    InMemoryIntentTaskRepositoryV2,
+    IntentPipelineBypass,
+    IntentPipelineContextV2,
+    IntentPipelineV2,
+    IntentTaskSnapshotV2,
+)
+from efficiency_platform_agent.orchestration.intent_v2.reducer import (
+    IntentStateReducer,
+)
+from efficiency_platform_agent.orchestration.intent_v2.research_bridge import (
+    ResearchBriefBuilderV2,
+)
+from efficiency_platform_agent.orchestration.intent_v2.scenario_adapter import (
+    ScenarioInputAdapter,
+)
+from efficiency_platform_agent.orchestration.intent_v2.temporal import TemporalResolver
+from efficiency_platform_agent.orchestration.scenario_resolver import ScenarioResolver
+from tests.api.test_conversation_routes import RecordingRuntime, StubInterpreter, intent
+
+RESEARCH = OperationSpecialistCapabilityId.RESEARCH_INSIGHT.value
+CONTENT = OperationSpecialistCapabilityId.CHANNEL_CONTENT.value
+ANCHOR = datetime.fromisoformat("2026-09-16T09:41:00+08:00")
+
+
+class _FakeInterpreter:
+    def __init__(
+        self,
+        patches: dict[str, IntentPatchV2],
+        barrier: asyncio.Barrier | None = None,
+    ) -> None:
+        self.patches = patches
+        self.barrier = barrier
+        self.calls = 0
+
+    async def execute(self, text, context, previous, catalog, lease):
+        self.calls += 1
+        if self.barrier is not None:
+            await self.barrier.wait()
+        return IntentInterpretationV2Execution(
+            patch=self.patches[context.current_message_id],
+            usage=UsageSnapshot(input_tokens=10, output_tokens=5),
+            degraded=False,
+            attempts=(),
+            provider_calls=1,
+            repair_attempted=False,
+            review_attempted=False,
+            review_applied=False,
+            prompt_versions=("intent.v2.interpret@2.0.0",),
+            catalog_version=catalog.catalog_version,
+            context_version=context.context_version,
+            lease_id=lease.lease_id,
+            lease_version=lease.version,
+        )
+
+
+class _FailingInterpreter:
+    async def execute(self, text, context, previous, catalog, lease):
+        raise IntentInterpretationV2Error(
+            "INTENT_PROVIDER_UNAVAILABLE",
+            "意图服务暂不可用",
+            provider_calls=1,
+            catalog_version=catalog.catalog_version,
+            context_version=context.context_version,
+            lease_id=lease.lease_id,
+            lease_version=lease.version,
+        )
+
+
+def _derived(value):
+    return FieldValue(value=value, origin="derived", normalizer_version="test/1")
+
+
+def _previous(*, temporal: bool, revision: int = 1) -> IntentFrameV2:
+    return IntentFrameV2(
+        task_id="task-1",
+        revision=revision,
+        message_id="m-1",
+        anchor_time=ANCHOR,
+        timezone="Asia/Shanghai",
+        dialog_act="new_task",
+        goal_nodes=(
+            GoalNodeV2(
+                goal_id="g-research",
+                description="研究 AI 动态",
+                candidate_capability_ids=(RESEARCH,),
+                parameters=(IntentParameterV2(name="count", value=3),),
+            ),
+            GoalNodeV2(
+                goal_id="g-content",
+                description="写公众号",
+                candidate_capability_ids=(CONTENT,),
+                depends_on=("g-research",),
+            ),
+        ),
+        topic=_derived("AI 行业动态"),
+        temporal=(
+            _derived(CalendarPeriodExpression(text="昨天", period="day", offset=-1))
+            if temporal
+            else None
+        ),
+        source_constraints=_derived(
+            SourceConstraintsV2(allowed_source_ids=("xiaohongshu",))
+        ),
+        output_requirements=_derived(
+            OutputRequirementsV2(
+                output_types=("article",),
+                target_platforms=("wechat_official_account",),
+                language="zh-CN",
+            )
+        ),
+    )
+
+
+def _patch(message_id: str, text: str, *, base: int, dialog_act: str, day: str):
+    span = SourceSpan(
+        message_id=message_id,
+        start=0,
+        end=len(text),
+        quoted_text=text,
+    )
+    offset = -1 if day == "昨天" else -2
+    return IntentPatchV2(
+        base_revision=base,
+        dialog_act=dialog_act,
+        field_operations=(
+            FieldOperation(
+                operation="set",
+                field_name="temporal",
+                value=FieldValue(
+                    value=CalendarPeriodExpression(
+                        text=day,
+                        period="day",
+                        offset=offset,
+                    ),
+                    origin="explicit",
+                    source_span=span,
+                ),
+            ),
+        ),
+    )
+
+
+def _new_task_patch(message_id: str, text: str) -> IntentPatchV2:
+    span = SourceSpan(
+        message_id=message_id,
+        start=0,
+        end=len(text),
+        quoted_text=text,
+    )
+    return IntentPatchV2(
+        base_revision=0,
+        dialog_act="new_task",
+        goal_updates=(
+            GoalNodeV2(
+                goal_id="g-research",
+                description="研究 AI 动态",
+                candidate_capability_ids=(RESEARCH,),
+            ),
+        ),
+        field_operations=(
+            FieldOperation(
+                operation="set",
+                field_name="topic",
+                value=FieldValue(value="AI 动态", origin="explicit", source_span=span),
+            ),
+            FieldOperation(
+                operation="set",
+                field_name="temporal",
+                value=FieldValue(
+                    value=CalendarPeriodExpression(
+                        text="昨天", period="day", offset=-1
+                    ),
+                    origin="explicit",
+                    source_span=span,
+                ),
+            ),
+            FieldOperation(
+                operation="set",
+                field_name="source_constraints",
+                value=FieldValue(
+                    value=SourceConstraintsV2(),
+                    origin="explicit",
+                    source_span=span,
+                ),
+            ),
+            FieldOperation(
+                operation="set",
+                field_name="output_requirements",
+                value=FieldValue(
+                    value=OutputRequirementsV2(
+                        output_types=("digest",), language="zh-CN"
+                    ),
+                    origin="explicit",
+                    source_span=span,
+                ),
+            ),
+        ),
+    )
+
+
+def _context(
+    message_id: str,
+    text: str,
+    *,
+    proposed_run_id: str,
+    task_id: str = "task-1",
+) -> IntentPipelineContextV2:
+    catalog = build_operation_semantic_catalog()
+    return IntentPipelineContextV2(
+        intent_context=IntentContextV2(
+            current_message_id=message_id,
+            visible_message_ids=("m-1", message_id),
+            context_version="context-1",
+        ),
+        visible_user_messages={"m-1": "之前的请求", message_id: text},
+        catalog=catalog,
+        permissions=PermissionSnapshotV2(
+            version="permission-1",
+            allowed_capability_ids=tuple(
+                item.capability_id for item in catalog.capabilities
+            ),
+        ),
+        lease=BudgetLeaseReferenceV2(lease_id="lease-1", version=1),
+        research_context=TrustedResearchContextV2(
+            tenant_id="tenant-1",
+            run_id=proposed_run_id,
+            task_id=task_id,
+            budget_lease_id="lease-1",
+        ),
+        research_policy=ResearchPolicySnapshotV2(
+            quality_policy_id="research-quality-v2",
+            policy_version="2026-09-16",
+        ),
+        proposed_run_id=proposed_run_id,
+        allowed_normalizer_versions=frozenset({"test/1"}),
+        allowed_intent_parameter_names=frozenset({"count", "objective"}),
+    )
+
+
+def _message(message_id: str, text: str, *, task_id: str = "task-1"):
+    return TrustedMessageV2(
+        task_id=task_id,
+        message_id=message_id,
+        text=text,
+        received_at=ANCHOR,
+        timezone="Asia/Shanghai",
+        referenced_task_ids=(task_id,),
+    )
+
+
+def _pipeline(repository, interpreter):
+    return IntentPipelineV2(
+        repository=repository,
+        interpreter=interpreter,
+        validator=IntentPatchValidator(),
+        reducer=IntentStateReducer(),
+        temporal_resolver=TemporalResolver(),
+        binder=CapabilityBinderV2(build_operation_parameter_schema_registry()),
+        decision_policy=IntentDecisionPolicyV2(),
+        brief_builder=ResearchBriefBuilderV2(),
+        scenario_adapter=ScenarioInputAdapter(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_waiting_input_resumes_same_run_after_committed_revision() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v2",
+            frame=_previous(temporal=False),
+            run_id="run-1",
+            run_status="waiting_input",
+            clarification_rounds=1,
+        )
+    )
+    text = "昨天"
+    pipeline = _pipeline(
+        repository,
+        _FakeInterpreter(
+            {
+                "m-2": _patch(
+                    "m-2", text, base=1, dialog_act="answer_clarification", day="昨天"
+                )
+            }
+        ),
+    )
+
+    result = await pipeline.prepare(
+        _message("m-2", text),
+        _context("m-2", text, proposed_run_id="run-new"),
+    )
+
+    assert result.frame is not None and result.frame.revision == 2
+    assert result.decision.outcome == "READY"
+    assert result.lifecycle_action == "RESUME_RUN"
+    assert result.run_id == "run-1"
+    assert result.committed is True
+    assert result.dispatch_allowed is True
+    assert result.brief is not None
+    assert result.brief.trusted_context.run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_terminal_new_task_starts_new_run() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    text = "收集昨天的 AI 动态"
+    pipeline = _pipeline(
+        repository, _FakeInterpreter({"m-new": _new_task_patch("m-new", text)})
+    )
+
+    result = await pipeline.prepare(
+        _message("m-new", text, task_id="task-2"),
+        _context("m-new", text, proposed_run_id="run-2", task_id="task-2"),
+    )
+
+    assert result.lifecycle_action == "START_NEW_RUN"
+    assert result.run_id == "run-2"
+    assert result.dispatch_allowed is True
+
+
+@pytest.mark.asyncio
+async def test_running_refine_waits_for_existing_safe_boundary() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v2",
+            frame=_previous(temporal=True),
+            run_id="run-1",
+            run_status="running",
+        )
+    )
+    text = "不是昨天，是前天"
+    pipeline = _pipeline(
+        repository,
+        _FakeInterpreter(
+            {"m-2": _patch("m-2", text, base=1, dialog_act="refine", day="前天")}
+        ),
+    )
+
+    result = await pipeline.prepare(
+        _message("m-2", text),
+        _context("m-2", text, proposed_run_id="run-2"),
+    )
+
+    assert result.committed is True
+    assert result.lifecycle_action == "SUPERSEDE_AT_SAFE_BOUNDARY"
+    assert result.run_id == "run-1"
+    assert result.replacement_run_id == "run-2"
+    assert result.dispatch_allowed is False
+    assert result.brief is not None
+    assert result.brief.trusted_context.run_id == "run-2"
+
+
+@pytest.mark.asyncio
+async def test_identical_message_replays_without_second_model_call() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    text = "收集昨天的 AI 动态"
+    interpreter = _FakeInterpreter({"m-new": _new_task_patch("m-new", text)})
+    pipeline = _pipeline(repository, interpreter)
+    message = _message("m-new", text, task_id="task-2")
+    context = _context("m-new", text, proposed_run_id="run-2", task_id="task-2")
+
+    first = await pipeline.prepare(message, context)
+    second = await pipeline.prepare(message, context)
+
+    assert interpreter.calls == 1
+    assert first.frame == second.frame
+    assert second.replayed is True
+    assert second.dispatch_allowed is False
+
+    conflict = await pipeline.prepare(
+        _message("m-new", "相同ID但正文不同", task_id="task-2"),
+        _context(
+            "m-new",
+            "相同ID但正文不同",
+            proposed_run_id="run-2",
+            task_id="task-2",
+        ),
+    )
+    assert conflict.decision.reason_codes == ("INTENT_MESSAGE_ID_CONFLICT",)
+    assert conflict.committed is False
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_messages_do_not_silently_overwrite_revision() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v2",
+            frame=_previous(temporal=True),
+            run_id="run-1",
+            run_status="waiting_input",
+        )
+    )
+    texts = {"m-2": "改成昨天", "m-3": "改成前天"}
+    interpreter = _FakeInterpreter(
+        {
+            "m-2": _patch("m-2", texts["m-2"], base=1, dialog_act="refine", day="昨天"),
+            "m-3": _patch("m-3", texts["m-3"], base=1, dialog_act="refine", day="前天"),
+        },
+        asyncio.Barrier(2),
+    )
+    pipeline = _pipeline(repository, interpreter)
+
+    results = await asyncio.gather(
+        pipeline.prepare(
+            _message("m-2", texts["m-2"]),
+            _context("m-2", texts["m-2"], proposed_run_id="run-2"),
+        ),
+        pipeline.prepare(
+            _message("m-3", texts["m-3"]),
+            _context("m-3", texts["m-3"], proposed_run_id="run-3"),
+        ),
+    )
+
+    assert sum(item.committed for item in results) == 1
+    failed = next(item for item in results if not item.committed)
+    assert failed.decision.outcome == "FAILED"
+    assert failed.decision.reason_codes == ("INTENT_CAS_CONFLICT",)
+    assert failed.dispatch_allowed is False
+    stored = await repository.load("tenant-1", "task-1")
+    assert stored is not None and stored.frame is not None
+    assert stored.frame.revision == 2
+
+
+@pytest.mark.asyncio
+async def test_existing_v1_task_is_never_silently_upgraded() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v1",
+            frame=None,
+            run_id="run-1",
+            run_status="waiting_input",
+        )
+    )
+    interpreter = _FakeInterpreter({})
+    pipeline = _pipeline(repository, interpreter)
+
+    with pytest.raises(IntentPipelineBypass) as caught:
+        await pipeline.prepare(
+            _message("m-2", "昨天"),
+            _context("m-2", "昨天", proposed_run_id="run-new"),
+        )
+
+    assert caught.value.code == "TASK_VERSION_V1"
+    assert interpreter.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_clarification_limit_and_provider_failure_never_commit_or_dispatch() -> (
+    None
+):
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v2",
+            frame=_previous(temporal=False),
+            run_id="run-1",
+            run_status="waiting_input",
+            clarification_rounds=2,
+        )
+    )
+    text = "还是不确定"
+    patch = IntentPatchV2(base_revision=1, dialog_act="answer_clarification")
+    limited = await _pipeline(repository, _FakeInterpreter({"m-2": patch})).prepare(
+        _message("m-2", text),
+        _context("m-2", text, proposed_run_id="run-new"),
+    )
+
+    assert limited.decision.reason_codes == ("CLARIFICATION_LIMIT_EXCEEDED",)
+    assert limited.committed is False
+    assert limited.dispatch_allowed is False
+
+    provider_failed = await _pipeline(
+        InMemoryIntentTaskRepositoryV2(), _FailingInterpreter()
+    ).prepare(
+        _message("m-fail", "测试故障", task_id="task-fail"),
+        _context(
+            "m-fail",
+            "测试故障",
+            proposed_run_id="run-fail",
+            task_id="task-fail",
+        ),
+    )
+    assert provider_failed.decision.reason_codes == ("INTENT_PROVIDER_UNAVAILABLE",)
+    assert provider_failed.provider_calls == 1
+    assert provider_failed.committed is False
+    assert provider_failed.dispatch_allowed is False
+
+
+@pytest.mark.asyncio
+async def test_cancel_is_committed_but_only_requests_existing_cancel_path() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="task-1",
+            task_version="intent-v2",
+            frame=_previous(temporal=True),
+            run_id="run-1",
+            run_status="running",
+        )
+    )
+    text = "取消这个任务"
+    result = await _pipeline(
+        repository,
+        _FakeInterpreter(
+            {
+                "m-cancel": IntentPatchV2(
+                    base_revision=1,
+                    dialog_act="cancel",
+                )
+            }
+        ),
+    ).prepare(
+        _message("m-cancel", text),
+        _context("m-cancel", text, proposed_run_id="run-unused"),
+    )
+
+    assert result.committed is True
+    assert result.lifecycle_action == "CANCEL_EXISTING"
+    assert result.run_id == "run-1"
+    assert result.brief is None
+    assert result.scenario_projection is None
+    assert result.dispatch_allowed is False
+
+
+@pytest.mark.asyncio
+async def test_intent_repository_is_tenant_isolated() -> None:
+    repository = InMemoryIntentTaskRepositoryV2()
+    await repository.seed(
+        IntentTaskSnapshotV2(
+            tenant_id="tenant-1",
+            task_id="same-task",
+            task_version="intent-v2",
+            frame=None,
+            run_id=None,
+            run_status=None,
+        )
+    )
+
+    assert await repository.load("tenant-1", "same-task") is not None
+    assert await repository.load("tenant-2", "same-task") is None
+
+
+class _ConversationCoordinator:
+    def __init__(self, *, enabled: bool) -> None:
+        self.enabled = enabled
+        self.calls = 0
+
+    async def prepare(self, pipeline, tenant_id, conversation_id, message):
+        self.calls += 1
+        if not self.enabled:
+            return None
+        return RunPipelinePreparation(
+            CreateRunRequestV1(
+                request_id=message.request_id,
+                tenant_id=tenant_id,
+                user_id=message.user_id,
+                input_text=message.message,
+                requested_strategy=StrategyMode.DIRECT,
+                strategy_payload_schema_version="strategy.none/1",
+                strategy_payload={},
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_local_live_runtime_mode_is_frozen_with_new_conversation() -> None:
+    from efficiency_platform_agent.harness.service import RunPipelineContext
+    from tests.unit.harness.test_research_local_tools import REMAINING
+
+    async def cancelled():
+        return False
+
+    async def wait_cancelled():
+        await asyncio.Event().wait()
+
+    class Delegate:
+        source_registry = object()
+        tool_runtime = object()
+        research_service = object()
+        intent_state_store = object()
+        research_state_store = object()
+
+        async def prepare_v2(
+            self, pipeline, tenant_id, conversation_id, message, versions
+        ):
+            del pipeline, tenant_id, conversation_id, message, versions
+
+    adapter = IntentV2ConversationAdapter(
+        PipelineVersionSnapshotV2(
+            intent_pipeline_version="intent-v2",
+            research_pipeline_version="research-v2",
+            research_replan_enabled=False,
+            research_source_allowlist=("google_blog_rss",),
+            research_policy_version="local-live-research/1",
+            state_backend="memory",
+            runtime_mode="local_live",
+            rollout_mode="tenant_allowlist",
+            rollout_tenant_allowlist=("tenant-1",),
+        ),
+        Delegate(),
+    )
+
+    await adapter.prepare(
+        RunPipelineContext("run-local-live", REMAINING, cancelled, wait_cancelled),
+        "tenant-1",
+        "conversation-local-live",
+        ConversationMessageV1(
+            message="收集 AI 动态",
+            request_id="request-local-live",
+            user_id="user-1",
+        ),
+    )
+
+    frozen = adapter.version_for("tenant-1", "conversation-local-live")
+    assert frozen is not None
+    assert frozen.runtime_mode == "local_live"
+
+
+@pytest.mark.asyncio
+async def test_conversation_service_uses_v2_hook_only_without_v1_pending() -> None:
+    runtime = RecordingRuntime()
+    coordinator = _ConversationCoordinator(enabled=False)
+    facade = ConversationService(
+        runtime=runtime,
+        interpreter=StubInterpreter([intent(missing=["platforms"]), intent()]),
+        resolver=ScenarioResolver(),
+        submissions=ConversationSubmissionStore(),
+        intent_v2_coordinator=coordinator,
+    )
+    await facade.submit(
+        "conversation-1",
+        "tenant-1",
+        ConversationMessageV1(
+            message="写内容",
+            request_id="request-1",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+    assert coordinator.calls == 1
+
+    coordinator.enabled = True
+    await facade.submit(
+        "conversation-1",
+        "tenant-1",
+        ConversationMessageV1(
+            message="小红书",
+            request_id="request-2",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+
+    assert coordinator.calls == 1
+    assert (
+        runtime.preparations[-1].request.requested_strategy is StrategyMode.MULTI_AGENT
+    )
+
+
+@pytest.mark.asyncio
+async def test_conversation_service_v2_hook_can_prepare_new_task() -> None:
+    runtime = RecordingRuntime()
+    coordinator = _ConversationCoordinator(enabled=True)
+    facade = ConversationService(
+        runtime=runtime,
+        interpreter=StubInterpreter([]),
+        resolver=ScenarioResolver(),
+        submissions=ConversationSubmissionStore(),
+        intent_v2_coordinator=coordinator,
+    )
+    await facade.submit(
+        "conversation-2",
+        "tenant-1",
+        ConversationMessageV1(
+            message="新任务",
+            request_id="request-v2",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+
+    assert coordinator.calls == 1
+    assert runtime.preparations[-1].request.requested_strategy is StrategyMode.DIRECT
+
+
+@pytest.mark.asyncio
+async def test_local_chat_bypasses_v2_and_collects_nothing() -> None:
+    runtime = RecordingRuntime()
+    coordinator = _ConversationCoordinator(enabled=True)
+    facade = ConversationService(
+        runtime=runtime,
+        interpreter=StubInterpreter([]),
+        resolver=ScenarioResolver(),
+        submissions=ConversationSubmissionStore(),
+        intent_v2_coordinator=coordinator,
+    )
+
+    await facade.submit(
+        "conversation-local-v2",
+        "tenant-1",
+        ConversationMessageV1(
+            message="你好",
+            request_id="request-local-v2",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+
+    assert coordinator.calls == 0
+    assert runtime.preparations[-1].request.requested_strategy is StrategyMode.DIRECT
+
+
+@pytest.mark.asyncio
+async def test_explicit_offline_independent_question_bypasses_stale_research() -> None:
+    """明确离线且不引用上文的问答必须新开 DIRECT，不能继承研究状态。"""
+
+    class ForbiddenInterpreter:
+        async def interpret(self, text, context):
+            del text, context
+            pytest.fail("高置信度离线独立问答不应再次调用意图模型")
+
+    runtime = RecordingRuntime()
+    coordinator = _ConversationCoordinator(enabled=True)
+    facade = ConversationService(
+        runtime=runtime,
+        interpreter=ForbiddenInterpreter(),
+        resolver=ScenarioResolver(),
+        submissions=ConversationSubmissionStore(),
+        intent_v2_coordinator=coordinator,
+    )
+    entry = facade._context_entry(
+        ("tenant-1", "conversation-offline-reset"), facade.monotonic()
+    )
+    entry.context.append(
+        ConversationTurn("user", "收集过去7天内大模型推理优化的最新动态")
+    )
+    entry.context.append(ConversationTurn("assistant", "已生成研究交付物"))
+
+    await facade.submit(
+        "conversation-offline-reset",
+        "tenant-1",
+        ConversationMessageV1(
+            message="请用两句话解释RSS是什么，不需要联网，也不要引用刚才的内容。",
+            request_id="request-offline-reset",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+
+    assert coordinator.calls == 0
+    assert runtime.preparations[-1].request.requested_strategy is StrategyMode.DIRECT
+    submission = facade.direct_submissions._entries[
+        ("tenant-1", "request-offline-reset")
+    ].submission
+    assert submission.visible_history == ()
+    assert submission.current_message.startswith("请用两句话解释RSS是什么")

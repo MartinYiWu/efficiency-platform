@@ -1,0 +1,25 @@
+{
+  "version": "x04-live-authorization/1",
+  "authorization_id": "user-20260917-all-live-agent",
+  "approved_by": "project-owner-user",
+  "approved_at": "2026-09-17T02:04:10+00:00",
+  "expires_at": "2026-09-18T02:04:10+00:00",
+  "allowed_actions": [
+    "model_evaluation",
+    "source_read",
+    "research_acceptance",
+    "single_tenant_canary"
+  ],
+  "allowed_case_ids": [
+    "yesterday_ai",
+    "last_week_topic",
+    "exact_five",
+    "rewrite_wechat",
+    "ordinary_chat"
+  ],
+  "allowed_tenant_ids": [
+    "tenant-x04-acceptance",
+    "tenant-x05-canary"
+  ],
+  "max_budget_microunits": 10000000
+}

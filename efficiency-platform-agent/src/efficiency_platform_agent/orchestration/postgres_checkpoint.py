@@ -33,7 +33,9 @@ class PostgresCheckpointStore:
     """提供与进程内 CheckpointStore 相同的最小保存/读取接口。"""
 
     def __init__(self, connection: Any, schema: str) -> None:
-        self.provider = PostgresProvider(connection, schema)
+        self.provider = PostgresProvider(
+            connection, schema, allow_runtime_schema=True
+        )
 
     async def save(
         self,
@@ -65,7 +67,12 @@ class PostgresCheckpointStore:
         )
         if hasattr(rows, "__await__"):
             rows = await rows
-        row = (rows or [None])[0]
+        if hasattr(rows, "fetchone"):
+            row = rows.fetchone()
+            if hasattr(row, "__await__"):
+                row = await row
+        else:
+            row = (rows or [None])[0]
         if row is None:
             return None
         if isinstance(row, Mapping):

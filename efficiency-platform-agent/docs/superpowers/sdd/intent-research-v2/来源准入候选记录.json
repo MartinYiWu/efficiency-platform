@@ -1,0 +1,65 @@
+{
+  "version": "x04-source-admission-candidates/1",
+  "records": [
+    {
+      "source_id": "fixture_official_feed",
+      "status": "VERIFIED",
+      "endpoint_url": "https://blog.google/rss/",
+      "schema": "RSS XML；channel/item 至少包含 title、link、pubDate 或等价时间字段；受限探针只验证结构不保存全文",
+      "checked_at": "2026-09-17T01:50:26+00:00",
+      "cost_evidence_url": "https://blog.google/feed/",
+      "permission_evidence_url": "https://policies.google.com/terms",
+      "rate_limit": "官方材料未公布数值；本地策略固定同主机并发 1、无重试风暴，准入探测仅 1 次",
+      "history_range": "实时 Feed 当前窗口，不宣称历史完整；历史研究不得用该列表替代完整历史源",
+      "allowed_storage": "conservative candidate boundary: feed metadata, canonical URL and short evidence excerpt only; no full article mirror"
+    },
+    {
+      "source_id": "fixture_arxiv",
+      "status": "UNVERIFIED",
+      "endpoint_url": "https://export.arxiv.org/api/query",
+      "schema": "Atom 1.0; entries document id, updated, published, title, summary, authors, categories and links; exact live response not probed",
+      "checked_at": "",
+      "cost_evidence_url": "https://info.arxiv.org/help/api/tou.html",
+      "permission_evidence_url": "https://info.arxiv.org/help/api/tou.html",
+      "rate_limit": "official guidance: one connection and no more than one request every three seconds; cache results",
+      "history_range": "query API supports paging over matching records; practical requested time windows still require an authorized probe",
+      "allowed_storage": "descriptive metadata may be retrieved, stored, transformed and shared; do not store or serve papers/source unless the item license permits"
+    },
+    {
+      "source_id": "fixture_gdelt",
+      "status": "UNVERIFIED",
+      "endpoint_url": "https://api.gdeltproject.org/api/v2/doc/doc",
+      "schema": "GDELT DOC 2.0 ArticleList JSON discovery response; exact current fields and response media type not probed",
+      "checked_at": "",
+      "cost_evidence_url": "https://www.gdeltproject.org/about.html",
+      "permission_evidence_url": "https://www.gdeltproject.org/about.html",
+      "rate_limit": "not published in reviewed official DOC API material; local policy must enforce bounded serial requests",
+      "history_range": "official DOC API material documents rolling search windows that vary by mode/version; exact current window must be probed",
+      "allowed_storage": "GDELT metadata and discovered URLs with required GDELT citation; no third-party publisher full text without separate permission"
+    },
+    {
+      "source_id": "fixture_github_releases",
+      "status": "VERIFIED",
+      "endpoint_url": "https://github.com/langchain-ai/langgraph/releases.atom",
+      "schema": "登记仓库 Releases Atom Feed；entry 包含 id、title、updated、link 与 content；只保留标签、时间和规范 URL",
+      "checked_at": "2026-09-17T01:50:26+00:00",
+      "cost_evidence_url": "https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api",
+      "permission_evidence_url": "https://docs.github.com/en/site-policy/github-terms/github-terms-of-service",
+      "rate_limit": "公开 Atom Feed 未公布独立数值；本地策略固定同主机并发 1、条件请求和有界退避",
+      "history_range": "登记仓库当前 Releases Feed 窗口；不宣称完整发布历史或仓库外覆盖",
+      "allowed_storage": "release identifiers, tags, timestamps and canonical URLs; body/assets require repository-specific license review before persistence"
+    },
+    {
+      "source_id": "fixture_hacker_news",
+      "status": "VERIFIED",
+      "endpoint_url": "https://hacker-news.firebaseio.com/v0/topstories.json",
+      "schema": "Firebase JSON 顶层整数 ID 数组；后续 item 端点可返回 type、by、time、title、url、score 等字段",
+      "checked_at": "2026-09-17T01:50:26+00:00",
+      "cost_evidence_url": "https://github.com/HackerNews/API",
+      "permission_evidence_url": "https://github.com/HackerNews/API",
+      "rate_limit": "official API documentation states there is currently no rate limit; local bounded request policy still applies",
+      "history_range": "top/new/best 当前列表最多 500 个 ID；不是时间窗完整历史，向后遍历必须另行有界规划",
+      "allowed_storage": "conservative candidate boundary: item id, timestamp, score, title and canonical URL only; user text/comments require separate terms review"
+    }
+  ]
+}

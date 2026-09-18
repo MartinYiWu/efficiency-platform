@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fixture Feed</title>
+    <item>
+      <guid>release-1</guid>
+      <title>First release</title>
+      <link>https://news.example.test/releases/1</link>
+      <pubDate>Tue, 15 Sep 2026 01:00:00 GMT</pubDate>
+      <description><![CDATA[<script>ignored()</script><p>Summary one</p>]]></description>
+    </item>
+    <item>
+      <guid>release-2</guid>
+      <title>Second release</title>
+      <link>https://news.example.test/releases/2</link>
+      <description><![CDATA[<p>No date remains unknown</p>]]></description>
+    </item>
+  </channel>
+</rss>

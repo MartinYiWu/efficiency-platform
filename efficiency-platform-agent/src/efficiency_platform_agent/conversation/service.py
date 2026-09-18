@@ -8,9 +8,9 @@ import inspect
 import re
 import time
 from collections import OrderedDict
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any, cast
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
+from typing import Any, Protocol, cast
 
 from efficiency_platform_agent.agents.operation.contracts.profiles import (
     AudienceProfile,
@@ -53,13 +53,27 @@ from efficiency_platform_agent.contracts.intent import (
     IntentEnvelopeV1,
     IntentRequirementsV1,
 )
+from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
 from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
+from efficiency_platform_agent.contracts.research_request_policy import (
+    has_explicit_time_window,
+    resolve_research_window,
+)
 from efficiency_platform_agent.contracts.stream_events import StreamEventName
 from efficiency_platform_agent.core.budget import BudgetCharge, BudgetGuard
 from efficiency_platform_agent.core.enums import StrategyMode
 from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunRequest
 from efficiency_platform_agent.core.runtime import UsageSnapshot
 from efficiency_platform_agent.harness.errors import HarnessError
+from efficiency_platform_agent.harness.intent_v2_delegate import (
+    IntentV2ConversationDecision,
+)
+from efficiency_platform_agent.harness.referenced_inputs import (
+    reference_error,
+    requested_rank,
+    rewrite_intent,
+    select_ranked_reference,
+)
 from efficiency_platform_agent.harness.service import (
     AgentRuntimeService,
     RunPipelineContext,
@@ -132,6 +146,43 @@ _EXPLICIT_RESEARCH_MARKERS = (
     "来源",
     "联网",
 )
+_NEGATED_RESEARCH_MARKERS = (
+    "不需要联网搜索",
+    "无需联网搜索",
+    "不用联网搜索",
+    "不要联网搜索",
+    "不需要联网",
+    "无需联网",
+    "不用联网",
+    "不要联网",
+    "不联网",
+    "不需要搜索",
+    "无需搜索",
+    "不用搜索",
+    "不要搜索",
+)
+_INDEPENDENT_CONTEXT_MARKERS = (
+    "不要引用刚才",
+    "不要引用之前",
+    "不要参考刚才",
+    "不要参考之前",
+    "不引用刚才",
+    "不引用之前",
+    "独立回答",
+)
+_DIRECT_QUESTION_MARKERS = ("解释", "是什么", "为什么", "怎么", "如何", "回答")
+_OPERATION_REQUEST_MARKERS = (
+    "写文案",
+    "写一篇",
+    "策划",
+    "活动方案",
+    "推广方案",
+    "生成内容",
+    "收集",
+    "行业新闻",
+    "行业动态",
+    "全球热点",
+)
 
 
 def _stable_id(prefix: str, value: str) -> str:
@@ -159,7 +210,21 @@ def _is_generic_research_reference(value: str | None) -> bool:
 def _has_explicit_research_request(value: str) -> bool:
     """以用户明示的在线核验词做确定性兜底，不依赖意图模型分类。"""
     normalised = _normalise_research_reference(value)
+    for marker in _NEGATED_RESEARCH_MARKERS:
+        normalised = normalised.replace(marker, "")
     return any(marker in normalised for marker in _EXPLICIT_RESEARCH_MARKERS)
+
+
+def _is_explicit_offline_independent_question(value: str) -> bool:
+    """识别用户明确要求切断研究上下文的普通问答，不猜测未表达的意图。"""
+
+    normalised = _normalise_research_reference(value)
+    return (
+        any(marker in normalised for marker in _NEGATED_RESEARCH_MARKERS)
+        and any(marker in normalised for marker in _INDEPENDENT_CONTEXT_MARKERS)
+        and any(marker in normalised for marker in _DIRECT_QUESTION_MARKERS)
+        and not any(marker in normalised for marker in _OPERATION_REQUEST_MARKERS)
+    )
 
 
 def _research_topic(
@@ -182,15 +247,21 @@ def _research_topic(
     else:
         candidates = (intent.requirements.topic, intent.goal, message.message, *history)
     for candidate in candidates:
-        if isinstance(candidate, str) and candidate.strip() and not _is_generic_research_reference(
-            candidate
+        if (
+            isinstance(candidate, str)
+            and candidate.strip()
+            and not _is_generic_research_reference(candidate)
         ):
             return candidate.strip()
     return None
 
 
-def _research_time_window(intent: IntentEnvelopeV1, message: ConversationMessageV1) -> str:
+def _research_time_window(
+    intent: IntentEnvelopeV1, message: ConversationMessageV1
+) -> str:
     """为研究场景保留显式时间范围，并把“最新”收敛为可审计默认窗口。"""
+    if has_explicit_time_window(message.message):
+        return resolve_research_window(message.message).original_text or message.message
     if intent.requirements.time_window:
         return intent.requirements.time_window
     if intent.time_range:
@@ -284,24 +355,31 @@ def _merge_pending_intent(
 
     if previous is None:
         return current
-    if previous.task_type != current.task_type:
-        return previous
+    if previous.task_type != current.task_type and not _is_clarification_answer(
+        previous, current
+    ):
+        return current
     missing = set(previous.missing_fields)
     if not missing:
         return current
     prior_values = previous.requirements.model_dump(mode="python")
     current_values = current.requirements.model_dump(mode="python")
     merged_values = dict(prior_values)
+    resolved: set[str] = set()
     for field_name in missing:
         candidate = current_values.get(field_name)
+        if candidate in {None, "", ()} and _is_temporal_field(field_name):
+            candidate = current.time_range or current.goal
         if candidate not in {None, "", ()}:
             merged_values[field_name] = candidate
+            resolved.add(field_name)
     merged_requirements = type(previous.requirements).model_validate(merged_values)
+    unresolved = [item for item in previous.missing_fields if item not in resolved]
     return previous.model_copy(
         update={
             "requirements": merged_requirements,
-            "missing_fields": [],
-            "needs_clarification": False,
+            "missing_fields": unresolved,
+            "needs_clarification": bool(unresolved),
             "confidence": current.confidence,
             "model_hint": current.model_hint or previous.model_hint,
             "needs_research": previous.needs_research or current.needs_research,
@@ -310,6 +388,73 @@ def _merge_pending_intent(
             ),
         }
     )
+
+
+_TEMPORAL_REQUIREMENT_FIELDS = frozenset(
+    {
+        "time_window",
+        "planning_window",
+        "incubation_window",
+        "campaign_window",
+        "calendar_window",
+        "experiment_window",
+        "review_window",
+    }
+)
+_DATE_ANSWER = re.compile(
+    r"(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?|今天|明天|后天|昨天|"
+    r"本周|下周|上周|本月|下月|\d+\s*(?:天|周|月))"
+)
+_STANDALONE_REQUEST_MARKERS = (
+    "请",
+    "收集",
+    "搜索",
+    "写",
+    "策划",
+    "解释",
+    "什么",
+    "输出",
+    "忽略",
+    "告诉我",
+)
+
+
+def _is_temporal_field(field_name: str) -> bool:
+    return field_name in _TEMPORAL_REQUIREMENT_FIELDS
+
+
+def _is_clarification_answer(
+    previous: IntentEnvelopeV1, current: IntentEnvelopeV1
+) -> bool:
+    """只在当前文本确实像缺失字段答案时延续旧任务，否则开始新意图。"""
+
+    text = current.goal.strip()
+    if any(marker in text for marker in _STANDALONE_REQUEST_MARKERS):
+        return False
+    missing = tuple(previous.missing_fields)
+    if len(missing) != 1:
+        return False
+    field_name = missing[0]
+    if _is_temporal_field(field_name):
+        return _DATE_ANSWER.search(text) is not None
+    candidate = current.requirements.model_dump(mode="python").get(field_name)
+    return candidate not in {None, "", ()}
+
+
+def _operation_input_text(message: str, intent: IntentEnvelopeV1) -> str:
+    """把当前消息与已解析结构化约束合成为 Specialist 的完整输入。"""
+
+    constraints = tuple(
+        f"{name}={value}"
+        for name, value in intent.requirements.model_dump(mode="python").items()
+        if name != "contract_version" and value not in {None, "", ()}
+    )
+    sections = [f"目标：{intent.goal}"]
+    if constraints:
+        sections.append("已确认约束：" + "；".join(constraints))
+    if message.strip() != intent.goal.strip():
+        sections.append(f"当前补充：{message.strip()}")
+    return "\n".join(sections)
 
 
 @dataclass(frozen=True, slots=True)
@@ -399,6 +544,8 @@ class _ContextEntry:
     waiting_runs: set[str] = field(default_factory=set)
     turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     pending_intent: IntentEnvelopeV1 | None = None
+    pending_v2: bool = False
+    latest_run: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +554,18 @@ class _ActiveRun:
     request_id: str
     context_key: tuple[str, str]
     context_entry: _ContextEntry
+
+
+class IntentV2ConversationCoordinator(Protocol):
+    """可选 V2 接线点；返回 None 时继续既有 V1 路径。"""
+
+    async def prepare(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+    ) -> RunPipelinePreparation | IntentV2ConversationDecision | None: ...
 
 
 class ConversationService:
@@ -423,7 +582,11 @@ class ConversationService:
         clarification: ClarificationManager | None = None,
         fast_path_detector: Callable[
             [str, ConversationContext], IntentEnvelopeV1 | None
-        ] | None = detect_fast_path_intent,
+        ]
+        | None = detect_fast_path_intent,
+        intent_v2_coordinator: IntentV2ConversationCoordinator | None = None,
+        ranked_reference_validator: Callable[[ReferencedRankedInput], Awaitable[None]]
+        | None = None,
         max_contexts: int = 256,
         max_requests: int = 2_048,
         max_active_runs: int = 1_024,
@@ -444,6 +607,8 @@ class ConversationService:
         self.local_responder = LocalConversationResponder()
         self.clarification = clarification or ClarificationManager()
         self.fast_path_detector = fast_path_detector
+        self.intent_v2_coordinator = intent_v2_coordinator
+        self.ranked_reference_validator = ranked_reference_validator
         self.max_contexts = max_contexts
         self.max_requests = max_requests
         self.max_active_runs = max_active_runs
@@ -531,13 +696,15 @@ class ConversationService:
                 message,
                 context_key,
                 context_entry,
+                previous_run,
             )
 
         queued_view: ConversationSubmitViewV1 | None = None
+        previous_run: tuple[str, str] | None = None
 
         async def on_queued(run: Any) -> None:
             """在后台任务可运行前原子登记幂等键与活动 Run。"""
-            nonlocal queued_view
+            nonlocal queued_view, previous_run
             view = ConversationSubmitViewV1(
                 conversation_id=conversation_id,
                 turn_id=_stable_id("turn", message.request_id),
@@ -545,6 +712,8 @@ class ConversationService:
                 status="queued",
             )
             async with self._lock:
+                previous_run = context_entry.latest_run
+                context_entry.latest_run = (run.run_id, message.user_id)
                 expires_at = self.monotonic() + self.ttl_seconds
                 self._requests[request_key] = _IdempotencyEntry(
                     conversation_id,
@@ -586,13 +755,38 @@ class ConversationService:
         message: ConversationMessageV1,
         context_key: tuple[str, str],
         entry: _ContextEntry,
+        previous_run: tuple[str, str] | None = None,
     ) -> RunPipelinePreparation:
         """在后台解释意图；全局锁不跨任何模型 I/O。"""
         started = self.monotonic()
         async with entry.turn_lock:
+            referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
+            rank = requested_rank(message.message)
+            reference_intent = None
+            if rank is not None:
+                if previous_run is None or previous_run[1] != message.user_id:
+                    raise reference_error()
+                try:
+                    previous_view = await self.runtime.get_run(
+                        previous_run[0], tenant_id
+                    )
+                except HarnessError as error:
+                    raise reference_error() from error
+                referenced_inputs = (
+                    select_ranked_reference(
+                        previous_view,
+                        rank,
+                        tenant_id=tenant_id,
+                        user_id=message.user_id,
+                        conversation_id=conversation_id,
+                    ),
+                )
+                if self.ranked_reference_validator is not None:
+                    await self.ranked_reference_validator(referenced_inputs[0])
+                reference_intent = rewrite_intent(message.message)
             async with self._lock:
                 context = ConversationContext()
-                for turn in entry.context.turns:
+                for turn in () if referenced_inputs else entry.context.turns:
                     context.append(turn)
                 entry.expires_at = self.monotonic() + self.ttl_seconds
                 if self._contexts.get(context_key) is entry:
@@ -615,13 +809,49 @@ class ConversationService:
                     BudgetCharge(),
                     started,
                 )
-            usage = UsageSnapshot()
+            if _is_explicit_offline_independent_question(message.message):
+                return await self._prepare_direct(
+                    pipeline,
+                    tenant_id,
+                    message,
+                    ConversationContext(),
+                    entry,
+                    None,
+                    UsageSnapshot(),
+                    False,
+                    BudgetCharge(),
+                    started,
+                )
+            # 已进入 V1 澄清的任务必须继续由 V1 消费；只允许新任务尝试 V2。
+            v2_decision = None
+            if (
+                reference_intent is None
+                and self.intent_v2_coordinator is not None
+                and (entry.pending_intent is None or entry.pending_v2)
+            ):
+                v2_preparation = await self.intent_v2_coordinator.prepare(
+                    pipeline,
+                    tenant_id,
+                    conversation_id,
+                    message,
+                )
+                if isinstance(v2_preparation, IntentV2ConversationDecision):
+                    v2_decision = v2_preparation
+                elif v2_preparation is not None:
+                    entry.pending_intent = None
+                    entry.pending_v2 = False
+                    return v2_preparation
+            usage = v2_decision.usage if v2_decision else UsageSnapshot()
             degraded = False
-            charge = BudgetCharge()
+            charge = v2_decision.charge if v2_decision else BudgetCharge()
             intent = (
-                self.fast_path_detector(message.message, context)
-                if self.fast_path_detector is not None
-                else None
+                reference_intent
+                or (v2_decision.intent if v2_decision else None)
+                or (
+                    self.fast_path_detector(message.message, context)
+                    if self.fast_path_detector is not None
+                    else None
+                )
             )
             if intent is None:
                 execute = getattr(self.interpreter, "execute", None)
@@ -634,12 +864,11 @@ class ConversationService:
                     degraded = bool(execution.degraded)
                     charge = self._intent_charge(execution)
                 else:
-                    intent = await self.interpreter.interpret(
-                        message.message, context
-                    )
+                    intent = await self.interpreter.interpret(message.message, context)
                     charge = BudgetCharge(iterations=1)
-            intent = _merge_pending_intent(entry.pending_intent, intent)
-            intent = _normalise_research_intent(intent, message, context)
+            if reference_intent is None and v2_decision is None:
+                intent = _merge_pending_intent(entry.pending_intent, intent)
+                intent = _normalise_research_intent(intent, message, context)
             if await pipeline.is_cancelled():
                 cancelled = HarnessError("CANCELLED", "运行已取消", category="runtime")
                 cast(Any, cancelled).usage = usage
@@ -679,7 +908,9 @@ class ConversationService:
                         "needs_clarification": True,
                     }
                 )
-            elif intent.missing_fields or intent.needs_clarification:
+            elif (
+                intent.missing_fields or intent.needs_clarification
+            ) and v2_decision is None:
                 intent = intent.model_copy(
                     update={"missing_fields": [], "needs_clarification": False}
                 )
@@ -688,14 +919,17 @@ class ConversationService:
                     tenant_id, conversation_id, message, intent, resolution
                 )
             )
+            submission = replace(submission, referenced_inputs=referenced_inputs)
             await self.submissions.put(submission)
             async with self._lock:
                 entry.context.append(ConversationTurn("user", message.message))
                 if question is not None:
                     entry.context.append(ConversationTurn("assistant", question))
                     entry.pending_intent = intent
+                    entry.pending_v2 = v2_decision is not None
                 else:
                     entry.pending_intent = None
+                    entry.pending_v2 = False
                 entry.expires_at = self.monotonic() + self.ttl_seconds
             events: list[tuple[StreamEventName, dict[str, Any]]] = [
                 (
@@ -800,6 +1034,8 @@ class ConversationService:
                     raise HarnessError("CANCELLED", "运行已取消", category="runtime")
                 await self.direct_submissions.put(submission)
                 entry.context.append(ConversationTurn("user", message.message))
+                entry.pending_intent = None
+                entry.pending_v2 = False
                 entry.expires_at = self.monotonic() + self.ttl_seconds
         except Exception as error:
             cast(Any, error).usage = usage
@@ -907,7 +1143,7 @@ class ConversationService:
             request_id=message.request_id,
             tenant_id=tenant_id,
             user_id=message.user_id,
-            input_text=message.message,
+            input_text=_operation_input_text(message.message, intent),
         )
         operation = OperationRequest(
             "operation-request/1",
@@ -1242,4 +1478,8 @@ class ConversationService:
         }
 
 
-__all__ = ["ConversationService", "ConversationSubmissionStore"]
+__all__ = [
+    "ConversationService",
+    "ConversationSubmissionStore",
+    "IntentV2ConversationCoordinator",
+]

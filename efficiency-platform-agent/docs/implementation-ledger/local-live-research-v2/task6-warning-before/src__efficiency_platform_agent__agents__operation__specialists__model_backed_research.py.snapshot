@@ -1,0 +1,476 @@
+"""把可信研究来源接入模型驱动交付物生成。"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from typing import Any
+from urllib.parse import urlsplit
+
+from efficiency_platform_agent.agents.operation.contracts.deliverables import (
+    DeliverableBundle,
+    DeliverableKind,
+    GenerationProcessReference,
+    OperationDeliverable,
+)
+from efficiency_platform_agent.agents.operation.contracts.evidence import EvidencePack
+from efficiency_platform_agent.agents.operation.execution import OperationUsage
+from efficiency_platform_agent.agents.operation.quality.evidence_gate import (
+    EvidenceGate,
+    EvidenceGatePolicy,
+)
+from efficiency_platform_agent.agents.operation.specialists.contracts import (
+    SpecialistExecutionResult,
+)
+from efficiency_platform_agent.agents.operation.specialists.model_backed import (
+    ModelBackedOperationSpecialist,
+    evidence_citations,
+    freeze,
+    plain,
+)
+from efficiency_platform_agent.agents.operation.specialists.research import (
+    ResearchInsightAgent,
+)
+from efficiency_platform_agent.agents.operation.specialists.runtime import (
+    encode_specialist_result,
+)
+from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
+    DeliverableAssembler,
+)
+from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
+    DeliveryPresentationValidator,
+    project_set_v2_to_v1,
+)
+from efficiency_platform_agent.capabilities.research.contracts import (
+    ResearchProviderPort,
+    ResearchRequest,
+    ResearchStatus,
+)
+from efficiency_platform_agent.capabilities.research.request_policy import (
+    describe_research_constraints,
+    has_explicit_source_count,
+    requested_source_count,
+)
+from efficiency_platform_agent.contracts.deliverables import (
+    CitationV2,
+    DeliverableSetV2,
+    DeliverySummaryV2,
+    RankedDigestContentV2,
+    RankedDigestDeliverableV2,
+    RankedItemV2,
+    WarningV2,
+)
+from efficiency_platform_agent.contracts.research_v2 import (
+    ResearchBriefV2,
+    ResearchOutcomeV2,
+)
+from efficiency_platform_agent.core.agent import AgentSpec
+from efficiency_platform_agent.core.multi_agent import BudgetUsage
+from efficiency_platform_agent.core.run import (
+    ExecutionBudget,
+    JsonObject,
+    RunResult,
+    SupervisorTask,
+)
+from efficiency_platform_agent.core.runtime import UsageSnapshot
+from efficiency_platform_agent.prompts.runtime import PromptRuntime
+
+
+class ModelBackedResearchSpecialist:
+    """先检索可信来源，再把来源约束注入模型生成。"""
+
+    def __init__(
+        self,
+        spec: AgentSpec,
+        prompts: PromptRuntime,
+        model: ModelRuntime,
+        provider: ResearchProviderPort,
+        usage: OperationUsage | None = None,
+        deliverable_contract_version: str = "deliverable/1",
+    ) -> None:
+        if not isinstance(provider, ResearchProviderPort):
+            raise TypeError("research_provider必须实现ResearchProviderPort")
+        self.spec = spec
+        self._provider = provider
+        self._prompts = prompts
+        self._model = model
+        self._usage = usage
+        self._deliverable_contract_version = deliverable_contract_version
+        self.descriptor = ModelBackedOperationSpecialist(
+            spec,
+            prompts,
+            model,
+            usage,
+            deliverable_contract_version=deliverable_contract_version,
+        ).descriptor
+
+    async def run(self, task: SupervisorTask) -> RunResult:
+        """研究失败时返回显式失败，成功时只允许 Provider URL 进入模型。"""
+        raw = plain(task.input_data)
+        if not isinstance(raw, dict):
+            raise TypeError("SPECIALIST_INPUT_INVALID")
+        operation_task_id = raw.get("task_id")
+        if not isinstance(operation_task_id, str) or not operation_task_id:
+            raise TypeError("SPECIALIST_INPUT_INVALID")
+        goal = str(raw["goal"])
+        source_count = requested_source_count(goal, default=5)
+        request = ResearchRequest(
+            "research-request/1",
+            f"research-{operation_task_id}",
+            operation_task_id,
+            str(raw["tenant_id"]),
+            goal,
+            None,
+            source_count,
+            ("goal",),
+            "research-result/1",
+            task.budget.max_output_tokens,
+        )
+        result = await self._provider.research(request)
+        if (
+            result.request_id != request.request_id
+            or result.task_id != request.task_id
+            or result.tenant_id != request.tenant_id
+        ):
+            return self._failure(task, "EVIDENCE_INVALID", result.usage)
+        if self._usage is not None:
+            self._usage.record_snapshot(result.usage)
+        # 研究失败优先保持研究错误语义；供应商失败响应中的异常 usage
+        # 不能把无来源研究误判成预算耗尽。
+        if result.status is ResearchStatus.FAILED:
+            return self._failure(task, "RESEARCH_UNAVAILABLE", result.usage)
+        if self._deliverable_contract_version == "deliverable/2":
+            facts = (
+                self._usage.research_results.get(
+                    (str(raw["tenant_id"]), operation_task_id)
+                )
+                if self._usage
+                else None
+            )
+            if facts is not None:
+                return self._research_v2_result(task, raw, *facts)
+            if result.status is ResearchStatus.EMPTY:
+                return encode_specialist_result(
+                    SpecialistExecutionResult(
+                        "operation-specialist-result/1",
+                        task.task_id,
+                        (task.task_id,),
+                        (),
+                        None,
+                        None,
+                        None,
+                        (),
+                        ("RESEARCH_NO_MATCHES",),
+                        None,
+                        None,
+                        None,
+                        BudgetUsage(),
+                    ),
+                    task.parent_run_id,
+                )
+            # 非空研究缺少治理时间窗和排序事实时，禁止调用模型猜造 V2 provenance。
+            return self._failure(task, "RESEARCH_UNAVAILABLE", result.usage)
+        if result.status is ResearchStatus.EMPTY:
+            raw["citations"] = []
+            raw["goal"] = "\n".join(
+                (
+                    goal,
+                    describe_research_constraints(
+                        goal,
+                        requested_count=source_count,
+                        delivered_count=0,
+                        count_required=has_explicit_source_count(goal),
+                    ),
+                    "免费公开来源采集已完成，但在主题、时间窗和来源类型约束下没有合格证据。请明确输出0条与证据不足，不得引用无关来源或虚构链接。",
+                )
+            )
+            return await self._delegate(
+                task,
+                raw,
+                evidence_pack=None,
+                warnings=result.warnings,
+                capability_usage=result.usage,
+            )
+        if result.status is not ResearchStatus.SUCCEEDED or not result.observations:
+            return self._failure(task, "EVIDENCE_INVALID", result.usage)
+        pack = ResearchInsightAgent._evidence_pack(task.task_id, result.observations)
+        decision = EvidenceGate().evaluate(
+            pack,
+            frozenset({"goal"}),
+            EvidenceGatePolicy("research-v1", 1, 1, True, True),
+        )
+        if not decision.accepted:
+            return self._failure(
+                task, decision.reason_codes[0] or "EVIDENCE_INVALID", result.usage
+            )
+        raw["citations"] = evidence_citations(pack)
+        raw["goal"] = "\n".join(
+            (
+                goal,
+                describe_research_constraints(
+                    goal,
+                    requested_count=source_count,
+                    delivered_count=len(result.observations),
+                    count_required=has_explicit_source_count(goal),
+                ),
+            )
+        )
+        warnings = (
+            (*result.warnings, "EVIDENCE_UNVERIFIED")
+            if any(item.quality_status.value == "unverified" for item in pack.records)
+            else result.warnings
+        )
+        return await self._delegate(
+            task,
+            raw,
+            evidence_pack=pack,
+            warnings=warnings,
+            capability_usage=result.usage,
+        )
+
+    async def _delegate(
+        self,
+        task: SupervisorTask,
+        raw: dict[str, object],
+        *,
+        evidence_pack: EvidencePack | None,
+        warnings: tuple[str, ...],
+        capability_usage: UsageSnapshot,
+    ) -> RunResult:
+        delegate = ModelBackedOperationSpecialist(
+            self.spec,
+            self._prompts,
+            self._model,
+            self._usage,
+            evidence_pack,
+            warnings,
+            capability_usage,
+            deliverable_contract_version=self._deliverable_contract_version,
+        )
+        # Responses API 的 web_search 用量包含服务端搜索工具链上下文，不能
+        # 直接从下游内容生成预算中扣除；真实用量仍已记录到当前 Run。
+        # 这里只为内容生成保留独立的迭代、输入、输出和超时预算。
+        remaining_budget = ExecutionBudget(
+            max_iterations=max(1, task.budget.max_iterations - 1),
+            max_tool_calls=task.budget.max_tool_calls,
+            max_input_tokens=task.budget.max_input_tokens,
+            max_output_tokens=task.budget.max_output_tokens,
+            timeout_ms=task.budget.timeout_ms,
+            max_cost_microunits=task.budget.max_cost_microunits,
+        )
+        frozen = freeze(raw)
+        if not isinstance(frozen, JsonObject):
+            raise TypeError("SPECIALIST_INPUT_INVALID")
+        return await delegate.run(
+            replace(task, input_data=frozen, budget=remaining_budget)
+        )
+
+    def _research_v2_result(
+        self,
+        task: SupervisorTask,
+        raw: dict[str, Any],
+        brief: ResearchBriefV2,
+        outcome: ResearchOutcomeV2,
+    ) -> RunResult:
+        """仅从已接纳事件和证据生成 V2，保留中央 Supervisor 调度。"""
+        delivery = outcome.delivery
+        if delivery is None or outcome.outcome == "FAILED":
+            return self._failure(task, "RESEARCH_UNAVAILABLE", UsageSnapshot())
+        if outcome.outcome == "NO_MATCHES":
+            return encode_specialist_result(
+                SpecialistExecutionResult(
+                    "operation-specialist-result/1",
+                    task.task_id,
+                    (task.task_id,),
+                    (),
+                    None,
+                    None,
+                    None,
+                    (),
+                    ("RESEARCH_NO_MATCHES",),
+                    None,
+                    None,
+                    None,
+                    BudgetUsage(),
+                ),
+                task.parent_run_id,
+            )
+        citations: dict[str, CitationV2] = {}
+        entries = []
+        for rank, event in enumerate(delivery.events, 1):
+            for source in event.citations:
+                existing = citations.get(source.evidence_id)
+                targets = (
+                    [*existing.supports_item_ids, event.event_id]
+                    if existing
+                    else [event.event_id]
+                )
+                citations[source.evidence_id] = CitationV2(
+                    citation_id=source.evidence_id,
+                    url=source.url,
+                    title=source.title[:500],
+                    source=source.publisher_id,
+                    source_type="api"
+                    if source.acquisition_method == "api"
+                    else (
+                        "rss"
+                        if source.acquisition_method in {"rss", "atom"}
+                        else "public_page"
+                    ),
+                    source_tier="primary"
+                    if source.source_role == "primary"
+                    else "secondary",
+                    verification_status=source.verification_status
+                    if delivery.output_verified
+                    else "unverified",
+                    supports_item_ids=list(dict.fromkeys(targets)),
+                    independent_source_group=source.independent_source_group
+                    or urlsplit(source.url).hostname,
+                    published_at=source.published_at.isoformat()
+                    if source.published_at
+                    else None,
+                    document_id=source.document_id,
+                    excerpt=source.excerpt,
+                    content_scope=source.content_scope,
+                    content_hash=source.content_hash,
+                    acquisition_method=source.acquisition_method,
+                )
+            entries.append(
+                RankedItemV2(
+                    item_id=event.event_id,
+                    rank=rank,
+                    title=event.title[:500],
+                    occurred_at=event.event_time.isoformat()
+                    if event.event_time
+                    else None,
+                    summary="\n".join(event.claim_texts)[:2000],
+                    why_it_matters="符合已冻结研究范围；可据所列证据继续评估内容选题。",
+                    source_refs=[source.evidence_id for source in event.citations],
+                    confidence="low",
+                    verification_status="verified"
+                    if delivery.output_verified
+                    and all(
+                        source.verification_status == "verified"
+                        for source in event.citations
+                    )
+                    else "unverified",
+                )
+            )
+        item = DeliveryPresentationValidator().validate_deliverable(
+            RankedDigestDeliverableV2(
+                deliverable_id=str(raw["deliverable_id"]),
+                platform=str(raw["platform"]),
+                title=brief.topic[:500],
+                lead=(delivery.summary or delivery.content)[:2000],
+                copy_text="待确定性渲染",
+                content=RankedDigestContentV2(
+                    selection_summary=(delivery.summary or delivery.content)[:2000],
+                    ranking_basis=delivery.ranking_basis or brief.ranking_mode,
+                    items=entries,
+                ),
+                citations=list(citations.values()),
+                warnings=[
+                    WarningV2(code="RESEARCH_LIMITATION", message=limitation[:1000])
+                    for limitation in delivery.limitations
+                    if delivery.output_verified
+                ],
+            )
+        )
+        view = project_set_v2_to_v1(
+            DeliverableSetV2(
+                run_id=task.parent_run_id,
+                intent_revision=brief.intent_revision,
+                summary=DeliverySummaryV2(
+                    message=delivery.summary or delivery.content,
+                    result_count=len(entries),
+                    complete=outcome.outcome == "COMPLETE",
+                ),
+                deliverables=[item],
+            )
+        )
+        report = DeliverableAssembler().assess(
+            view.deliverables,
+            task_id=str(raw["task_id"]),
+            report_id=f"quality-{task.task_id}",
+            deliverable_ids=(str(raw["deliverable_id"]),),
+        )
+        payload = freeze(item.model_dump(mode="json"))
+        assert isinstance(payload, JsonObject)
+        artifact = OperationDeliverable(
+            "operation-deliverable/1",
+            str(raw["deliverable_id"]),
+            DeliverableKind.REPORT,
+            "1.0.0",
+            item.title,
+            (),
+            (item.platform,),
+            None,
+            payload,
+            frozenset(),
+            frozenset(),
+            frozenset(),
+            tuple(raw["profile_reference_ids"]),
+            GenerationProcessReference(
+                f"process-{task.task_id}", "operation-process/1", (task.task_id,), ()
+            ),
+            None,
+            None,
+            str(raw["plan_id"]),
+            report.report_id,
+            None,
+        )
+        bundle = DeliverableBundle(
+            "deliverable-bundle/1",
+            f"bundle-{task.task_id}",
+            str(raw["task_id"]),
+            str(raw["plan_id"]),
+            (artifact,),
+            None,
+            (report.report_id,),
+            frozenset(),
+        )
+        return encode_specialist_result(
+            SpecialistExecutionResult(
+                "operation-specialist-result/1",
+                task.task_id,
+                (task.task_id,),
+                (),
+                bundle,
+                None,
+                report,
+                (),
+                ("RESEARCH_OUTCOME_PARTIAL",) if outcome.outcome == "PARTIAL" else (),
+                None,
+                None,
+                None,
+                BudgetUsage(),
+            ),
+            task.parent_run_id,
+        )
+
+    @staticmethod
+    def _failure(task: SupervisorTask, code: str, usage: UsageSnapshot) -> RunResult:
+        result = SpecialistExecutionResult(
+            "operation-specialist-result/1",
+            task.task_id,
+            (),
+            (task.task_id,),
+            None,
+            None,
+            None,
+            (),
+            (),
+            code,
+            None,
+            None,
+            BudgetUsage(
+                iterations=1 if usage != UsageSnapshot() else 0,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+                cost_microunits=usage.cost_microunits,
+            ),
+        )
+        return encode_specialist_result(result, task.parent_run_id)
+
+
+__all__ = ["ModelBackedResearchSpecialist"]

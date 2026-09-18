@@ -73,6 +73,7 @@ def test_three_prompts_render_versioned_provider_messages() -> None:
     assert rendered.messages == (
         ProviderMessage("system", rendered.messages[0].content),
     )
+    assert isinstance(rendered.messages[0].content, str)
     assert "合成问题" in rendered.messages[0].content
     assert "不可信用户输入" in rendered.messages[0].content
     assert registry.get("workflow.draft").template_path == "workflow_draft_v1.j2"
@@ -152,5 +153,30 @@ def test_user_input_is_not_executed_as_a_second_template() -> None:
     rendered = runtime.render("direct.system", {"user_input": "{{danger}}"})
     content = rendered.messages[0].content
 
+    assert isinstance(content, str)
     assert "{{danger}}" in content
     assert "不可信用户输入" in content
+
+
+def test_operation_factory_registers_v1_and_v2_prompts() -> None:
+    """运营组合根显式注册两个契约版本的模板。"""
+    from efficiency_platform_agent.harness import operation_agent_factory
+
+    registry = operation_agent_factory.build_operation_prompt_registry()
+    assert (
+        registry.get("operation.deliverable.generation/1").output_schema_version
+        == "deliverable/1"
+    )
+    spec = registry.get("operation.deliverable.generation/2")
+    assert spec.output_schema_version == "deliverable/2"
+    assert spec.required_variables == frozenset({"capability", "deliverable_kind"})
+    rendered = PromptRuntime(registry).render(
+        spec.prompt_id,
+        {
+            "capability": "operation.research.insight",
+            "deliverable_kind": "ranked_digest",
+        },
+    )
+    assert isinstance(rendered.messages[0].content, str)
+    assert "Research Quality Gate" in rendered.messages[0].content
+    assert "copy_text" in rendered.messages[0].content

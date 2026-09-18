@@ -10,10 +10,17 @@ from .contracts import (
 )
 from .manifests import build_s6_manifests
 from .registry import InMemoryScenarioPackRegistry
+from .semantic_catalog import (
+    OperationSemanticRegistryView,
+    build_operation_semantic_catalog,
+    build_operation_semantic_registry_view,
+    build_semantic_catalog,
+)
 from .service import ScenarioPackService
 
 __all__ = [
     "InMemoryScenarioPackRegistry",
+    "OperationSemanticRegistryView",
     "ScenarioExecutionResult",
     "ScenarioPackRegistry",
     "ScenarioPackService",
@@ -21,5 +28,8 @@ __all__ = [
     "ScenarioSubmission",
     "ScenarioSupervisorPort",
     "ScenarioSupervisorRequest",
+    "build_operation_semantic_catalog",
+    "build_operation_semantic_registry_view",
     "build_s6_manifests",
+    "build_semantic_catalog",
 ]

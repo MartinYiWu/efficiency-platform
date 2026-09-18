@@ -1,0 +1,73 @@
+# Task 4 受控工具和内容获取差异包
+
+状态：实现及离线验证完成，待独立复核；负责人：Agent 端维护负责人；更新时间：2026-09-17。
+适用范围：本地实时研究 Task 4；关联：[实施计划](../../superpowers/plans/2026-09-17-免费公开源本地实时V2研究闭环-实施计划.md)。
+
+## 文件白名单与变更前基线
+
+下列文件在开始实施时不存在，全部为本任务新增，无既有内容需要覆盖。
+
+- `src/efficiency_platform_agent/harness/research_local_tools.py`
+- `src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py`
+- `tests/unit/harness/test_research_local_tools.py`
+- `tests/unit/capabilities/research_v2/test_content_acquisition.py`
+- 本差异包。
+
+既有 Tool Runtime、Provider 与 transport 全部复用，没有修改这些文件。
+主进度账本只追加本任务记录；追加前逐字快照位于 `task4-before/进度账本.md.snapshot`。
+该快照 SHA-256 为 `346A0B2CC7B6D87ECF9C3469C29A606B90B7E201B4D37A054710812A601C7520`。
+
+## 文件级变化与接口
+
+- `build_local_research_tools(*, descriptors, binding, run_context, connector=None, resolver=None, cancellation_signal=None, network_limits=None, now=...) -> ToolRuntime` 显式注册四类 Provider 和 fetcher，复用 `research_tool_entries`。静态 host/endpoint 来自通过 Task 2 校验的 descriptor；可信 ScopeResolver 检查 tenant/run/user 与当前 binding 对象，来源权限和证据时效逐次复核。没有 ContextVar binding 就失败关闭。
+- `LocalResearchNetworkLimits` 是组合根持有的可跨 Run 共享实例：按已登记 source_id/host 保存速率窗口，按 host 单并发，总并发为 4。状态只含静态标识、锁和时间戳。跨 Run 改变同一来源限流策略失败关闭，不能借重新注册刷新配额。
+- `_GovernedTransport` 复用 `SafeHttpTransport`，仅在每一跳 `_request_with_budget` 前取得共享限流槽并复核取消。等待后才由父 transport 预约/派发预算，解决“等配额时 Run 已取消却仍打开下一个连接”的竞争。原有逐跳 URL/DNS/IP 固定/Host TLS/压缩上限全部保留。
+- 每个 HTTP 子请求独立预约/结算同一 Run 父账本；Tool Runtime 的外层调用计数同时保留，免费 HTTP 不借用模型费用语义。网络没有内部重试；发现重试沿用 AcquisitionExecutor，fetch 为单次受控调用。
+- 原文限额收紧到 1 MiB，保证 base64/JSON 放大后仍低于既有 2 MiB Tool 限额；超限稳定拒绝，不截断成全文。主预算最多 60 调用，正文 fetch 还具有每来源 30 次上限，外层 Tool 与 HTTP 双计数使 Run 内实际正文请求不超过 30。
+- `ResearchContentAcquirer.acquire(candidate, context)` 只调用 `research.fetch.v2`，显式完整参数 Schema，取得结果后再校验关联 ID。`summary` 一律拒绝；普通 `research` 用途不推导正文许可，必须有准入记录中的 `article_body` 或 `platform_text`。
+- 文章证据必须重新读取静态允许主机的 HTML/plain 原文，XML/JSON 发现载荷不能升全文。HN 平台文本只允许 `source_item_id` 对应的固定 item API，检查返回 ID/删除状态后仅提取该 item text；返回版本标记 `platform_text`，不能声明外链文章事实。当前不启用 GitHub Release 平台正文，现有 Feed 仍保留摘要语义。
+- metadata_only 来源发现输出移除正文；未经 platform_text/article_body 明确授权的对应 inline 内容不进入事实库。没有正文缓存，没有日志/事件写原文，解析库只收到内存字节。
+
+## TDD 红绿证据
+
+1. 首轮：先新增 28 项用例，`28 failed in 2.87s`，均断言正式组合模块缺失；完成组合及内容能力后 `28 passed in 4.38s`。实现过程中发现 Tool Runtime 要求所有可选字段显式给值，调用补齐 `etag/last_modified/cursor=None`，未放宽公共 Runtime。
+2. 内容语义补强：`3 failed, 29 passed in 4.94s`，发现 HN metadata_only 仍暴露 text，以及 XML/JSON 可被当文章提取；修正后聚焦与计划契约集合 `70 passed in 4.02s`。
+3. 跨 Run 配额：两个并发 Run 与取消隔离用例先得到 `2 failed, 21 deselected in 2.29s`，原因 `SHARED_SOURCE_RATE_LIMIT_MISSING`；增加共享限流后新增集合 `34 passed in 5.04s`。
+4. 取消竞争：`1 failed, 23 deselected in 3.31s`，证实预算终态发生在限流等待中仍有新 socket 调用；将限流前移至预算预约/派发前后，新增集合 `35 passed in 6.07s`。
+
+## 最终验证命令与结果
+
+在项目根目录执行：
+
+```powershell
+.venv\Scripts\python.exe -m pytest tests/unit/harness/test_research_local_tools.py tests/unit/capabilities/research_v2/test_content_acquisition.py tests/unit/capabilities/research_v2/test_acquisition.py tests/contract/providers/research_v2 tests/architecture -q --tb=short
+```
+
+结果：`174 passed, 124 subtests passed in 19.30s`，退出码 0。包含计划要求的 transport、live_connector 和 research_v2_boundaries，以及完整研究 Provider 契约、发现执行器和全部架构测试。
+
+```powershell
+.venv\Scripts\python.exe -m mypy --follow-imports=silent src/efficiency_platform_agent/harness/research_local_tools.py src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py
+.venv\Scripts\python.exe -m ruff check src/efficiency_platform_agent/harness/research_local_tools.py src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py tests/unit/harness/test_research_local_tools.py tests/unit/capabilities/research_v2/test_content_acquisition.py
+.venv\Scripts\python.exe -m ruff format --check src/efficiency_platform_agent/harness/research_local_tools.py src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py tests/unit/harness/test_research_local_tools.py tests/unit/capabilities/research_v2/test_content_acquisition.py
+.venv\Scripts\python.exe -m compileall -q src/efficiency_platform_agent/harness/research_local_tools.py src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py tests/unit/harness/test_research_local_tools.py tests/unit/capabilities/research_v2/test_content_acquisition.py
+```
+
+分别为：`Success: no issues found in 2 source files`、`All checks passed!`、`4 files already formatted`、退出码 0。没有宣称全仓 mypy 或全量 pytest 已完成。
+
+文档更新后的 `.venv\Scripts\python.exe -m pytest tests/governance/test_documentation_contract.py -q --tb=short`：`20 passed, 122 subtests passed in 4.32s`，退出码 0。
+
+验证后 SHA-256：
+
+| 文件 | SHA-256 |
+|---|---|
+| `src/efficiency_platform_agent/harness/research_local_tools.py` | `594E301028EE793AA38A94D27D1A91AB68377EFA7DE9DF2AC00258ABBC1D4214` |
+| `src/efficiency_platform_agent/capabilities/research/v2/content_acquisition.py` | `42F520B58E224B048B77513B5F50407BC3EFE136C5C6E662F621672B6E178F78` |
+| `tests/unit/harness/test_research_local_tools.py` | `EC5186CC974E6CD58E37293C494D2284592AD19DBB68EE45A0DB78D3560A84C4` |
+| `tests/unit/capabilities/research_v2/test_content_acquisition.py` | `74F17512CDFAF20E378539CE4C306440D28636B4B61F4B5109482852DC036D40` |
+
+## 后续组合约束与未验证项
+
+- Task 7 的应用组合根创建一次 `LocalResearchNetworkLimits()`，对所有 Run 的工具工厂传同一 `network_limits`。省略参数只适合单 Run 使用，不能用于并发多 Run 的正式入口。
+- 每 Run 全程传播最初创建的 `BudgetExecutionBinding`；Acquirer 和 AcquisitionExecutor 共用该 ToolRuntime，并传该 Run 的权限、取消和 deadline。Task 3 的异步取消端口需由 Task 7 适配成 Runtime 的 CancellationPort。
+- 五个现有来源配置仍禁用、原文许可仍未开放。测试中明确授权的 descriptor 是离线边界样本，不构成真实准入证据。
+- 源码/离线测试不表示 Task 5～9 完成，不表示真实两轮研究成功或 production 就绪。未访问公网、模型或数据库，未重启服务，未读取 `.env`，没有 Git/Java/UI 操作。

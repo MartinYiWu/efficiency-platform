@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: ai-efficiency-platform
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+  # 数据源结构参考旧平台，但当前工程统一采用 MySQL + Druid。
+  # 连接信息只能由运行环境注入，禁止在仓库中填写真实地址、账号或密码。
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${TODAYLIGHT_DB_URL:}
+    username: ${TODAYLIGHT_DB_USERNAME:}
+    password: ${TODAYLIGHT_DB_PASSWORD:}
+    druid:
+      initial-size: ${AIEP_DATASOURCE_INITIAL_SIZE:5}
+      min-idle: ${AIEP_DATASOURCE_MIN_IDLE:5}
+      max-active: ${AIEP_DATASOURCE_MAX_ACTIVE:20}
+      max-wait: ${AIEP_DATASOURCE_MAX_WAIT:30000ms}
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+  # Redis 的地址与凭据按环境注入；缓存 Key、TTL 与一致性语义由具体业务模块定义。
+  data:
+    redis:
+      host: ${REDIS_HOST:}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${AIEP_REDIS_DATABASE:0}
+      timeout: ${AIEP_REDIS_TIMEOUT:10000ms}
+      lettuce:
+        pool:
+          min-idle: ${AIEP_REDIS_POOL_MIN_IDLE:0}
+          max-idle: ${AIEP_REDIS_POOL_MAX_IDLE:8}
+          max-active: ${AIEP_REDIS_POOL_MAX_ACTIVE:8}
+          max-wait: ${AIEP_REDIS_POOL_MAX_WAIT:-1ms}
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:}
+    producer:
+      acks: all
+      retries: 3
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: ${TODAYLIGHT_KAFKA_GROUP_ID:ai-efficiency-platform-dev}
+      enable-auto-commit: false
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: manual
+# MyBatis-Plus 在数据访问模块启用后统一使用本配置；逻辑删除字段由各业务表设计决定，暂不设全局默认值。
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+# 源工程未提供 Kafka 配置，且当前工程未通过 Kafka ADR；禁止在此新增猜测性的 Kafka 连接配置。
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true

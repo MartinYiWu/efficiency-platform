@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from copy import deepcopy
 from math import isfinite
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+from efficiency_platform_agent.core.operation_progress import OperationVisiblePhase
 
 
 def _validated_json(value: Any) -> Any:
@@ -45,6 +47,7 @@ StreamEventName = Literal[
     "stream_error",
     "stream_done",
 ]
+_OPERATION_VISIBLE_PHASES = frozenset(get_args(OperationVisiblePhase))
 
 
 class RunStreamEventV1(BaseModel):
@@ -62,5 +65,37 @@ class RunStreamEventV1(BaseModel):
         default_factory=dict, description="脱敏后的严格 JSON 事件数据。"
     )
 
+    @model_validator(mode="after")
+    def validate_visible_phase(self) -> RunStreamEventV1:
+        """禁止事件载荷透传内部阶段，并约束可选进度计数。"""
 
-__all__ = ["JsonValue", "RunStreamEventV1", "StreamEventName"]
+        progress: dict[str, int] = {}
+        for key in ("completed", "target"):
+            value = self.payload.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"{key} 必须是非负整数")
+            progress[key] = value
+        if (
+            "completed" in progress
+            and "target" in progress
+            and progress["completed"] > progress["target"]
+        ):
+            raise ValueError("completed 不得大于 target")
+        phase = self.payload.get("phase")
+        if phase is None:
+            if self.event == "phase_started":
+                raise ValueError("phase_started 必须包含 phase")
+            return self
+        if not isinstance(phase, str) or phase not in _OPERATION_VISIBLE_PHASES:
+            raise ValueError("运营阶段必须是用户可见阶段")
+        return self
+
+
+__all__ = [
+    "JsonValue",
+    "OperationVisiblePhase",
+    "RunStreamEventV1",
+    "StreamEventName",
+]

@@ -71,7 +71,7 @@ _AGENT_ROWS: tuple[
         frozenset({"synthetic.read"}),
         "operation-evidence-quality/1",
         # 联网研究包含服务端搜索和多轮来源整理，预算高于普通内容专家。
-        ExecutionBudget(3, 1, 4_000, 8_000, 240_000, 0),
+        ExecutionBudget(4, 1, 4_000, 8_000, 240_000, 0),
     ),
     (
         "operation.quality.review",
@@ -82,7 +82,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-quality-review/1",
-        ExecutionBudget(2, 0, 6_000, 2_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 2_000, 120_000, 0),
     ),
     (
         "operation.brand.strategy",
@@ -93,7 +93,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 6_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 3_000, 120_000, 0),
     ),
     (
         "operation.ip.strategy",
@@ -104,7 +104,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 6_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 3_000, 120_000, 0),
     ),
     (
         "operation.product.plan",
@@ -115,7 +115,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 6_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 3_000, 120_000, 0),
     ),
     (
         "operation.content.create",
@@ -126,7 +126,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-content-quality/1",
-        ExecutionBudget(2, 0, 6_000, 4_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 4_000, 120_000, 0),
     ),
     (
         "operation.channel.content",
@@ -139,7 +139,7 @@ _AGENT_ROWS: tuple[
         "operation-channel-quality/1",
         # 多平台成品允许 120 秒，和 S6 场景步骤预算保持一致。
         # 多平台长文案需要容纳完整 JSON 与正文，避免达到旧上限后截断。
-        ExecutionBudget(2, 0, 5_000, 8_000, 120_000, 0),
+        ExecutionBudget(4, 0, 5_000, 8_000, 120_000, 0),
     ),
     (
         "operation.campaign.plan",
@@ -150,7 +150,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 7_000, 4_000, 30_000, 0),
+        ExecutionBudget(4, 0, 7_000, 4_000, 120_000, 0),
     ),
     (
         "operation.user_growth.plan",
@@ -161,7 +161,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 6_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 3_000, 120_000, 0),
     ),
     (
         "operation.community.plan",
@@ -172,7 +172,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-strategy-quality/1",
-        ExecutionBudget(2, 0, 6_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 6_000, 3_000, 120_000, 0),
     ),
     (
         "operation.analytics.review",
@@ -183,7 +183,7 @@ _AGENT_ROWS: tuple[
         frozenset(),
         frozenset(),
         "operation-analytics-quality/1",
-        ExecutionBudget(2, 0, 5_000, 3_000, 30_000, 0),
+        ExecutionBudget(4, 0, 5_000, 3_000, 120_000, 0),
     ),
 )
 

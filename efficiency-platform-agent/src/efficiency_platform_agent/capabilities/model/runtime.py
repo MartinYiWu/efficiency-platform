@@ -6,8 +6,8 @@ import asyncio
 import inspect
 import time
 from collections.abc import AsyncIterator, Callable
-from dataclasses import replace
-from typing import Any
+from dataclasses import dataclass, replace
+from typing import Any, Literal
 from uuid import uuid4
 
 from ...core.budget import (
@@ -16,6 +16,17 @@ from ...core.budget import (
     BudgetGuard,
     BudgetState,
     RemainingBudget,
+)
+from ...core.budget_execution import current_budget_execution_binding
+from ...core.budget_lease import (
+    BudgetCharge as LeaseBudgetCharge,
+)
+from ...core.budget_lease import (
+    BudgetLeaseError,
+    BudgetLeasePort,
+    BudgetScope,
+    LeaseConflictError,
+    Reservation,
 )
 from ...core.diagnostics import (
     DiagnosticLevel,
@@ -58,6 +69,26 @@ _RETRYABLE_PROVIDER_ERRORS = frozenset(
 )
 
 
+@dataclass(slots=True)
+class ModelBudgetContext:
+    """单次模型调用独占的旧预算守卫上下文。"""
+
+    guard: BudgetGuard
+    budget: ExecutionBudget
+    state: BudgetState
+
+
+@dataclass(slots=True)
+class ModelLeaseContext:
+    """单次 Run 在共享父账本中的模型调用上下文。"""
+
+    port: BudgetLeasePort
+    scope: BudgetScope
+    invocation_prefix: str
+    version: int
+    reserve_cost_microunits: int | None = None
+
+
 class ModelRuntime:
     """通过候选选择端口执行最多两次模型尝试。"""
 
@@ -74,6 +105,10 @@ class ModelRuntime:
         monotonic_clock: Callable[[], float] | None = None,
         diagnostic_recorder: DiagnosticRecorderPort | None = None,
     ) -> None:
+        if (budget_guard is None) != (budget is None) or (budget_guard is None) != (
+            budget_state is None
+        ):
+            raise ValueError("budget_guard、budget 和 budget_state 必须同时提供")
         self.selector = selector
         self.registry = registry
         self.budget_guard = budget_guard
@@ -83,6 +118,7 @@ class ModelRuntime:
         self.clock = clock
         self.monotonic_clock = monotonic_clock or time.monotonic
         self.diagnostic_recorder = diagnostic_recorder or NoopDiagnosticRecorder()
+        self._legacy_budget_lock = asyncio.Lock()
 
     async def complete(
         self,
@@ -90,6 +126,71 @@ class ModelRuntime:
         request: ProviderRequest,
         *,
         remaining_budget: RemainingBudget,
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
+    ) -> ModelExecutionResult:
+        """显式上下文可并发；旧构造器预算串行累计并写回。"""
+
+        binding = current_budget_execution_binding()
+        if binding is not None:
+            self._validate_bound_lease(binding.port, binding.scope, budget_context, lease_context)
+            if lease_context is None:
+                prefix, version = await binding.next_invocation("model")
+                bound_context = ModelLeaseContext(
+                    binding.port,
+                    binding.scope,
+                    prefix,
+                    version,
+                )
+                try:
+                    return await self.complete(
+                        demand,
+                        request,
+                        remaining_budget=remaining_budget,
+                        lease_context=bound_context,
+                    )
+                finally:
+                    binding.update_version(bound_context.version)
+
+        constructor_budget = (
+            self.budget_guard is not None
+            and budget_context is None
+            and lease_context is None
+        )
+        if not constructor_budget:
+            return await self._complete_once(
+                demand,
+                request,
+                remaining_budget=remaining_budget,
+                budget_context=budget_context,
+                lease_context=lease_context,
+            )
+        async with self._legacy_budget_lock:
+            assert self.budget_guard is not None
+            assert self.budget is not None and self.budget_state is not None
+            context = ModelBudgetContext(
+                self.budget_guard,
+                self.budget,
+                self.budget_state,
+            )
+            try:
+                return await self._complete_once(
+                    demand,
+                    request,
+                    remaining_budget=remaining_budget,
+                    budget_context=context,
+                )
+            finally:
+                self.budget_state = context.state
+
+    async def _complete_once(
+        self,
+        demand: ModelDemand,
+        request: ProviderRequest,
+        *,
+        remaining_budget: RemainingBudget,
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
     ) -> ModelExecutionResult:
         """执行模型步骤，保留每次候选选择与失败事实。"""
         if not isinstance(demand, ModelDemand) or not isinstance(
@@ -98,6 +199,9 @@ class ModelRuntime:
             raise TypeError("demand/request 类型不正确")
         if not isinstance(remaining_budget, RemainingBudget):
             raise TypeError("remaining_budget 类型不正确")
+        active_budget_context = self._active_budget_context(
+            budget_context, lease_context
+        )
         deadline = self._call_deadline(remaining_budget)
         attempts: list[ModelSelection] = []
         unavailable: set[str] = set()
@@ -109,7 +213,9 @@ class ModelRuntime:
 
         for attempt_number in range(1, 3):
             try:
-                current_remaining = self._refresh_for_call(current_remaining, deadline)
+                current_remaining = self._refresh_for_call(
+                    current_remaining, deadline, active_budget_context
+                )
             except BudgetExhaustedError:
                 last_result = self._error_result(
                     request, "BUDGET_EXHAUSTED", "budget", "运行预算已耗尽"
@@ -156,13 +262,17 @@ class ModelRuntime:
                 fallback_pending = False
 
             if await self._cancel_requested():
+                await self._mark_lease_terminal(lease_context)
                 last_result = self._error_result(
                     request, "CANCELLED", "cancelled", "模型调用已取消"
                 )
                 break
 
             try:
-                current_remaining = self._check_before(demand, current_remaining)
+                if lease_context is None:
+                    current_remaining = self._check_before(
+                        demand, current_remaining, active_budget_context
+                    )
                 current_remaining = self._cap_to_deadline(current_remaining, deadline)
             except BudgetExhaustedError:
                 last_result = self._error_result(
@@ -179,13 +289,27 @@ class ModelRuntime:
             )
             started_at = self.monotonic_clock()
             provider_call_id = f"model-{uuid4().hex}"
-            self._record_model_started(candidate, attempt_number, provider_call_id)
             caught_error: BaseException | None = None
+            reservation: Reservation | None = None
             try:
                 provider = self.registry.get(candidate.provider_id)
-                result = await asyncio.wait_for(
-                    provider.complete(provider_request), timeout=timeout_seconds
+                lease_ready, reservation = await self._reserve_model_lease(
+                    lease_context,
+                    demand,
+                    attempt_number,
+                    current_remaining.cost_microunits,
                 )
+                if not lease_ready:
+                    result = self._error_result(
+                        request, "BUDGET_EXHAUSTED", "budget", "运行预算已耗尽"
+                    )
+                else:
+                    self._record_model_started(
+                        candidate, attempt_number, provider_call_id
+                    )
+                    result = await asyncio.wait_for(
+                        provider.complete(provider_request), timeout=timeout_seconds
+                    )
             except TimeoutError as error:
                 caught_error = error
                 result = self._error_result(
@@ -209,6 +333,39 @@ class ModelRuntime:
                     "provider",
                     "模型 Provider 返回无效结果",
                 )
+
+            cancelled_result = result.error is not None and result.error.code == "CANCELLED"
+            if cancelled_result:
+                await self._mark_lease_terminal(lease_context)
+
+            if reservation is not None:
+                lease_outcome = self._lease_outcome(result, caught_error)
+                lease_settled, delivery_allowed = await self._settle_model_lease(
+                    lease_context,
+                    reservation,
+                    result.usage,
+                    lease_outcome,
+                )
+                if not lease_settled:
+                    result = self._error_result_with_usage(
+                        request,
+                        result.usage,
+                        "BUDGET_EXHAUSTED",
+                        "budget",
+                        "运行预算已耗尽",
+                    )
+                elif result.message is not None and not delivery_allowed:
+                    result = ProviderResult(
+                        request.contract_version,
+                        None,
+                        result.usage,
+                        ProviderError(
+                            "CANCELLED",
+                            "cancelled",
+                            False,
+                            "模型调用已取消",
+                        ),
+                    )
 
             duration_ms = self._duration_ms(started_at)
             if result.message is not None:
@@ -239,7 +396,10 @@ class ModelRuntime:
             )
             estimated = estimated or candidate.usage_is_estimated
             try:
-                current_remaining = self._record_after(usage, current_remaining)
+                if lease_context is None:
+                    current_remaining = self._record_after(
+                        usage, current_remaining, active_budget_context
+                    )
                 current_remaining = self._cap_to_deadline(current_remaining, deadline)
             except BudgetExhaustedError:
                 last_result = self._error_result(
@@ -286,6 +446,104 @@ class ModelRuntime:
         request: ProviderRequest,
         *,
         remaining_budget: RemainingBudget,
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
+    ) -> AsyncIterator[ProviderStreamChunk]:
+        """租约路径结算后才释放增量；旧路径保持实时流式语义。"""
+
+        binding = current_budget_execution_binding()
+        if binding is not None:
+            self._validate_bound_lease(binding.port, binding.scope, budget_context, lease_context)
+            if lease_context is None:
+                prefix, version = await binding.next_invocation("model-stream")
+                bound_context = ModelLeaseContext(
+                    binding.port,
+                    binding.scope,
+                    prefix,
+                    version,
+                )
+                try:
+                    async for chunk in self.stream(
+                        demand,
+                        request,
+                        remaining_budget=remaining_budget,
+                        budget_context=None,
+                        lease_context=bound_context,
+                    ):
+                        yield chunk
+                finally:
+                    binding.update_version(bound_context.version)
+                return
+
+        if lease_context is not None:
+            buffered: list[str] = []
+            execution = await self.stream_complete(
+                demand,
+                request,
+                remaining_budget=remaining_budget,
+                on_delta=buffered.append,
+                budget_context=budget_context,
+                lease_context=lease_context,
+            )
+            if execution.result.error is not None:
+                yield ProviderStreamChunk(error=execution.result.error)
+                return
+            usage = ProviderUsage(
+                execution.usage.input_tokens,
+                execution.usage.output_tokens,
+                0,
+                0,
+                execution.usage.cost_microunits,
+            )
+            if not buffered:
+                yield ProviderStreamChunk(usage=usage, finish_reason="stop")
+                return
+            for index, delta in enumerate(buffered):
+                final = index == len(buffered) - 1
+                yield ProviderStreamChunk(
+                    delta,
+                    usage if final else ProviderUsage(0, 0, 0, 0, 0),
+                    "stop" if final else None,
+                )
+            return
+
+        constructor_budget = self.budget_guard is not None and budget_context is None
+        if not constructor_budget:
+            async for chunk in self._stream_once(
+                demand,
+                request,
+                remaining_budget=remaining_budget,
+                budget_context=budget_context,
+            ):
+                yield chunk
+            return
+        async with self._legacy_budget_lock:
+            assert self.budget_guard is not None
+            assert self.budget is not None and self.budget_state is not None
+            context = ModelBudgetContext(
+                self.budget_guard,
+                self.budget,
+                self.budget_state,
+            )
+            try:
+                async for chunk in self._stream_once(
+                    demand,
+                    request,
+                    remaining_budget=remaining_budget,
+                    budget_context=context,
+                ):
+                    yield chunk
+            finally:
+                self.budget_state = context.state
+
+    async def _stream_once(
+        self,
+        demand: ModelDemand,
+        request: ProviderRequest,
+        *,
+        remaining_budget: RemainingBudget,
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
     ) -> AsyncIterator[ProviderStreamChunk]:
         """按既有候选路由执行流式调用，首个增量前才允许自动降级。"""
         if not isinstance(demand, ModelDemand) or not isinstance(
@@ -294,12 +552,16 @@ class ModelRuntime:
             raise TypeError("demand/request 类型不正确")
         if not isinstance(remaining_budget, RemainingBudget):
             raise TypeError("remaining_budget 类型不正确")
+        active_budget_context = self._active_budget_context(
+            budget_context, lease_context
+        )
         deadline = self._call_deadline(remaining_budget)
         unavailable: set[str] = set()
         current_remaining = remaining_budget
         degraded_event_pending = False
         for attempt_number in range(1, 3):
             if await self._cancel_requested():
+                await self._mark_lease_terminal(lease_context)
                 yield ProviderStreamChunk(
                     error=ProviderError(
                         "CANCELLED", "cancelled", False, "模型调用已取消"
@@ -307,8 +569,13 @@ class ModelRuntime:
                 )
                 return
             try:
-                current_remaining = self._refresh_for_call(current_remaining, deadline)
-                current_remaining = self._check_before(demand, current_remaining)
+                current_remaining = self._refresh_for_call(
+                    current_remaining, deadline, active_budget_context
+                )
+                if lease_context is None:
+                    current_remaining = self._check_before(
+                        demand, current_remaining, active_budget_context
+                    )
                 current_remaining = self._cap_to_deadline(current_remaining, deadline)
             except BudgetExhaustedError:
                 yield ProviderStreamChunk(
@@ -349,11 +616,27 @@ class ModelRuntime:
                 self._request_for_candidate(request, candidate),
                 timeout_ms=min(request.timeout_ms, current_remaining.timeout_ms),
             )
+            lease_ready, reservation = await self._reserve_model_lease(
+                lease_context,
+                demand,
+                attempt_number,
+                current_remaining.cost_microunits,
+            )
+            if not lease_ready:
+                yield ProviderStreamChunk(
+                    error=ProviderError(
+                        "BUDGET_EXHAUSTED", "budget", False, "运行预算已耗尽"
+                    )
+                )
+                return
             stream = provider.stream(provider_request)
             emitted = False
             retry = False
             timed_out = False
             usage = ProviderUsage(0, 0, 0, 0, 0)
+            lease_outcome: Literal[
+                "success", "failed", "cancelled", "unknown"
+            ] = "unknown"
             try:
                 try:
                     async with asyncio.timeout(
@@ -376,6 +659,10 @@ class ModelRuntime:
                                 )
                                 return
                             if await self._cancel_requested():
+                                if lease_context is not None:
+                                    await lease_context.port.mark_scope_terminal(
+                                        lease_context.scope, "cancelled"
+                                    )
                                 yield ProviderStreamChunk(
                                     error=ProviderError(
                                         "CANCELLED",
@@ -399,6 +686,7 @@ class ModelRuntime:
                                 ),
                             )
                             if chunk.error is not None:
+                                lease_outcome = "failed"
                                 retry = not emitted and self._may_degrade(chunk.error)
                                 if retry:
                                     break
@@ -406,10 +694,14 @@ class ModelRuntime:
                                 break
                             emitted = emitted or bool(chunk.delta)
                             yield chunk
+                        else:
+                            lease_outcome = "success"
                 except TimeoutError:
                     timed_out = True
                 try:
-                    current_remaining = self._record_after(usage, current_remaining)
+                    current_remaining = self._record_after(
+                        usage, current_remaining, active_budget_context
+                    )
                     current_remaining = self._cap_to_deadline(
                         current_remaining, deadline
                     )
@@ -441,6 +733,13 @@ class ModelRuntime:
                 close = getattr(stream, "aclose", None)
                 if close is not None:
                     await close()
+                if reservation is not None:
+                    await self._settle_model_lease(
+                        lease_context,
+                        reservation,
+                        usage,
+                        lease_outcome,
+                    )
         yield ProviderStreamChunk(
             error=ProviderError(
                 "MODEL_UNAVAILABLE", "routing", False, "没有可用模型候选"
@@ -454,6 +753,75 @@ class ModelRuntime:
         *,
         remaining_budget: RemainingBudget,
         on_delta: Callable[[str], Any],
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
+    ) -> ModelExecutionResult:
+        """隔离显式上下文；旧构造器预算串行累计并写回。"""
+
+        binding = current_budget_execution_binding()
+        if binding is not None:
+            self._validate_bound_lease(binding.port, binding.scope, budget_context, lease_context)
+            if lease_context is None:
+                prefix, version = await binding.next_invocation("model-stream-complete")
+                bound_context = ModelLeaseContext(
+                    binding.port,
+                    binding.scope,
+                    prefix,
+                    version,
+                )
+                try:
+                    return await self.stream_complete(
+                        demand,
+                        request,
+                        remaining_budget=remaining_budget,
+                        on_delta=on_delta,
+                        lease_context=bound_context,
+                    )
+                finally:
+                    binding.update_version(bound_context.version)
+
+        constructor_budget = (
+            self.budget_guard is not None
+            and budget_context is None
+            and lease_context is None
+        )
+        if not constructor_budget:
+            return await self._stream_complete_once(
+                demand,
+                request,
+                remaining_budget=remaining_budget,
+                on_delta=on_delta,
+                budget_context=budget_context,
+                lease_context=lease_context,
+            )
+        async with self._legacy_budget_lock:
+            assert self.budget_guard is not None
+            assert self.budget is not None and self.budget_state is not None
+            context = ModelBudgetContext(
+                self.budget_guard,
+                self.budget,
+                self.budget_state,
+            )
+            try:
+                return await self._stream_complete_once(
+                    demand,
+                    request,
+                    remaining_budget=remaining_budget,
+                    on_delta=on_delta,
+                    budget_context=context,
+                )
+            finally:
+                self.budget_state = context.state
+
+    async def _stream_complete_once(
+        self,
+        demand: ModelDemand,
+        request: ProviderRequest,
+        *,
+        remaining_budget: RemainingBudget,
+        on_delta: Callable[[str], Any],
+        budget_context: ModelBudgetContext | None = None,
+        lease_context: ModelLeaseContext | None = None,
     ) -> ModelExecutionResult:
         """实时交付正文增量，并在流结束后返回完整的执行事实。"""
         if not isinstance(demand, ModelDemand) or not isinstance(
@@ -464,6 +832,9 @@ class ModelRuntime:
             raise TypeError("remaining_budget 类型不正确")
         if not callable(on_delta):
             raise TypeError("on_delta 必须可调用")
+        active_budget_context = self._active_budget_context(
+            budget_context, lease_context
+        )
 
         deadline = self._call_deadline(remaining_budget)
         attempts: list[ModelSelection] = []
@@ -476,13 +847,19 @@ class ModelRuntime:
 
         for attempt_number in range(1, 3):
             if await self._cancel_requested():
+                await self._mark_lease_terminal(lease_context)
                 last_result = self._error_result(
                     request, "CANCELLED", "cancelled", "模型调用已取消"
                 )
                 break
             try:
-                current_remaining = self._refresh_for_call(current_remaining, deadline)
-                current_remaining = self._check_before(demand, current_remaining)
+                current_remaining = self._refresh_for_call(
+                    current_remaining, deadline, active_budget_context
+                )
+                if lease_context is None:
+                    current_remaining = self._check_before(
+                        demand, current_remaining, active_budget_context
+                    )
                 current_remaining = self._cap_to_deadline(current_remaining, deadline)
             except BudgetExhaustedError:
                 last_result = self._error_result(
@@ -525,7 +902,6 @@ class ModelRuntime:
             usage = ProviderUsage(0, 0, 0, 0, 0)
             started_at = self.monotonic_clock()
             provider_call_id = f"model-{uuid4().hex}"
-            self._record_model_started(candidate, attempt_number, provider_call_id)
             caught_error: BaseException | None = None
             try:
                 provider = self.registry.get(candidate.provider_id)
@@ -565,10 +941,23 @@ class ModelRuntime:
                 self._request_for_candidate(request, candidate),
                 timeout_ms=min(request.timeout_ms, current_remaining.timeout_ms),
             )
+            lease_ready, reservation = await self._reserve_model_lease(
+                lease_context,
+                demand,
+                attempt_number,
+                current_remaining.cost_microunits,
+            )
+            if not lease_ready:
+                last_result = self._error_result(
+                    request, "BUDGET_EXHAUSTED", "budget", "运行预算已耗尽"
+                )
+                break
+            self._record_model_started(candidate, attempt_number, provider_call_id)
             text: list[str] = []
             emitted = False
             retry = False
             stream = None
+            lease_settled = True
             try:
                 try:
                     stream = provider.stream(provider_request)
@@ -578,6 +967,10 @@ class ModelRuntime:
                                 current_remaining, deadline
                             )
                             if await self._cancel_requested():
+                                if lease_context is not None:
+                                    await lease_context.port.mark_scope_terminal(
+                                        lease_context.scope, "cancelled"
+                                    )
                                 last_result = self._error_result(
                                     request, "CANCELLED", "cancelled", "模型调用已取消"
                                 )
@@ -607,17 +1000,18 @@ class ModelRuntime:
                             if chunk.delta:
                                 emitted = True
                                 text.append(chunk.delta)
-                                callback_result = on_delta(chunk.delta)
-                                if inspect.isawaitable(callback_result):
-                                    await callback_result
-                                if await self._cancel_requested():
-                                    last_result = self._error_result(
-                                        request,
-                                        "CANCELLED",
-                                        "cancelled",
-                                        "模型调用已取消",
-                                    )
-                                    break
+                                if lease_context is None:
+                                    callback_result = on_delta(chunk.delta)
+                                    if inspect.isawaitable(callback_result):
+                                        await callback_result
+                                    if await self._cancel_requested():
+                                        last_result = self._error_result(
+                                            request,
+                                            "CANCELLED",
+                                            "cancelled",
+                                            "模型调用已取消",
+                                        )
+                                        break
                         else:
                             last_result = ProviderResult(
                                 request.contract_version,
@@ -659,6 +1053,60 @@ class ModelRuntime:
                                 "provider",
                                 "模型 Provider 调用失败",
                             )
+                if reservation is not None:
+                    assert last_result is not None
+                    lease_settled, delivery_allowed = await self._settle_model_lease(
+                        lease_context,
+                        reservation,
+                        usage,
+                        self._lease_outcome(last_result, caught_error),
+                    )
+                    if (
+                        lease_settled
+                        and last_result.message is not None
+                        and not delivery_allowed
+                    ):
+                        last_result = ProviderResult(
+                            request.contract_version,
+                            None,
+                            usage,
+                            ProviderError(
+                                "CANCELLED",
+                                "cancelled",
+                                False,
+                                "模型调用已取消",
+                            ),
+                        )
+
+            if not lease_settled:
+                last_result = self._error_result_with_usage(
+                    request,
+                    usage,
+                    "BUDGET_EXHAUSTED",
+                    "budget",
+                    "运行预算已耗尽",
+                )
+            elif (
+                lease_context is not None
+                and last_result is not None
+                and last_result.message is not None
+            ):
+                try:
+                    for delta in text:
+                        callback_result = on_delta(delta)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+                except asyncio.CancelledError:
+                    await self._mark_lease_terminal(lease_context)
+                    raise
+                except Exception as error:  # noqa: BLE001 - 交付边界失败必须归一化
+                    caught_error = error
+                    last_result = self._error_result(
+                        request,
+                        "PROVIDER_FAILURE",
+                        "delivery",
+                        "模型结果交付失败",
+                    )
 
             total = ProviderUsage(
                 total.input_tokens + usage.input_tokens,
@@ -686,7 +1134,10 @@ class ModelRuntime:
                     provider_call_id,
                 )
             try:
-                current_remaining = self._record_after(usage, current_remaining)
+                if lease_context is None:
+                    current_remaining = self._record_after(
+                        usage, current_remaining, active_budget_context
+                    )
                 current_remaining = self._cap_to_deadline(current_remaining, deadline)
             except BudgetExhaustedError:
                 last_result = self._error_result(
@@ -828,15 +1279,155 @@ class ModelRuntime:
         options += (("logical_model", candidate.logical_model),)
         return replace(request, options=JsonObject(options))
 
-    def _refresh_remaining(self, fallback: RemainingBudget) -> RemainingBudget:
-        """每次候选选择前取得最新的 Run 预算快照。"""
+    def _active_budget_context(
+        self,
+        supplied: ModelBudgetContext | None,
+        lease_context: ModelLeaseContext | None = None,
+    ) -> ModelBudgetContext | None:
+        """为每次公开调用建立独占上下文，禁止覆盖 Runtime 实例状态。"""
+
+        if lease_context is not None and (
+            supplied is not None or self.budget_guard is not None
+        ):
+            raise ValueError("lease_context 必须是唯一预算计账路径")
+
+        if supplied is not None:
+            return supplied
         if (
             self.budget_guard is not None
             and self.budget is not None
             and self.budget_state is not None
         ):
-            return self.budget_guard.remaining(
-                self.budget, self.budget_state, now_epoch_ms=self._now_ms()
+            return ModelBudgetContext(
+                self.budget_guard,
+                self.budget,
+                self.budget_state,
+            )
+        return None
+
+    def _validate_bound_lease(
+        self,
+        port: BudgetLeasePort,
+        scope: BudgetScope,
+        budget_context: ModelBudgetContext | None,
+        lease_context: ModelLeaseContext | None,
+    ) -> None:
+        """任务级硬绑定存在时，拒绝切回旧预算或替换父账本。"""
+
+        if budget_context is not None or self.budget_guard is not None:
+            raise ValueError("BOUND_BUDGET_MUST_BE_ONLY_ACCOUNTING_PATH")
+        if lease_context is not None and (
+            lease_context.port is not port or lease_context.scope != scope
+        ):
+            raise ValueError("BOUND_BUDGET_LEASE_MISMATCH")
+
+    async def _reserve_model_lease(
+        self,
+        context: ModelLeaseContext | None,
+        demand: ModelDemand,
+        attempt: int,
+        max_cost_microunits: int,
+    ) -> tuple[bool, Reservation | None]:
+        """在 Provider 派发前预留并原子标记调用已派发。"""
+
+        if context is None:
+            return True, None
+        charge = LeaseBudgetCharge(
+            calls=1,
+            input_tokens=demand.estimated_input_tokens,
+            output_tokens=demand.max_output_tokens,
+            cost_microunits=(
+                context.reserve_cost_microunits
+                if context.reserve_cost_microunits is not None
+                else max_cost_microunits
+            ),
+        )
+        invocation_id = f"{context.invocation_prefix}:{attempt}"
+        for _ in range(8):
+            try:
+                reservation = await context.port.reserve(
+                    context.scope,
+                    invocation_id,
+                    charge,
+                    context.version,
+                )
+                dispatched = await context.port.mark_dispatched(
+                    reservation.reservation_id
+                )
+                context.version = dispatched.version
+                return True, dispatched
+            except LeaseConflictError:
+                snapshot = await context.port.snapshot(context.scope)
+                context.version = snapshot.version
+            except BudgetLeaseError:
+                snapshot = await context.port.snapshot(context.scope)
+                context.version = snapshot.version
+                return False, None
+        return False, None
+
+    async def _settle_model_lease(
+        self,
+        context: ModelLeaseContext | None,
+        reservation: Reservation,
+        usage: ProviderUsage,
+        outcome: Literal["success", "failed", "cancelled", "unknown"],
+    ) -> tuple[bool, bool]:
+        """以 Provider 明确用量结算；未知结果不得释放原预留。"""
+
+        if context is None:
+            return True, True
+        try:
+            snapshot = await context.port.settle(
+                reservation.reservation_id,
+                LeaseBudgetCharge(
+                    calls=1,
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cost_microunits=usage.cost_microunits,
+                    unknown=outcome == "unknown",
+                ),
+                outcome,
+            )
+            context.version = snapshot.version
+        except BudgetLeaseError:
+            return False, False
+        if snapshot.over_limit:
+            return False, False
+        return True, snapshot.delivery_allowed
+
+    @staticmethod
+    async def _mark_lease_terminal(context: ModelLeaseContext | None) -> None:
+        """把取消事实写入父账本，使迟到成功只能保留审计。"""
+
+        if context is not None:
+            await context.port.mark_scope_terminal(context.scope, "cancelled")
+
+    @staticmethod
+    def _lease_outcome(
+        result: ProviderResult,
+        caught_error: BaseException | None,
+    ) -> Literal["success", "failed", "cancelled", "unknown"]:
+        """把模型边界结果转换为保守租约结算语义。"""
+
+        if caught_error is not None:
+            return "unknown"
+        if result.message is not None:
+            return "success"
+        if result.error is not None and result.error.code == "CANCELLED":
+            return "cancelled"
+        return "failed"
+
+    def _refresh_remaining(
+        self,
+        fallback: RemainingBudget,
+        budget_context: ModelBudgetContext | None,
+    ) -> RemainingBudget:
+        """每次候选选择前取得最新的 Run 预算快照。"""
+        if budget_context is not None:
+            return budget_context.guard.remaining(
+                budget_context.budget,
+                budget_context.state,
+                now_epoch_ms=self._now_ms(),
             )
         return fallback
 
@@ -845,10 +1436,15 @@ class ModelRuntime:
         return self.monotonic_clock() + max(0, remaining.timeout_ms) / 1000
 
     def _refresh_for_call(
-        self, fallback: RemainingBudget, deadline: float
+        self,
+        fallback: RemainingBudget,
+        deadline: float,
+        budget_context: ModelBudgetContext | None,
     ) -> RemainingBudget:
         """合并最新 Run 预算与本次调用的绝对截止时间。"""
-        return self._cap_to_deadline(self._refresh_remaining(fallback), deadline)
+        return self._cap_to_deadline(
+            self._refresh_remaining(fallback, budget_context), deadline
+        )
 
     def _cap_to_deadline(
         self, remaining: RemainingBudget, deadline: float
@@ -872,18 +1468,17 @@ class ModelRuntime:
         )
 
     def _check_before(
-        self, demand: ModelDemand, remaining: RemainingBudget
+        self,
+        demand: ModelDemand,
+        remaining: RemainingBudget,
+        budget_context: ModelBudgetContext | None,
     ) -> RemainingBudget:
         """在可用 BudgetGuard 上执行统一前置检查。"""
-        if (
-            self.budget_guard is not None
-            and self.budget is not None
-            and self.budget_state is not None
-        ):
+        if budget_context is not None:
             now = self._now_ms()
-            return self.budget_guard.check_before_node(
-                self.budget,
-                self.budget_state,
+            return budget_context.guard.check_before_node(
+                budget_context.budget,
+                budget_context.state,
                 BudgetCharge(
                     iterations=1,
                     input_tokens=demand.estimated_input_tokens,
@@ -900,18 +1495,17 @@ class ModelRuntime:
         return remaining
 
     def _record_after(
-        self, usage: ProviderUsage, remaining: RemainingBudget
+        self,
+        usage: ProviderUsage,
+        remaining: RemainingBudget,
+        budget_context: ModelBudgetContext | None,
     ) -> RemainingBudget:
         """记录 Provider 明确返回的用量，超限不泄露模型正文。"""
-        if (
-            self.budget_guard is not None
-            and self.budget is not None
-            and self.budget_state is not None
-        ):
+        if budget_context is not None:
             now = self._now_ms()
-            self.budget_state, next_remaining = self.budget_guard.record_after_node(
-                self.budget,
-                self.budget_state,
+            budget_context.state, next_remaining = budget_context.guard.record_after_node(
+                budget_context.budget,
+                budget_context.state,
                 BudgetCharge(
                     iterations=1,
                     input_tokens=usage.input_tokens,
@@ -941,6 +1535,8 @@ class ModelRuntime:
         return next_remaining
 
     def _now_ms(self) -> int:
+        if callable(self.clock):
+            return int(self.clock())
         if self.clock is not None and hasattr(self.clock, "now_epoch_ms"):
             return int(self.clock.now_epoch_ms())
         return int(time.time() * 1000)
@@ -961,5 +1557,22 @@ class ModelRuntime:
             contract_version=request.contract_version,
             message=None,
             usage=ProviderUsage(0, 0, 0, 0, 0),
+            error=ProviderError(code, category, code == "PROVIDER_TIMEOUT", message),
+        )
+
+    @staticmethod
+    def _error_result_with_usage(
+        request: ProviderRequest,
+        usage: ProviderUsage,
+        code: str,
+        category: str,
+        message: str,
+    ) -> ProviderResult:
+        """预算结算失败仍保留 Provider 已明确报告的实际用量。"""
+
+        return ProviderResult(
+            contract_version=request.contract_version,
+            message=None,
+            usage=usage,
             error=ProviderError(code, category, code == "PROVIDER_TIMEOUT", message),
         )

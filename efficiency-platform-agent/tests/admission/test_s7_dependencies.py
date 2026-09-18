@@ -42,7 +42,6 @@ FORBIDDEN = {
     "llama-index",
     "playwright",
     "beautifulsoup4",
-    "trafilatura",
     "duckdb",
     "sqlglot",
     "openpyxl",

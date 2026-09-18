@@ -72,6 +72,29 @@ def test_diagnostic_log_contains_location_but_not_sensitive_values(caplog) -> No
     assert synthetic_secret not in text
 
 
+def test_scheduler_diagnostic_is_not_silently_discarded(caplog) -> None:
+    """专家调度失败必须留下安全位置，才能定位真实链路的结构错误。"""
+
+    logger = logging.getLogger("tests.diagnostic_scheduler")
+    caplog.set_level(logging.INFO, logger=logger.name)
+    LocalExecutionLogger(logger=logger).record(
+        DiagnosticRecord(
+            event_name="specialist_execution_failed",
+            component="scheduler",
+            level=DiagnosticLevel.ERROR,
+            stage="specialist.run",
+            error_code="SPECIALIST_FAILED",
+            error_type="ValueError",
+            error_location="model_backed.py:1:run",
+        )
+    )
+
+    text = "\n".join(caplog.messages)
+    assert "[AgentScheduler]" in text
+    assert "异常类型=ValueError" in text
+    assert "错误位置=model_backed.py:1:run" in text
+
+
 def test_record_rejects_sensitive_free_fields_before_logging(caplog) -> None:
     """record 路径不能把未知自由字段传入诊断记录。"""
 
@@ -348,7 +371,7 @@ async def test_real_composition_root_registers_local_execution_logger(monkeypatc
         )
         assert execution_logger.capabilities == [
             ("deepseek_chat", True, None),
-            ("deepseek_web_search", False, "RESEARCH_GATE_DISABLED"),
+            ("free_public_research", False, "RESEARCH_GATE_DISABLED"),
         ]
     finally:
         await bundle.close()

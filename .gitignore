@@ -1,0 +1,35 @@
+# 操作系统与编辑器本地状态
+.DS_Store
+Thumbs.db
+**/.idea/
+**/.vscode/
+**/*.iml
+
+# Java / Python / Node 构建与缓存产物
+**/target/
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/.uv-cache/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/node_modules/
+**/dist/
+**/build/
+**/coverage/
+**/playwright-report/
+**/playwright-report-*/
+**/test-results/
+**/*.tsbuildinfo
+**/*.log
+
+# 本机验收与辅助产物
+**/.local-acceptance/
+**/.superpowers/
+
+# 本机配置与凭据；仅允许提交脱敏模板
+**/.env
+**/.env.*
+!**/.env.example
+**/application-local.yml

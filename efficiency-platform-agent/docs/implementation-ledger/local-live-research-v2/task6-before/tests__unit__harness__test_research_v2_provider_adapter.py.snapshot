@@ -1,0 +1,182 @@
+"""X03 Supervisor 旧研究端口到 V2 Service 的无损适配。"""
+
+from datetime import UTC, datetime
+
+import pytest
+
+from efficiency_platform_agent.capabilities.research.contracts import ResearchRequest
+from efficiency_platform_agent.harness.research_v2_adapter import (
+    InMemoryResearchBriefStoreV2,
+    ResearchV2ProviderAdapter,
+)
+from tests.unit.capabilities.research_v2._delivery_support import (
+    delivery_facts,
+    research_outcome,
+)
+
+
+class _Store:
+    def __init__(self, brief):
+        self.brief = brief
+
+    async def get_brief(self, tenant_id, task_id):
+        if (tenant_id, task_id) == (
+            self.brief.trusted_context.tenant_id,
+            self.brief.trusted_context.task_id,
+        ):
+            return self.brief
+        return None
+
+
+class _Service:
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.windows = []
+
+    async def research(self, brief, runtime_context):
+        self.windows.append(brief.time_window)
+        return self.outcome
+
+
+class _FailingService:
+    async def research(self, brief, runtime_context):
+        del brief, runtime_context
+        raise RuntimeError("canary-secret-must-not-leak")
+
+
+@pytest.mark.asyncio
+async def test_adapter_preserves_frozen_brief_window_and_maps_server_citations() -> (
+    None
+):
+    brief, snapshot, document, *_ = delivery_facts()
+    from efficiency_platform_agent.capabilities.research.v2.delivery import (
+        DeliveryPackBuilder,
+    )
+
+    base = research_outcome(brief)
+    outcome = base.model_copy(
+        update={"delivery": DeliveryPackBuilder().build(brief, base, snapshot)}
+    )
+    service = _Service(outcome)
+    adapter = ResearchV2ProviderAdapter(
+        service,
+        _Store(brief),
+        now=lambda: datetime(2026, 9, 16, tzinfo=UTC),
+    )
+    result = await adapter.research(
+        ResearchRequest(
+            "research-request/1",
+            "request-1",
+            brief.trusted_context.task_id,
+            brief.trusted_context.tenant_id,
+            "ignored legacy goal",
+            None,
+            1,
+            ("goal-1",),
+            "research-result/1",
+        )
+    )
+    assert service.windows == [brief.time_window]
+    assert result.observations[0].source_url == document.canonical_url
+    assert result.observations[0].within_time_window is True
+
+
+@pytest.mark.asyncio
+async def test_missing_frozen_brief_fails_without_service_call() -> None:
+    brief, *_ = delivery_facts()
+    service = _Service(None)
+    adapter = ResearchV2ProviderAdapter(service, _Store(brief))
+    result = await adapter.research(
+        ResearchRequest(
+            "research-request/1",
+            "request-1",
+            "other-task",
+            "other-tenant",
+            "goal",
+            None,
+            1,
+            ("goal-1",),
+            "research-result/1",
+        )
+    )
+    assert result.status.value == "failed"
+    assert service.windows == []
+
+
+@pytest.mark.asyncio
+async def test_service_failure_is_sanitized_at_legacy_provider_boundary() -> None:
+    brief, *_ = delivery_facts()
+    adapter = ResearchV2ProviderAdapter(_FailingService(), _Store(brief))
+    result = await adapter.research(
+        ResearchRequest(
+            "research-request/1",
+            "request-1",
+            brief.trusted_context.task_id,
+            brief.trusted_context.tenant_id,
+            "goal",
+            None,
+            1,
+            ("goal-1",),
+            "research-result/1",
+        )
+    )
+
+    assert result.status.value == "failed"
+    assert result.error_code == "RESEARCH_UNAVAILABLE"
+    assert "canary" not in repr(result)
+
+
+@pytest.mark.asyncio
+async def test_in_memory_brief_store_is_tenant_isolated_and_immutable() -> None:
+    brief, *_ = delivery_facts()
+    store = InMemoryResearchBriefStoreV2()
+    await store.put_brief(brief)
+
+    assert (
+        await store.get_brief(
+            brief.trusted_context.tenant_id,
+            brief.trusted_context.task_id,
+        )
+        is brief
+    )
+    assert await store.get_brief("other-tenant", brief.trusted_context.task_id) is None
+    with pytest.raises(ValueError, match="RESEARCH_BRIEF_CONFLICT"):
+        await store.put_brief(brief.model_copy(update={"topic": "different"}))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["PARTIAL", "NO_MATCHES"])
+async def test_adapter_preserves_terminal_outcome_in_stable_warnings(status):
+    from efficiency_platform_agent.capabilities.research.v2.delivery import (
+        DeliveryPackBuilder,
+    )
+
+    brief, snapshot, *_ = delivery_facts(target=2)
+    base = research_outcome(brief, partial=status == "PARTIAL")
+    if status == "NO_MATCHES":
+        base = base.model_copy(
+            update={"outcome": status, "usable_event_ids": (), "evidence_ids": ()}
+        )
+    outcome = base.model_copy(
+        update={"delivery": DeliveryPackBuilder().build(brief, base, snapshot)}
+    )
+    result = await ResearchV2ProviderAdapter(_Service(outcome), _Store(brief)).research(
+        ResearchRequest(
+            "research-request/1",
+            "request-1",
+            brief.trusted_context.task_id,
+            brief.trusted_context.tenant_id,
+            "goal",
+            None,
+            2,
+            ("goal-1",),
+            "research-result/1",
+        )
+    )
+    if status == "NO_MATCHES":
+        assert result.status.value == "empty"
+        assert "RESEARCH_NO_MATCHES" in result.warnings
+    else:
+        assert result.status.value == "succeeded"
+        assert "RESEARCH_OUTCOME_PARTIAL" in result.warnings
+        assert "COUNT_EXACT_UNMET" in result.warnings

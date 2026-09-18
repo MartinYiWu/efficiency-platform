@@ -16,6 +16,9 @@ from efficiency_platform_agent.agents.operation.contracts.scenarios import (
     compile_scenario_plan,
 )
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
+from efficiency_platform_agent.core.operation_progress import (
+    report_operation_progress,
+)
 
 from .contracts import (
     ScenarioExecutionResult,
@@ -85,6 +88,7 @@ class ScenarioPackService:
             context,
             plan,
             submission.evidence_pack,
+            submission.referenced_inputs,
         )
         result = await self.supervisor.execute_scenario(request)
         if not isinstance(result, ScenarioExecutionResult):
@@ -121,9 +125,18 @@ class ScenarioPackService:
                 error_code=result.error_code or "SCENARIO_PARTIAL_INCOMPLETE",
             )
         if self.quality_gate is not None and result.deliverable_bundle is not None:
+            await report_operation_progress("checking_delivery")
             report = self.quality_gate.validate(manifest, result)
             if not isinstance(report, OperationQualityReport):
                 raise ValueError("SCENARIO_QUALITY_REPORT_INVALID")
+            await report_operation_progress(
+                "checking_delivery",
+                event="quality_checked",
+                payload={
+                    "completed": len(result.deliverable_bundle.deliverables),
+                    "target": len(result.deliverable_bundle.deliverables),
+                },
+            )
             bundle = replace(
                 result.deliverable_bundle,
                 quality_report_ids=tuple(

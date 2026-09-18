@@ -1,0 +1,332 @@
+"""正式模型决策适配器只接纳有界、可回查的候选。"""
+
+import json
+from importlib import import_module, util
+from types import SimpleNamespace
+
+import pytest
+
+from efficiency_platform_agent.context.builder import ContextBuilder
+from efficiency_platform_agent.contracts.intent_v2 import BudgetLeaseReferenceV2
+from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.run import RunContext
+from efficiency_platform_agent.harness.research_local_runtime import (
+    build_local_research_binding,
+)
+from tests.unit.capabilities.research_v2._delivery_support import delivery_facts
+from tests.unit.harness.test_research_local_tools import NOW
+
+
+def module():
+    name = "efficiency_platform_agent.capabilities.research.v2.model_decisions"
+    assert util.find_spec(name) is not None, "RESEARCH_MODEL_DECISIONS_MISSING"
+    return import_module(name)
+
+
+class Model:
+    def __init__(self, output):
+        self.output, self.calls = output, []
+
+    async def complete(self, demand, request, **kwargs):
+        self.calls.append((demand, request, kwargs))
+        output = self.output(demand, request) if callable(self.output) else self.output
+        return SimpleNamespace(
+            result=SimpleNamespace(
+                error=None, message=SimpleNamespace(content=json.dumps(output))
+            ),
+            attempts=(object(),),
+        )
+
+
+def setup(output):
+    brief, _, document, *_ = delivery_facts()
+    remaining = RemainingBudget(50, 60, 100_000, 20_000, 100_000, 180_000)
+    binding = build_local_research_binding(
+        tenant_id="t",
+        run_id="r",
+        lease_id="lease",
+        remaining=remaining,
+        now=NOW,
+        clock_ms=lambda: int(NOW.timestamp() * 1000),
+    )
+    model = Model(output)
+    decisions = module().ResearchModelDecisions(
+        model_runtime=model,
+        context_builder=ContextBuilder(),
+        run_context=RunContext("r", "t", "u", "trace"),
+        binding=binding,
+        brief=brief,
+        remaining_budget=remaining,
+    )
+    return decisions, model, binding, brief, document
+
+
+def relevance_output():
+    brief, _, document, *_ = delivery_facts()
+    return {
+        "document_id": document.document_id,
+        "document_content_hash": document.content_hash,
+        "brief_digest": brief.canonical_digest(),
+        "outcome": "irrelevant",
+        "requirement_ids": [],
+        "source_excerpt": document.text,
+        "prompt_version": "research.v2.relevance@1.0.0",
+    }
+
+
+@pytest.mark.asyncio
+async def test_relevance_uses_context_builder_model_runtime_and_same_lease():
+    decisions, model, binding, brief, document = setup(relevance_output())
+    result = await decisions.relevance(
+        brief, (document,), BudgetLeaseReferenceV2(lease_id="lease", version=0)
+    )
+    assert result[0].outcome == "irrelevant"
+    _, request, kwargs = model.calls[0]
+    assert document.text in request.messages[-1].content
+    assert request.messages[-1].role == "user"
+    assert kwargs["lease_context"].port is binding.port
+    assert kwargs["lease_context"].scope == binding.scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("document_id", "invented-document"),
+        ("url", "https://invented.example/x"),
+        ("char_start", 99999),
+        ("source_excerpt", "invented quote"),
+        ("brief_digest", "f" * 64),
+    ],
+)
+async def test_relevance_rejects_invented_identity_url_or_offsets(field, value):
+    output = relevance_output()
+    output[field] = value
+    decisions, _, _, brief, document = setup(output)
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_DECISION_INVALID"):
+        await decisions.relevance(
+            brief, (document,), BudgetLeaseReferenceV2(lease_id="lease", version=0)
+        )
+
+
+@pytest.mark.asyncio
+async def test_wrong_lease_is_rejected_before_model():
+    decisions, model, _, brief, document = setup(relevance_output())
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_SCOPE_MISMATCH"):
+        await decisions.relevance(
+            brief, (document,), BudgetLeaseReferenceV2(lease_id="foreign", version=0)
+        )
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_exhausted_shared_budget_blocks_model_before_dispatch():
+    from efficiency_platform_agent.core.budget_lease import BudgetCharge
+
+    decisions, model, binding, brief, document = setup(relevance_output())
+    reservation = await binding.port.reserve(
+        binding.scope, "consume", BudgetCharge(input_tokens=100_000), 0
+    )
+    await binding.port.mark_dispatched(reservation.reservation_id)
+    snapshot = await binding.port.settle(
+        reservation.reservation_id, BudgetCharge(input_tokens=100_000), "success"
+    )
+    binding.update_version(snapshot.version)
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_CONTEXT_TOO_LARGE"):
+        await decisions.relevance(
+            brief,
+            (document,),
+            BudgetLeaseReferenceV2(lease_id="lease", version=binding.version),
+        )
+    assert model.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"url": "https://invented.example"},
+        {"char_start": 9999},
+        {"support_refs": ["invented-ref"]},
+        {"text": "Acme announced https://invented.example/news"},
+    ],
+)
+async def test_claim_adapter_rejects_invented_urls_offsets_and_evidence(extra):
+    from efficiency_platform_agent.capabilities.research.v2.evidence import (
+        EvidenceContextV2,
+    )
+    from efficiency_platform_agent.capabilities.research.v2.source_families import (
+        SourceFamilyResolver,
+    )
+
+    brief, _, document, event, _, ref = delivery_facts()
+    proposal = {
+        "proposal_id": "p",
+        "claim_key": "announcement",
+        "brief_digest": brief.canonical_digest(),
+        "prompt_version": "research.v2.claims@1.0.0",
+        "event_id": event.event_id,
+        "text": document.text,
+        "claim_type": "announcement",
+        "subject": "Acme",
+        "assertion_mode": "attributed",
+        "attributed_to": "Acme",
+        "support_refs": [ref.evidence_id],
+    }
+    proposal.update(extra)
+    decisions, *_ = setup([proposal])
+    context = EvidenceContextV2(
+        brief_digest=brief.canonical_digest(),
+        documents=(document,),
+        evidence_refs=(ref,),
+        source_families=SourceFamilyResolver().resolve((document,)),
+    )
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_DECISION_INVALID"):
+        await (
+            module()
+            .ResearchClaimModelAdapter(decisions)
+            .propose(
+                (event,), context, BudgetLeaseReferenceV2(lease_id="lease", version=0)
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_real_model_runtime_charges_the_original_parent_lease():
+    from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+    from efficiency_platform_agent.providers.llm.fake import FakeModelProvider
+    from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+    from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
+    from tests.unit.capabilities.test_model_runtime import result
+
+    decisions, _, binding, brief, document = setup(relevance_output())
+    registry = ModelProviderRegistry()
+    registry.register(
+        "fake_balanced",
+        FakeModelProvider("fake_balanced", [result(json.dumps(relevance_output()))]),
+    )
+    decisions.model_runtime = ModelRuntime(ModelPolicyRouter(), registry)
+    await decisions.relevance(
+        brief, (document,), BudgetLeaseReferenceV2(lease_id="lease", version=0)
+    )
+    snapshot = await binding.port.snapshot(binding.scope)
+    assert snapshot.used.calls == 1
+    assert snapshot.used.input_tokens == 2
+    assert snapshot.used.cost_microunits == 5
+    assert decisions.model_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cluster_adapter_rejects_unknown_document():
+    from efficiency_platform_agent.capabilities.research.v2.clustering import (
+        ClusterBucketV2,
+    )
+
+    brief, _, document, *_ = delivery_facts()
+    decisions, *_ = setup(
+        [
+            {
+                "proposal_id": "p",
+                "brief_digest": brief.canonical_digest(),
+                "prompt_version": "research.v2.cluster@1.0.0",
+                "members": [
+                    {
+                        "document_id": "invented",
+                        "event_type": "announcement",
+                        "semantic_equivalence": "same_event",
+                    }
+                ],
+                "merge_basis": ["same announcement"],
+            }
+        ]
+    )
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_DECISION_INVALID"):
+        await (
+            module()
+            .ResearchClusterModelAdapter(decisions)
+            .propose(
+                ClusterBucketV2(bucket_id="b", documents=(document,)),
+                brief,
+                BudgetLeaseReferenceV2(lease_id="lease", version=0),
+            )
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field",
+    ["event_type", "product_version", "entity_names", "merge_basis", "proposal_id"],
+)
+@pytest.mark.parametrize(
+    "value",
+    [
+        "announcement https://invented.example/news",
+        "ftp://invented.example/item",
+        "//invented.example/item",
+    ],
+)
+async def test_cluster_adapter_rejects_urls_in_every_string_field(field, value):
+    from efficiency_platform_agent.capabilities.research.v2.clustering import (
+        ClusterBucketV2,
+    )
+
+    brief, _, document, *_ = delivery_facts()
+    proposal = {
+        "proposal_id": "p",
+        "brief_digest": brief.canonical_digest(),
+        "prompt_version": "research.v2.cluster@1.0.0",
+        "members": [
+            {
+                "document_id": document.document_id,
+                "event_type": "announcement",
+                "semantic_equivalence": "same_event",
+            }
+        ],
+        "entity_names": ["Acme"],
+        "merge_basis": ["same announcement"],
+    }
+    if field in {"event_type", "product_version"}:
+        proposal["members"][0][field] = value
+    else:
+        proposal[field] = [value] if field in {"entity_names", "merge_basis"} else value
+    decisions, *_ = setup([proposal])
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_DECISION_INVALID"):
+        await (
+            module()
+            .ResearchClusterModelAdapter(decisions)
+            .propose(
+                ClusterBucketV2(bucket_id="b", documents=(document,)),
+                brief,
+                BudgetLeaseReferenceV2(lease_id="lease", version=0),
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_plan_adapter_cannot_invent_source_action_or_url():
+    from efficiency_platform_agent.contracts.research_v2 import (
+        BudgetSnapshotV2,
+        CollectionHistoryV2,
+        QualityReportV2,
+    )
+
+    decisions, _, _, brief, _ = setup({"action_ids": ["https://invented.example/"]})
+    with pytest.raises(ValueError, match="RESEARCH_MODEL_DECISION_INVALID"):
+        await (
+            module()
+            .ResearchPlanModelAdapter(decisions, ())
+            .propose(
+                brief,
+                QualityReportV2(
+                    report_id="q",
+                    brief_digest=brief.canonical_digest(),
+                    policy_version="v2",
+                    hard_gates_passed=False,
+                    coverage_ratio=0,
+                ),
+                CollectionHistoryV2(rounds=0, no_gain_rounds=0),
+                BudgetSnapshotV2(
+                    lease_id="lease", version=0, remaining_calls=5, remaining_bytes=100
+                ),
+            )
+        )

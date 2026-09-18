@@ -119,6 +119,7 @@ _COMPONENT_PREFIXES = {
     "model": "AgentModel",
     "provider": "AgentProvider",
     "graph": "AgentGraph",
+    "scheduler": "AgentScheduler",
 }
 
 

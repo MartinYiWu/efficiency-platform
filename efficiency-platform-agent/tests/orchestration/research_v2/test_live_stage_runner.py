@@ -1,0 +1,875 @@
+"""只在传输和模型边界使用离线样本的正式阶段回归。"""
+
+import json
+import time
+from datetime import timedelta
+from importlib import import_module, util
+
+import pytest
+
+from efficiency_platform_agent.capabilities.research.v2.acquisition import (
+    AcquisitionExecutor,
+    AcquisitionRuntimeContextV2,
+)
+from efficiency_platform_agent.capabilities.research.v2.attempts import (
+    InMemorySourceAttemptLedger,
+)
+from efficiency_platform_agent.capabilities.research.v2.content_acquisition import (
+    ResearchContentAcquirer,
+)
+from efficiency_platform_agent.capabilities.research.v2.source_admission import (
+    SourceAdmission,
+)
+from efficiency_platform_agent.capabilities.research.v2.sources import (
+    VerifiedSourceRegistry,
+)
+from efficiency_platform_agent.contracts.research_local_runtime_v2 import (
+    LocalResearchRunKeyV2,
+)
+from efficiency_platform_agent.contracts.research_sources_v2 import (
+    CandidateRecordV2,
+    SourceRuntimeContextV2,
+)
+from efficiency_platform_agent.contracts.research_v2 import (
+    BudgetSnapshotV2,
+    ResearchPolicySnapshotV2,
+)
+from efficiency_platform_agent.orchestration.research_v2.graph import (
+    ResearchGraphDependencies,
+    ResearchStageUpdateV2,
+    build_research_graph,
+)
+from efficiency_platform_agent.orchestration.research_v2.state import (
+    initial_research_state,
+)
+from efficiency_platform_agent.persistence.research_local_memory import (
+    LocalResearchRunStore,
+)
+from tests.unit.capabilities.research_v2._delivery_support import delivery_facts
+from tests.unit.capabilities.research_v2.test_model_decisions import Model
+from tests.unit.harness.test_research_local_tools import (
+    NOW,
+    REMAINING,
+    Connector,
+    Signal,
+    source,
+)
+
+
+def module():
+    name = "efficiency_platform_agent.orchestration.research_v2.stage_runner"
+    assert util.find_spec(name) is not None, "LOCAL_LIVE_STAGE_RUNNER_MISSING"
+    return import_module(name)
+
+
+class OutputStages:
+    def __init__(self):
+        self.calls = []
+
+    async def run_stage(self, stage, state):
+        self.calls.append(stage)
+        return (
+            ResearchStageUpdateV2(output_verified=True)
+            if stage == "verify"
+            else ResearchStageUpdateV2()
+        )
+
+
+async def setup(*, responses=None, body=True, model_output=None, target=1, three=False):
+    runner_type = module().LocalLiveResearchStageRunner
+    descriptor = source(body=body)
+    if three:
+        descriptor = descriptor.model_copy(
+            update={
+                "content_endpoints": (
+                    "https://blog.google/article",
+                    "https://blog.google/second",
+                    "https://blog.google/third",
+                )
+            }
+        )
+    descriptor = descriptor.model_copy(
+        update={
+            "history_mode": "latest_only",
+            "freshness_sla": timedelta(days=7),
+            "max_lookback": timedelta(days=7),
+            "admission": descriptor.admission.model_copy(
+                update={"history_verified": True}
+            ),
+        }
+    )
+    connector = Connector(responses)
+    signal = Signal()
+    from dataclasses import replace
+
+    from efficiency_platform_agent.core.run import RunContext
+    from efficiency_platform_agent.harness.research_local_runtime import (
+        build_local_research_binding,
+    )
+    from efficiency_platform_agent.harness.research_local_tools import (
+        LocalResearchNetworkLimits,
+        build_local_research_tools,
+    )
+    from tests.unit.harness.test_research_local_tools import Resolver
+
+    context = RunContext("run-1", "tenant-1", "user-1", "trace")
+    remaining = replace(REMAINING, input_tokens=100_000, output_tokens=20_000)
+    binding = build_local_research_binding(
+        tenant_id=context.tenant_id,
+        run_id=context.run_id,
+        lease_id="lease-1",
+        remaining=remaining,
+        now=NOW,
+        clock_ms=lambda: int(NOW.timestamp() * 1000),
+    )
+    runtime = build_local_research_tools(
+        descriptors=(descriptor,),
+        binding=binding,
+        run_context=context,
+        connector=connector,
+        resolver=Resolver(),
+        cancellation_signal=signal,
+        network_limits=LocalResearchNetworkLimits(),
+        now=lambda: NOW,
+    )
+    brief, *_ = delivery_facts(target)
+    brief = brief.model_copy(
+        update={
+            "trusted_context": brief.trusted_context.model_copy(
+                update={
+                    "tenant_id": context.tenant_id,
+                    "run_id": context.run_id,
+                    "budget_lease_id": binding.lease_id,
+                }
+            )
+        }
+    )
+    key = LocalResearchRunKeyV2(
+        tenant_id=context.tenant_id,
+        user_id=context.user_id,
+        conversation_id="conversation",
+        run_id=context.run_id,
+        task_id="x",
+        revision=1,
+    )
+    store = LocalResearchRunStore(now=lambda: NOW)
+    await store.create(key, brief)
+    policy = ResearchPolicySnapshotV2(
+        quality_policy_id=brief.quality_policy_id, policy_version=brief.policy_version
+    )
+    budget = BudgetSnapshotV2(
+        lease_id=binding.lease_id,
+        version=0,
+        remaining_calls=60,
+        remaining_bytes=20_000_000,
+    )
+    source_context = SourceRuntimeContextV2(
+        tenant_id=context.tenant_id,
+        run_id=context.run_id,
+        now=NOW,
+        allowed_source_ids=(descriptor.source_id,),
+    )
+    acquisition_context = AcquisitionRuntimeContextV2(
+        context,
+        frozenset({descriptor.source_id}),
+        frozenset({"research:read"}),
+        remaining,
+        time.monotonic() + 180,
+        max_attempts=1,
+    )
+    model_module = import_module(
+        "efficiency_platform_agent.capabilities.research.v2.model_decisions"
+    )
+    from efficiency_platform_agent.context.builder import ContextBuilder
+
+    model = Model(model_output or {})
+    decisions = model_module.ResearchModelDecisions(
+        model_runtime=model,
+        context_builder=ContextBuilder(),
+        run_context=context,
+        binding=binding,
+        brief=brief,
+        remaining_budget=remaining,
+    )
+    output = OutputStages()
+    runner = runner_type(
+        key=key,
+        store=store,
+        brief=brief,
+        policy=policy,
+        binding=binding,
+        registry=VerifiedSourceRegistry(
+            (descriptor,),
+            SourceAdmission(),
+            registered_adapter_ids=frozenset({descriptor.adapter_id}),
+        ),
+        source_context=source_context,
+        acquisition_executor=AcquisitionExecutor(
+            runtime, InMemorySourceAttemptLedger()
+        ),
+        content_acquirer=ResearchContentAcquirer(runtime, descriptors=(descriptor,)),
+        acquisition_context=acquisition_context,
+        decisions=decisions,
+        output_stages=output,
+        now=lambda: NOW,
+    )
+    return (
+        runner,
+        initial_research_state(brief, policy, budget),
+        store,
+        key,
+        connector,
+        model,
+        signal,
+    )
+
+
+def candidate(**changes):
+    values = {
+        "candidate_id": "candidate-1",
+        "source_id": "google_blog_rss",
+        "source_item_id": "1",
+        "url": "https://blog.google/article",
+        "title": "AI release",
+        "raw_published_at": "2026-09-15T00:00:00Z",
+        "discovered_via": "rss",
+        "content_scope": "summary",
+        "inline_content": "summary is not body",
+        "timestamp_semantics": "published",
+    }
+    values.update(changes)
+    return CandidateRecordV2(**values)
+
+
+async def seed(case, item):
+    _, state, store, key, *_ = case
+    facts = await store.get(key)
+    await store.put(
+        key, facts.model_copy(update={"candidates": {item.candidate_id: item}})
+    )
+    state["candidate_ids"] = [item.candidate_id]
+
+
+async def advance(runner, state, stage):
+    update = await runner.run_stage(stage, state)
+    state.update(
+        {
+            k: list(v) if isinstance(v, tuple) else v
+            for k, v in update.model_dump(exclude_unset=True).items()
+        }
+    )
+    return update
+
+
+@pytest.mark.asyncio
+async def test_stage_uses_prior_ids_and_reacquired_body_scope_without_upgrading_summary():
+    case = await setup()
+    runner, state, store, key, connector, *_ = case
+    await seed(case, candidate())
+    await advance(runner, state, "acquire")
+    await advance(runner, state, "normalize")
+    facts = await store.get(key)
+    document = facts.documents[state["normalized_document_ids"][0]]
+    assert document.content_scope == "full"
+    assert document.text == "Original verified article body."
+    assert facts.candidates["candidate-1"].content_scope == "summary"
+    assert len(connector.calls) == 1
+    assert "Original verified article body" not in json.dumps(state)
+
+
+@pytest.mark.asyncio
+async def test_summary_only_never_becomes_qualified_event():
+    case = await setup(body=False)
+    runner, state, _, _, connector, *_ = case
+    await seed(case, candidate())
+    for stage in (
+        "acquire",
+        "normalize",
+        "filter",
+        "deduplicate",
+        "cluster",
+        "claims",
+        "quality",
+    ):
+        update = await advance(runner, state, stage)
+    assert update.qualified_event_ids == ()
+    assert update.hard_gap_ids
+    assert connector.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("brief_digest", "f" * 64),
+        ("budget_lease_id", "foreign"),
+        ("intent_revision", 2),
+        ("policy_version", "foreign"),
+        ("budget_version", 999),
+    ],
+)
+async def test_validate_rejects_forged_state(field, value):
+    runner, state, _, _, connector, model, _ = await setup()
+    state[field] = value
+    with pytest.raises(ValueError, match="LOCAL_RESEARCH_STAGE_SCOPE_MISMATCH"):
+        await runner.run_stage("validate", state)
+    assert connector.calls == model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unknown_prior_id_fails_before_fetch():
+    runner, state, _, _, connector, *_ = await setup()
+    state["candidate_ids"] = ["invented"]
+    with pytest.raises(ValueError, match="LOCAL_RESEARCH_STAGE_ID_UNKNOWN"):
+        await runner.run_stage("acquire", state)
+    assert connector.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_stage_starts_no_new_requests():
+    case = await setup()
+    runner, state, _, _, connector, model, signal = case
+    await seed(case, candidate())
+    signal.event.set()
+    update = await runner.run_stage("acquire", state)
+    assert update.cancelled
+    assert connector.calls == model.calls == []
+
+
+@pytest.mark.asyncio
+async def test_partial_exit_renders_three_at_round_limit_without_recollecting():
+    class Runner:
+        async def run_stage(self, stage, state):
+            if stage == "validate":
+                return ResearchStageUpdateV2()
+            if stage == "plan":
+                return ResearchStageUpdateV2(planned_action_ids=("a",))
+            if stage == "quality":
+                return ResearchStageUpdateV2(
+                    qualified_event_ids=("e1", "e2", "e3"),
+                    hard_gap_ids=("count-exact-5",),
+                )
+            if stage == "verify":
+                return ResearchStageUpdateV2(
+                    output_verified=True, output_recollect_requested=True
+                )
+            return ResearchStageUpdateV2()
+
+    from tests.orchestration.research_v2.test_graph import _state
+
+    state = _state()
+    state["max_refill_rounds"] = 0
+    result = await build_research_graph(ResearchGraphDependencies(Runner())).ainvoke(
+        state, config={"configurable": {"thread_id": "partial"}}
+    )
+    assert result["stage_events"][-4:] == ["compose", "verify", "render", "finalize"]
+    assert result["stage_events"].count("plan") == 1
+    assert result["domain_status"] == "PARTIAL"
+
+
+def semantic_model(demand, request):
+    data = json.loads(request.messages[-1].content)
+    if demand.demand_version == "research.v2.relevance":
+        doc = data["document"]
+        return {
+            "document_id": doc["document_id"],
+            "document_content_hash": doc["content_hash"],
+            "brief_digest": data["brief"]["digest"]
+            if "digest" in data["brief"]
+            else _brief_digest(data["brief"]),
+            "outcome": "relevant",
+            "requirement_ids": [
+                item["requirement_id"] for item in data["brief"]["hard_requirements"]
+            ],
+            "source_excerpt": doc["text"],
+            "prompt_version": "research.v2.relevance@1.0.0",
+        }
+    if demand.demand_version == "research.v2.cluster":
+        return []
+    if demand.demand_version == "research.v2.replan":
+        return {"action_ids": [item["action_id"] for item in data["allowed_actions"]]}
+    evidence = data["evidence_context"]
+    return [
+        {
+            "proposal_id": event["event_id"],
+            "claim_key": "announcement",
+            "brief_digest": evidence["brief_digest"],
+            "prompt_version": "research.v2.claims@1.0.0",
+            "event_id": event["event_id"],
+            "text": "Acme announced an AI release.",
+            "claim_type": "announcement",
+            "subject": "Acme",
+            "assertion_mode": "attributed",
+            "attributed_to": "Acme",
+            "support_refs": [
+                ref["evidence_id"]
+                for ref in evidence["evidence_refs"]
+                if ref["document_id"] in event["member_document_ids"]
+            ],
+        }
+        for event in data["events"]
+    ]
+
+
+def _brief_digest(data):
+    from efficiency_platform_agent.contracts.research_v2 import ResearchBriefV2
+
+    return ResearchBriefV2.model_validate(data).canonical_digest()
+
+
+def rss_response():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    return PinnedResponse(
+        200,
+        {"content-type": "application/rss+xml"},
+        (
+            b'<rss version="2.0"><channel><title>Google</title><link>https://blog.google/</link><description>feed</description><item><title>Acme AI</title><link>https://blog.google/article</link><guid>1</guid><pubDate>Tue, 15 Sep 2026 00:00:00 GMT</pubDate><description>summary only</description></item></channel></rss>',
+        ),
+    )
+
+
+def body_response():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    return PinnedResponse(
+        200, {"content-type": "text/plain"}, (b"Acme announced an AI release.",)
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_component_chain_preserves_ids_and_records_http_and_models():
+    runner, state, store, key, connector, model, _ = await setup(
+        responses=[rss_response(), body_response()], model_output=semantic_model
+    )
+    for stage in (
+        "validate",
+        "plan",
+        "discover",
+        "acquire",
+        "normalize",
+        "filter",
+        "deduplicate",
+        "cluster",
+        "claims",
+        "quality",
+    ):
+        await advance(runner, state, stage)
+        assert not state.get("fatal_error"), stage
+    facts = await store.get(key)
+    assert len(state["qualified_event_ids"]) == 1, (
+        [(x.status, x.error_code) for x in facts.attempts.values()],
+        [(x.published_at, x.text) for x in facts.documents.values()],
+        list(facts.claims.values()),
+        state,
+    )
+    assert facts.events[state["qualified_event_ids"][0]].member_document_ids == tuple(
+        state["deduplicated_document_ids"]
+    )
+    assert set(state["claim_ids"]).issubset(facts.claims)
+    assert len(connector.calls) == 2
+    assert len(model.calls) == 3
+    assert facts.resources.http_requests == 2
+    assert facts.resources.body_requests == 1
+    assert facts.resources.model_calls == 3
+    ledger = await runner.binding.port.snapshot(runner.binding.scope)
+    assert ledger.used.calls == 4
+    assert facts.resources.downloaded_bytes == sum(
+        len(chunk)
+        for response in (rss_response(), body_response())
+        for chunk in response.body_chunks
+    )
+
+
+@pytest.mark.asyncio
+async def test_unacquired_candidate_prevents_no_matches_even_if_discovery_succeeded():
+    from efficiency_platform_agent.contracts.research_sources_v2 import (
+        SourceAttemptV2,
+        SourceUsageV2,
+    )
+
+    case = await setup(body=False)
+    runner, state, store, key, *_ = case
+    await advance(runner, state, "plan")
+    await seed(case, candidate())
+    facts = await store.get(key)
+    action = state["planned_action_ids"][0]
+    attempt = SourceAttemptV2(
+        attempt_id="attempt-1",
+        action_id=action,
+        source_id="google_blog_rss",
+        status="success",
+        started_at=NOW,
+        finished_at=NOW,
+        returned_count=1,
+        filtered_count=0,
+        coverage="complete",
+        usage=SourceUsageV2(requests=1, returned_items=1, downloaded_bytes=100),
+    )
+    await store.put(
+        key,
+        facts.model_copy(
+            update={
+                "attempts": {attempt.attempt_id: attempt},
+                "stage_artifact_ids": {
+                    **facts.stage_artifact_ids,
+                    "discovered_actions": (action,),
+                },
+            }
+        ),
+    )
+    update = await runner.run_stage("quality", state)
+    assert update.complete_empty_plan is False
+
+
+@pytest.mark.asyncio
+async def test_content_attempts_append_failure_and_later_success():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    case = await setup(
+        responses=[PinnedResponse(403, {}, (b"denied",)), body_response()]
+    )
+    runner, state, store, key, *_ = case
+    await seed(case, candidate())
+    await advance(runner, state, "acquire")
+    failed = await store.get(key)
+    assert [item.status for item in failed.attempts.values()] == ["failed"]
+    await advance(runner, state, "acquire")
+    facts = await store.get(key)
+    assert [item.status for item in facts.attempts.values()] == ["failed", "success"]
+    assert all(facts.attempts[k] == v for k, v in failed.attempts.items())
+    assert [item.usage.requests for item in facts.attempts.values()] == [1, 1]
+    assert sum(item.usage.downloaded_bytes for item in facts.attempts.values()) == len(
+        b"denied"
+    ) + len(b"Acme announced an AI release.")
+
+
+@pytest.mark.asyncio
+async def test_state_cancellation_is_terminal_before_acquisition():
+    case = await setup()
+    runner, state, _, _, connector, *_ = case
+    await seed(case, candidate())
+    state["cancelled"] = True
+    update = await runner.run_stage("acquire", state)
+    assert update.cancelled
+    assert not connector.calls
+
+
+@pytest.mark.asyncio
+async def test_reprints_cannot_increase_independent_support_count():
+    case = await setup(model_output=semantic_model)
+    runner, state, store, key, *_ = case
+    _, _, first, event, *_ = delivery_facts()
+    second = first.model_copy(
+        update={
+            "document_id": "doc-2",
+            "canonical_url": "https://reprint.example/item",
+            "publisher_id": "reprint.example",
+        }
+    )
+    event = event.model_copy(
+        update={"member_document_ids": (first.document_id, second.document_id)}
+    )
+    facts = await store.get(key)
+    await store.put(
+        key,
+        facts.model_copy(
+            update={
+                "documents": {first.document_id: first, second.document_id: second},
+                "events": {event.event_id: event},
+            }
+        ),
+    )
+    state["deduplicated_document_ids"] = [first.document_id, second.document_id]
+    state["event_ids"] = [event.event_id]
+    await advance(runner, state, "claims")
+    facts = await store.get(key)
+    assert len(state["claim_ids"]) == 1
+    assert facts.claims[state["claim_ids"][0]].independent_support_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {
+            "raw_published_at": "2020-01-01T00:00:00Z",
+            "raw_updated_at": "2026-09-15T00:00:00Z",
+        },
+        {},
+    ],
+)
+async def test_old_publication_or_semantically_irrelevant_title_never_pass_filter(
+    changes,
+):
+    def decide(demand, request):
+        result = semantic_model(demand, request)
+        if not changes:
+            result["outcome"] = "irrelevant"
+        return result
+
+    case = await setup(responses=[body_response()], model_output=decide)
+    await seed(case, candidate(**changes))
+    runner, state, *_ = case
+    for stage in ("acquire", "normalize", "filter"):
+        await advance(runner, state, stage)
+    assert state["filtered_document_ids"] == []
+
+
+@pytest.mark.asyncio
+async def test_exact_shortfall_uses_bounded_graph_and_keeps_verified_partial():
+    runner, state, _, _, connector, *_ = await setup(
+        responses=[rss_response(), body_response(), rss_response()],
+        model_output=semantic_model,
+        target=5,
+    )
+    result = await build_research_graph(ResearchGraphDependencies(runner)).ainvoke(
+        state,
+        config={"configurable": {"thread_id": "real-partial"}, "recursion_limit": 100},
+    )
+    assert result["domain_status"] == "PARTIAL"
+    assert result["output_verified"]
+    assert len(result["qualified_event_ids"]) == 1
+    assert result["refill_rounds"] <= 2
+    assert len(connector.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_acquire_enforces_one_global_body_request_limit():
+    case = await setup(responses=[body_response() for _ in range(31)])
+    runner, state, store, key, connector, *_ = case
+    items = tuple(
+        candidate(candidate_id=f"candidate-{i}", source_item_id=str(i))
+        for i in range(31)
+    )
+    facts = await store.get(key)
+    await store.put(
+        key,
+        facts.model_copy(
+            update={"candidates": {item.candidate_id: item for item in items}}
+        ),
+    )
+    state["candidate_ids"] = [item.candidate_id for item in items]
+    update = await runner.run_stage("acquire", state)
+    assert update.budget_exhausted
+    assert len(connector.calls) <= 30
+
+
+@pytest.mark.asyncio
+async def test_acquire_reports_actual_redirect_http_body_requests():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    case = await setup(
+        responses=[
+            response
+            for _ in range(16)
+            for response in (
+                PinnedResponse(
+                    302, {"location": "https://blog.google/second"}, (b"hop",)
+                ),
+                body_response(),
+            )
+        ]
+    )
+    runner, state, store, key, connector, *_ = case
+    items = tuple(candidate(candidate_id=f"candidate-{i}") for i in range(16))
+    facts = await store.get(key)
+    await store.put(
+        key,
+        facts.model_copy(
+            update={
+                "candidates": {item.candidate_id: item for item in items},
+            }
+        ),
+    )
+    state["candidate_ids"] = [item.candidate_id for item in items]
+    update = await runner.run_stage("acquire", state)
+    facts = await store.get(key)
+    assert len(connector.calls) == 30
+    assert update.budget_exhausted
+    assert facts.resources.body_requests == 30
+    assert sum(item.usage.requests for item in facts.attempts.values()) == 30
+
+
+@pytest.mark.asyncio
+async def test_three_collection_rounds_allow_partial_output_at_default_graph_limit():
+    from tests.orchestration.research_v2.test_graph import _CompleteRunner, _state
+
+    class Runner(_CompleteRunner):
+        async def run_stage(self, stage, state):
+            if stage == "quality":
+                self.calls.append(stage)
+                return ResearchStageUpdateV2(
+                    qualified_event_ids=("e1", "e2", "e3"),
+                    hard_gap_ids=("missing-two",),
+                )
+            return await super().run_stage(stage, state)
+
+    runner = Runner()
+    result = await build_research_graph(ResearchGraphDependencies(runner)).ainvoke(
+        _state(), config={"configurable": {"thread_id": "three-rounds"}}
+    )
+    assert result["domain_status"] == "PARTIAL"
+    assert runner.calls.count("plan") == 3
+    assert runner.calls[-4:] == ["compose", "verify", "render", "finalize"]
+
+
+@pytest.mark.asyncio
+async def test_exact_five_with_three_real_component_results_stays_partial():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    items = "".join(
+        f"<item><title>Acme AI {i}</title><link>https://blog.google/{path}</link><guid>{i}</guid><pubDate>Tue, 15 Sep 2026 00:00:00 GMT</pubDate><description>summary</description></item>"
+        for i, path in enumerate(("article", "second", "third"))
+    )
+    feed = PinnedResponse(
+        200,
+        {"content-type": "application/rss+xml"},
+        (
+            (
+                f'<rss version="2.0"><channel><title>Google</title><link>https://blog.google/</link><description>feed</description>{items}</channel></rss>'
+            ).encode(),
+        ),
+    )
+    bodies = [
+        PinnedResponse(
+            200,
+            {"content-type": "text/plain"},
+            (f"Acme announced an AI release for {name}.".encode(),),
+        )
+        for name in ("Alpha", "Beta", "Gamma")
+    ]
+    runner, state, store, key, connector, _, _ = await setup(
+        responses=[feed, *bodies, feed],
+        model_output=semantic_model,
+        target=5,
+        three=True,
+    )
+    result = await build_research_graph(ResearchGraphDependencies(runner)).ainvoke(
+        state,
+        config={"configurable": {"thread_id": "three-real"}, "recursion_limit": 100},
+    )
+    facts = await store.get(key)
+    assert result["domain_status"] == "PARTIAL"
+    assert len(result["qualified_event_ids"]) == 3
+    assert result["output_verified"]
+    assert len(connector.calls) == 5
+    assert all(
+        action.time_window == runner.brief.time_window
+        for plan in facts.plans.values()
+        for action in plan.actions
+    )
+
+
+@pytest.mark.asyncio
+async def test_empty_body_is_a_preserved_failed_attempt():
+    from efficiency_platform_agent.providers.research.transport import PinnedResponse
+
+    case = await setup(
+        responses=[PinnedResponse(200, {"content-type": "text/plain"}, (b"   ",))]
+    )
+    await seed(case, candidate())
+    runner, state, store, key, *_ = case
+    update = await runner.run_stage("acquire", state)
+    facts = await store.get(key)
+    assert update.acquired_document_ids == ()
+    assert len(facts.attempts) == 1
+    assert next(iter(facts.attempts.values())).error_code == "CONTENT_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_budget_stop_never_starts_more_collection_before_partial_output():
+    from tests.orchestration.research_v2.test_graph import _CompleteRunner, _state
+
+    class Runner(_CompleteRunner):
+        async def run_stage(self, stage, state):
+            if stage == "discover" and state["initial_collection_done"]:
+                self.calls.append(stage)
+                return ResearchStageUpdateV2(budget_exhausted=True)
+            if stage == "quality":
+                self.calls.append(stage)
+                return ResearchStageUpdateV2(
+                    qualified_event_ids=("e1",), hard_gap_ids=("missing",)
+                )
+            return await super().run_stage(stage, state)
+
+    runner = Runner()
+    result = await build_research_graph(ResearchGraphDependencies(runner)).ainvoke(
+        _state(), config={"configurable": {"thread_id": "budget-partial"}}
+    )
+    assert runner.calls.count("acquire") == 1
+    assert result["domain_status"] == "PARTIAL"
+    assert result["output_verified"]
+
+
+@pytest.mark.asyncio
+async def test_soft_deadline_stops_before_new_discovery():
+    from dataclasses import replace
+
+    case = await setup()
+    runner, state, _, _, connector, *_ = case
+    runner.now = lambda: NOW + timedelta(seconds=150)
+    runner.context = replace(runner.context, deadline_monotonic=time.monotonic() + 30)
+    update = await runner.run_stage("plan", state)
+    assert update.soft_deadline_reached
+    assert not update.planned_action_ids
+    assert not connector.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop", ["budget_exhausted", "soft_deadline_reached"])
+@pytest.mark.parametrize("clear", [False, None])
+async def test_output_patch_cannot_reopen_stopped_real_research_chain(stop, clear):
+    case = await setup(
+        responses=[rss_response(), body_response(), rss_response()],
+        model_output=semantic_model,
+        target=5,
+    )
+    runner, state, _, _, connector, *_ = case
+    for stage in (
+        "plan",
+        "discover",
+        "acquire",
+        "normalize",
+        "filter",
+        "deduplicate",
+        "cluster",
+        "claims",
+        "quality",
+    ):
+        await advance(runner, state, stage)
+    assert state["qualified_event_ids"]
+    assert state["hard_gap_ids"]
+    state[stop] = True
+    state["initial_collection_done"] = True
+    calls_before = len(connector.calls)
+
+    class ReopeningOutput(OutputStages):
+        async def run_stage(self, stage, state):
+            self.calls.append(stage)
+            return ResearchStageUpdateV2.model_validate(
+                {
+                    stop: clear,
+                    "output_verified": False,
+                    "output_recollect_requested": True,
+                }
+            )
+
+    runner.output_stages = ReopeningOutput()
+    result = await build_research_graph(ResearchGraphDependencies(runner)).ainvoke(
+        state,
+        config={
+            "configurable": {"thread_id": "stopped-output"},
+            "recursion_limit": 100,
+        },
+    )
+    assert result[stop] is True
+    assert result["stage_events"] == [
+        "validate",
+        "plan",
+        "compose",
+        "verify",
+        "finalize",
+    ]
+    assert len(connector.calls) == calls_before
+    assert result["domain_status"] == "PARTIAL"

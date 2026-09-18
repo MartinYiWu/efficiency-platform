@@ -1,0 +1,290 @@
+"""Task 6 复核缺陷的正式研究、输出和运营交付回归。"""
+
+import asyncio
+import time
+from dataclasses import replace
+
+import pytest
+
+from efficiency_platform_agent.contracts.research_v2 import BudgetSnapshotV2
+from efficiency_platform_agent.core.multi_agent import CompletionStatus
+from efficiency_platform_agent.harness.research_v2_adapter import (
+    InMemoryResearchBriefStoreV2,
+    ResearchV2ProviderAdapter,
+)
+from efficiency_platform_agent.orchestration.research_v2.service import (
+    LangGraphResearchServiceV2,
+)
+from efficiency_platform_agent.providers.research.transport import PinnedResponse
+from tests.integration.test_operation_deliverable_v2 import build_test_agent
+from tests.orchestration.research_v2.test_live_materializer import (
+    delivered,
+    graph_case,
+    materializer_type,
+    researched,
+)
+from tests.orchestration.research_v2.test_live_stage_runner import (
+    rss_response,
+    semantic_model,
+    setup,
+)
+from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
+from tests.unit.harness.test_research_local_tools import NOW
+
+
+def scenario_for(key):
+    submission = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+    return replace(
+        submission,
+        request=replace(
+            submission.request,
+            request=replace(
+                submission.request.request,
+                tenant_id=key.tenant_id,
+                user_id=key.user_id,
+            ),
+        ),
+        task_spec=replace(
+            submission.task_spec,
+            tenant_id=key.tenant_id,
+            user_id=key.user_id,
+            task_id=key.task_id,
+        ),
+        evidence_pack=replace(submission.evidence_pack, task_id=key.task_id),
+    )
+
+
+async def operation_probe(
+    *, title="Acme launched 99 tools and defeated all competitors", generator=None
+):
+    response = rss_response()
+    feed = PinnedResponse(
+        response.status_code,
+        response.headers,
+        (response.body_chunks[0].replace(b"Acme AI", title.encode()),),
+    )
+    body = PinnedResponse(
+        200,
+        {"content-type": "text/html"},
+        (
+            (
+                f"<html><head><title>{title}</title></head><body><article>"
+                "<h1>Acme announced an AI release.</h1>"
+                "<p>Acme announced an AI release. The announcement describes the release and its availability. "
+                "The original article provides this announcement as an attributed statement from Acme.</p>"
+                "</article></body></html>"
+            ).encode(),
+        ),
+    )
+    runner, state, store, key, connector, _, signal = await setup(
+        responses=[feed, body],
+        model_output=semantic_model,
+    )
+    output = materializer_type()(
+        key=key,
+        store=store,
+        brief=runner.brief,
+        binding=runner.binding,
+        cancellation_signal=signal,
+        deadline_monotonic=runner.context.deadline_monotonic,
+        draft_generator=generator,
+    )
+    runner.output_stages = output
+    service = LangGraphResearchServiceV2(
+        policy=runner.policy,
+        budget=BudgetSnapshotV2(
+            lease_id=state["budget_lease_id"],
+            version=state["budget_version"],
+            remaining_calls=60,
+            remaining_bytes=20_000_000,
+        ),
+        stage_runner=runner,
+        materializer=output,
+        now=lambda: NOW,
+    )
+    briefs = InMemoryResearchBriefStoreV2()
+    await briefs.put_brief(runner.brief)
+    provider = ResearchV2ProviderAdapter(service, briefs, now=lambda: NOW)
+    submission = scenario_for(key)
+    execution = await build_test_agent(research_provider=provider).execute(
+        submission, run_id=key.run_id
+    )
+    facts = await store.get(key)
+    return execution, next(iter(facts.deliveries.values())), connector
+
+
+async def test_unverified_source_title_facts_never_become_verified_ranked_titles():
+    execution, pack, connector = await operation_probe()
+    assert execution.status is CompletionStatus.COMPLETE
+    item = execution.deliverables.deliverables[0]
+    assert item.content.items[0].verification_status == "verified"
+    visible_titles = [
+        pack.events[0].title,
+        item.content.items[0].title,
+        *[citation.title for citation in item.citations],
+    ]
+    assert all(
+        "99" not in title and "defeated" not in title for title in visible_titles
+    )
+    assert pack.events[0].title == "Acme announced an AI release."
+    assert "defeated" not in pack.content and "99" not in pack.content
+    assert len(connector.calls) == 2
+
+
+async def test_full_delivery_body_is_not_copied_into_short_summary_fields():
+    execution, pack, _ = await operation_probe(title="Acme AI")
+    result = execution.deliverables
+    item = result.deliverables[0]
+    assert "# 研究结果" in pack.content
+    for short in (item.lead, item.content.selection_summary, result.summary.message):
+        assert "# 研究结果" not in short and "https://" not in short
+        assert len(short) < 500
+        assert short == pack.summary
+    assert item.content.ranking_basis == "evidence_order"
+    assert result.provenance.ranking_basis == "evidence_order"
+    assert "未生成重要性或热度评分" in item.content.selection_summary
+
+
+async def test_normal_complete_does_not_degrade_for_informational_ranking_limit():
+    execution, pack, _ = await operation_probe(title="Acme AI")
+    result = execution.deliverables
+    item = result.deliverables[0]
+    assert pack.outcome == "COMPLETE" and pack.display_status == "succeeded"
+    assert not pack.gap_codes
+    assert execution.status is CompletionStatus.COMPLETE
+    assert result.summary.complete and not result.degraded
+    assert not result.warnings and not item.warnings
+    assert any(
+        "未生成重要性或热度评分" in limitation for limitation in pack.limitations
+    )
+    assert "未生成重要性或热度评分" in result.summary.message
+    assert (
+        result.summary.message
+        == item.lead
+        == item.content.selection_summary
+        == pack.summary
+    )
+
+
+async def test_formal_output_failure_still_degrades_despite_informational_limit():
+    async def generation_failed(brief, pack):
+        raise ValueError("synthetic output failure")
+
+    execution, pack, _ = await operation_probe(
+        title="Acme AI", generator=generation_failed
+    )
+    result = execution.deliverables
+    assert pack.outcome == "PARTIAL" and pack.stop_reason == "OUTPUT_DEGRADED"
+    assert pack.display_status == "degraded_succeeded"
+    assert "OUTPUT_GENERATION_FAILED" in pack.gap_codes
+    assert execution.status is CompletionStatus.PARTIAL
+    assert not result.summary.complete and result.degraded
+    assert any(
+        warning.code == "RESEARCH_OUTPUT_DEGRADED" for warning in result.warnings
+    )
+    assert result.deliverables[0].warnings
+
+
+async def empty_case():
+    async def generation_failed(brief, pack):
+        raise ValueError("synthetic output failure")
+
+    case, output = await researched(generator=generation_failed)
+    _, state, store, key, *_ = case
+    facts = await store.get(key)
+    report = facts.quality_reports[state["quality_report_id"]].model_copy(
+        update={
+            "usable_event_ids": (),
+            "gaps": (),
+            "hard_gates_passed": False,
+        }
+    )
+    artifacts = dict(facts.stage_artifact_ids)
+    for name in ("qualified_events", "qualified_claims", "qualified_evidence"):
+        artifacts[name] = ()
+    await store.put(
+        key,
+        facts.model_copy(
+            update={
+                "events": {},
+                "claims": {},
+                "evidence": {},
+                "documents": {},
+                "quality_reports": {report.report_id: report},
+                "stage_artifact_ids": artifacts,
+            }
+        ),
+    )
+    for field in (
+        "event_ids",
+        "qualified_event_ids",
+        "claim_ids",
+        "evidence_ids",
+        "hard_gap_ids",
+    ):
+        state[field] = []
+    state["complete_empty_plan"] = True
+    return case, output
+
+
+async def test_no_matches_retains_domain_fact_but_output_failure_remains_degraded():
+    from tests.unit.harness.test_research_v2_provider_adapter import _Service
+
+    case, output = await empty_case()
+    outcome = await delivered(case, output)
+    runner, _, _, key, *_ = case
+    assert outcome.outcome == "NO_MATCHES"
+    assert outcome.stop_reason == "OUTPUT_DEGRADED"
+    assert outcome.delivery.display_status == "degraded_succeeded"
+    briefs = InMemoryResearchBriefStoreV2()
+    await briefs.put_brief(runner.brief)
+    submission = scenario_for(key)
+    execution = await build_test_agent(
+        research_provider=ResearchV2ProviderAdapter(_Service(outcome), briefs)
+    ).execute(submission, run_id=key.run_id)
+    assert execution.status is CompletionStatus.PARTIAL
+    assert execution.deliverables.deliverables == []
+    assert (
+        execution.deliverables.degraded and not execution.deliverables.summary.complete
+    )
+    assert any(
+        warning.code == "RESEARCH_OUTPUT_DEGRADED"
+        for warning in execution.deliverables.warnings
+    )
+
+
+@pytest.mark.parametrize("stop", ["deadline", "cancel"])
+async def test_optional_generator_is_stopped_before_it_can_hang_materializer(stop):
+    started, ended = asyncio.Event(), asyncio.Event()
+
+    async def blocked_generator(brief, pack):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            ended.set()
+
+    case, output = await researched(generator=blocked_generator)
+    if stop == "deadline":
+        output.deadline_monotonic = time.monotonic() + 0.05
+    task = asyncio.create_task(output.run_stage("compose", case[1]))
+    try:
+        await asyncio.wait_for(started.wait(), 0.3)
+        if stop == "cancel":
+            case[-1].event.set()
+        done, _ = await asyncio.wait((task,), timeout=0.3)
+        assert task in done, "MATERIALIZER_GENERATOR_NOT_STOPPED"
+        with pytest.raises(
+            TimeoutError if stop == "deadline" else asyncio.CancelledError
+        ):
+            await task
+        await asyncio.wait_for(ended.wait(), 0.3)
+        assert not (await case[2].get(case[3])).deliveries
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_exact_one_rejects_three_qualified_events_before_delivery():
+    with pytest.raises(ValueError, match="RESEARCH_OUTPUT_COUNT_EXCEEDED"):
+        await graph_case(count=3, target=1)

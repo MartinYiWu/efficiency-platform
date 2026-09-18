@@ -1,0 +1,7 @@
+.superpowers/
+node_modules/
+dist/
+coverage/
+playwright-report/
+playwright-report-agent/
+test-results/

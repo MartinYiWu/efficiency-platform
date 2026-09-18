@@ -14,6 +14,15 @@ from efficiency_platform_agent.core.budget import (
     BudgetState,
     RemainingBudget,
 )
+from efficiency_platform_agent.core.budget_execution import (
+    BudgetExecutionBinding,
+    bind_budget_execution,
+)
+from efficiency_platform_agent.core.budget_lease import (
+    BudgetLimits,
+    BudgetScope,
+    InMemoryBudgetLeaseRepository,
+)
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
     ExtensionDescriptor,
@@ -25,7 +34,11 @@ from efficiency_platform_agent.core.run import (
 )
 from efficiency_platform_agent.tools.runtime.contracts import ToolSpec
 from efficiency_platform_agent.tools.runtime.registry import ToolRegistry
-from efficiency_platform_agent.tools.runtime.service import ToolRuntime
+from efficiency_platform_agent.tools.runtime.service import (
+    ToolBudgetContext,
+    ToolLeaseContext,
+    ToolRuntime,
+)
 
 
 class QueryArguments(BaseModel):
@@ -67,6 +80,20 @@ class CountingTool:
         return ToolResult("1", JsonObject((("lookup", "ok"),)), None, 14, False)
 
 
+@dataclass
+class TerminalTool:
+    descriptor: ExtensionDescriptor
+    repository: InMemoryBudgetLeaseRepository
+    scope: BudgetScope
+    calls: int = 0
+
+    async def invoke(self, request: ToolRequest, context: RunContext) -> ToolResult:
+        del request, context
+        self.calls += 1
+        await self.repository.mark_scope_terminal(self.scope, "cancelled")
+        return ToolResult("1", JsonObject((("lookup", "late"),)), None, 16, False)
+
+
 def spec(
     name: str = "synthetic.lookup",
     *,
@@ -105,6 +132,40 @@ def request(
         False,
         128,
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_runtime_uses_task_local_live_acceptance_lease() -> None:
+    registry = ToolRegistry()
+    tool = CountingTool(descriptor())
+    registry.register(spec(), tool)
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=2, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "acceptance-1", "live_acceptance", "all")
+    binding = BudgetExecutionBinding(
+        repository,
+        scope,
+        "lease-live-1",
+        "a" * 64,
+    )
+    runtime = ToolRuntime(registry)
+
+    with bind_budget_execution(binding):
+        result, records = await runtime.invoke(
+            request(),
+            RunContext("acceptance-1", "tenant-1", "user-1", "trace-1"),
+            allowed_tools=frozenset({"synthetic.lookup"}),
+            granted_permissions=frozenset({"lookup:read"}),
+            remaining_budget=RemainingBudget(10, 10, 100, 100, 100, 1_000),
+        )
+
+    snapshot = await repository.snapshot(scope)
+    assert result.error is None
+    assert len(records) == 1
+    assert tool.calls == 1
+    assert snapshot.used.calls == 1
+    assert binding.version == snapshot.version
 
 
 def remaining(**changes: int) -> RemainingBudget:
@@ -370,13 +431,8 @@ async def test_runtime_records_tool_attempt_through_budget_guard() -> None:
     guard = SpyBudgetGuard()
     state = guard.start(budget, now_epoch_ms=1_000)
     tool = CountingTool(descriptor())
-    rt = ToolRuntime(
-        ToolRegistry(),
-        budget_guard=guard,
-        budget=budget,
-        budget_state=state,
-        clock=lambda: 1_001,
-    )
+    budget_context = ToolBudgetContext(guard, budget, state)
+    rt = ToolRuntime(ToolRegistry(), clock=lambda: 1_001)
     rt.registry.register(spec(), tool)
     result, _ = await rt.invoke(
         request(),
@@ -384,9 +440,276 @@ async def test_runtime_records_tool_attempt_through_budget_guard() -> None:
         allowed_tools=frozenset({"synthetic.lookup"}),
         granted_permissions=frozenset({"lookup:read"}),
         remaining_budget=remaining(),
+        budget_context=budget_context,
     )
     assert result.error is None
     assert guard.before_calls == 1
     assert guard.after_calls == 1
+    assert budget_context.state.consumed.tool_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_invocations_keep_budget_contexts_isolated() -> None:
+    budget = ExecutionBudget(3, 2, 20, 20, 500, 20)
+    first_guard = BudgetGuard()
+    second_guard = BudgetGuard()
+    first_context = ToolBudgetContext(
+        first_guard,
+        budget,
+        first_guard.start(budget, now_epoch_ms=1_000),
+    )
+    second_context = ToolBudgetContext(
+        second_guard,
+        budget,
+        second_guard.start(budget, now_epoch_ms=1_000),
+    )
+    tool = CountingTool(descriptor(), delay=0.01)
+    rt = runtime(tool, clock=lambda: 1_001)
+
+    async def invoke(context: ToolBudgetContext):
+        return await rt.invoke(
+            request(),
+            ctx(),
+            allowed_tools=frozenset({"synthetic.lookup"}),
+            granted_permissions=frozenset({"lookup:read"}),
+            remaining_budget=remaining(),
+            budget_context=context,
+        )
+
+    await asyncio.gather(invoke(first_context), invoke(second_context))
+    assert first_context.state.consumed.tool_calls == 1
+    assert second_context.state.consumed.tool_calls == 1
+    assert tool.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_lease_rejection_prevents_tool_dispatch() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=0, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    tool = CountingTool(descriptor())
+    result, _ = await runtime(tool).invoke(
+        request(),
+        ctx(),
+        allowed_tools=frozenset({"synthetic.lookup"}),
+        granted_permissions=frozenset({"lookup:read"}),
+        remaining_budget=remaining(),
+        lease_context=ToolLeaseContext(repository, scope, "tool-call", 0),
+    )
+    assert result.error is not None and result.error.code == "BUDGET_EXHAUSTED"
+    assert tool.calls == 0
+    assert repository.dispatched_invocation_count == 0
+
+
+@pytest.mark.asyncio
+async def test_successful_tool_attempt_uses_parent_lease_once() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=1, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    lease_context = ToolLeaseContext(repository, scope, "tool-call", 0)
+    tool = CountingTool(descriptor())
+    result, _ = await runtime(tool).invoke(
+        request(),
+        ctx(),
+        allowed_tools=frozenset({"synthetic.lookup"}),
+        granted_permissions=frozenset({"lookup:read"}),
+        remaining_budget=remaining(),
+        lease_context=lease_context,
+    )
+    snapshot = await repository.snapshot(scope)
+    assert result.error is None
+    assert tool.calls == 1
+    assert repository.dispatched_invocation_count == 1
+    assert snapshot.used.calls == 1
+    assert snapshot.used.bytes == 14
+    assert snapshot.reserved.calls == 0
+    assert lease_context.version == snapshot.version
+
+
+@pytest.mark.asyncio
+async def test_lease_is_the_only_budget_path() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=1, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    budget = ExecutionBudget(3, 2, 20, 20, 100, 20)
+    guard = BudgetGuard()
+    context = ToolBudgetContext(
+        guard,
+        budget,
+        guard.start(budget, now_epoch_ms=1_000),
+    )
+    with pytest.raises(ValueError, match="唯一预算计账路径"):
+        await runtime(CountingTool(descriptor())).invoke(
+            request(),
+            ctx(),
+            allowed_tools=frozenset({"synthetic.lookup"}),
+            granted_permissions=frozenset({"lookup:read"}),
+            remaining_budget=remaining(),
+            budget_context=context,
+            lease_context=ToolLeaseContext(repository, scope, "tool-call", 0),
+        )
+
+
+@pytest.mark.asyncio
+async def test_late_tool_success_is_audit_only_and_not_delivered() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=1, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    tool = TerminalTool(descriptor(), repository, scope)
+    result, _ = await runtime(tool).invoke(
+        request(),
+        ctx(),
+        allowed_tools=frozenset({"synthetic.lookup"}),
+        granted_permissions=frozenset({"lookup:read"}),
+        remaining_budget=remaining(),
+        lease_context=ToolLeaseContext(repository, scope, "tool-call", 0),
+    )
+    assert tool.calls == 1
+    assert result.output is None
+    assert result.error is not None and result.error.code == "TOOL_CANCELLED"
+    assert repository.audit_records[-1].delivery_allowed is False
+
+
+@pytest.mark.asyncio
+async def test_lease_path_does_not_early_return_on_stale_legacy_remaining() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=1_000,
+            max_cost_microunits=100,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    tool_result = ToolResult(
+        "1",
+        JsonObject((("lookup", "ok"),)),
+        None,
+        14,
+        False,
+        JsonObject((("output_tokens", 5), ("cost_microunits", 7))),
+    )
+    tool = CountingTool(descriptor(), result=tool_result)
+    result, _ = await runtime(tool).invoke(
+        request(),
+        ctx(),
+        allowed_tools=frozenset({"synthetic.lookup"}),
+        granted_permissions=frozenset({"lookup:read"}),
+        remaining_budget=remaining(tool_calls=0, output_tokens=0, cost_microunits=0),
+        lease_context=ToolLeaseContext(repository, scope, "tool-call", 0),
+    )
+    snapshot = await repository.snapshot(scope)
+    assert result.error is None
+    assert snapshot.used.calls == 1
+    assert snapshot.used.output_tokens == 5
+    assert snapshot.used.cost_microunits == 7
+    assert snapshot.reserved.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_parent_lease_calls_retry_fresh_cas_version() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(max_calls=2, max_bytes=1_000, max_cost_microunits=100)
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    tool = CountingTool(descriptor(), delay=0.01)
+    rt = runtime(tool)
+
+    async def invoke(prefix: str):
+        return await rt.invoke(
+            request(),
+            ctx(),
+            allowed_tools=frozenset({"synthetic.lookup"}),
+            granted_permissions=frozenset({"lookup:read"}),
+            remaining_budget=remaining(),
+            lease_context=ToolLeaseContext(repository, scope, prefix, 0),
+        )
+
+    first, second = await asyncio.gather(invoke("first"), invoke("second"))
+    snapshot = await repository.snapshot(scope)
+    assert first[0].error is None
+    assert second[0].error is None
+    assert tool.calls == 2
+    assert snapshot.used.calls == 2
+    assert snapshot.reserved.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_constructor_budget_accumulates_across_tool_calls() -> None:
+    budget = ExecutionBudget(3, 1, 20, 20, 1_000, 20)
+    guard = BudgetGuard()
+    tool = CountingTool(descriptor())
+    rt = runtime(
+        tool,
+        budget_guard=guard,
+        budget=budget,
+        budget_state=guard.start(budget, now_epoch_ms=1_000),
+        clock=lambda: 1_001,
+    )
+
+    async def invoke():
+        return await rt.invoke(
+            request(),
+            ctx(),
+            allowed_tools=frozenset({"synthetic.lookup"}),
+            granted_permissions=frozenset({"lookup:read"}),
+            remaining_budget=remaining(),
+        )
+
+    first = await invoke()
+    second = await invoke()
+    assert first[0].error is None
+    assert second[0].error is not None
+    assert second[0].error.code == "BUDGET_EXHAUSTED"
+    assert tool.calls == 1
     assert rt.budget_state is not None
     assert rt.budget_state.consumed.tool_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_tool_settlement_overrun_closes_dispatched_reservation() -> None:
+    repository = InMemoryBudgetLeaseRepository(
+        BudgetLimits(
+            max_calls=1,
+            max_bytes=1_000,
+            max_cost_microunits=0,
+            max_output_tokens=100,
+        )
+    )
+    scope = BudgetScope("tenant-1", "run-1", "research", "tool")
+    tool_result = ToolResult(
+        "1",
+        JsonObject((("lookup", "secret"),)),
+        None,
+        18,
+        False,
+        JsonObject((("cost_microunits", 7),)),
+    )
+    tool = CountingTool(descriptor(), result=tool_result)
+    result, _ = await runtime(tool).invoke(
+        request(),
+        ctx(),
+        allowed_tools=frozenset({"synthetic.lookup"}),
+        granted_permissions=frozenset({"lookup:read"}),
+        remaining_budget=remaining(),
+        lease_context=ToolLeaseContext(
+            repository,
+            scope,
+            "tool-overrun",
+            0,
+            reserve_cost_microunits=0,
+        ),
+    )
+    snapshot = await repository.snapshot(scope)
+    assert result.output is None
+    assert result.error is not None and result.error.code == "BUDGET_EXHAUSTED"
+    assert snapshot.reserved.calls == 0
+    assert snapshot.used.calls == 1
+    assert snapshot.used.cost_microunits == 7
+    assert repository.audit_records[-1].actual.cost_microunits == 7
+    assert repository.audit_records[-1].over_limit is True
+    assert repository.audit_records[-1].outcome == "success"

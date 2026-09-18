@@ -50,6 +50,9 @@ from efficiency_platform_agent.capabilities.research.contracts import (
     ResearchResult,
     ResearchStatus,
 )
+from efficiency_platform_agent.capabilities.research.request_policy import (
+    requested_source_count,
+)
 from efficiency_platform_agent.core.diagnostics import (
     DiagnosticRecorderPort,
     NoopDiagnosticRecorder,
@@ -59,6 +62,9 @@ from efficiency_platform_agent.core.multi_agent import (
     CompletionStatus,
     SupervisorLimits,
     TaskExecutionStatus,
+)
+from efficiency_platform_agent.core.operation_progress import (
+    report_operation_progress,
 )
 from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunResult
 from efficiency_platform_agent.strategies.multi_agent.scheduler import BoundedScheduler
@@ -88,6 +94,20 @@ class _ScenarioDispatch:
             if task_id in node.depends_on and envelope.deliverable_bundle
             for item in envelope.deliverable_bundle.deliverables
         ]
+        inputs.extend(
+            {
+                "source_run_id": reference.source_run_id,
+                "source_deliverable_id": reference.source_deliverable_id,
+                "item": reference.item.model_dump(mode="json"),
+            }
+            for reference in request.referenced_inputs
+        )
+        citations = evidence_citations(request.evidence_pack)
+        citations.extend(
+            citation.model_dump(mode="json")
+            for reference in request.referenced_inputs
+            for citation in reference.citations
+        )
         value = freeze(
             {
                 "platform": platform,
@@ -96,8 +116,12 @@ class _ScenarioDispatch:
                 "task_id": request.task_spec.task_id,
                 "plan_id": request.operation_plan.plan_id,
                 "deliverable_id": node.expected_deliverable_ids[0],
-                "citations": evidence_citations(request.evidence_pack),
+                "citations": citations,
                 "input_deliverables": inputs,
+                "profile_reference_ids": [
+                    reference.profile_id
+                    for reference in request.operation_context.profile_references
+                ],
                 "research": node.task_type == "operation.research"
                 or bool(getattr(request.task_spec, "requires_research", False)),
             }
@@ -141,6 +165,26 @@ def compile_runtime_plan(plan):
             for node in graph.tasks
         ),
     )
+
+
+def _wave_progress_counts(
+    ready_nodes: tuple[Any, ...],
+    outcomes: tuple[Any, ...],
+    *,
+    research: bool,
+) -> tuple[int, int]:
+    """按任务类型隔离统计成功结果，返回 completed/target。"""
+
+    task_ids = {
+        node.task_id
+        for node in ready_nodes
+        if (node.task_type == "operation.research") is research
+    }
+    completed = sum(
+        outcome.task_id in task_ids and outcome.status is TaskExecutionStatus.SUCCEEDED
+        for outcome in outcomes
+    )
+    return completed, len(task_ids)
 
 
 class ScenarioSupervisorAdapter:
@@ -188,10 +232,16 @@ class ScenarioSupervisorAdapter:
             task_spec.tenant_id,
             request.request.request.input_text,
             None,
-            1,
+            requested_source_count(request.request.request.input_text, default=1),
             ("goal",),
             "research-result/1",
             self._RESEARCH_BUDGET.max_output_tokens,
+        )
+        await report_operation_progress("collecting_sources")
+        await report_operation_progress(
+            "collecting_sources",
+            event="research_started",
+            payload={"completed": 0, "target": 1},
         )
         try:
             result = await asyncio.wait_for(
@@ -227,8 +277,16 @@ class ScenarioSupervisorAdapter:
         )
         if not decision.accepted:
             raise ValueError(
-                decision.reason_codes[0] if decision.reason_codes else "EVIDENCE_INVALID"
+                decision.reason_codes[0]
+                if decision.reason_codes
+                else "EVIDENCE_INVALID"
             )
+        await report_operation_progress("checking_evidence")
+        await report_operation_progress(
+            "checking_evidence",
+            event="research_completed",
+            payload={"completed": 1, "target": 1},
+        )
         return replace(request, evidence_pack=pack)
 
     async def execute_scenario(
@@ -309,7 +367,59 @@ class ScenarioSupervisorAdapter:
         outcomes: dict[str, Any] = {}
         cancelled = False
         for _ in range(len(graph.tasks)):
+            ready_nodes = tuple(
+                node
+                for node in graph.tasks
+                if state["task_statuses"][node.task_id] == "ready"
+            )
+            research_wave = any(
+                node.task_type == "operation.research" for node in ready_nodes
+            )
+            content_wave = any(
+                node.task_type != "operation.research" for node in ready_nodes
+            )
+            _, research_target = _wave_progress_counts(ready_nodes, (), research=True)
+            _, content_target = _wave_progress_counts(ready_nodes, (), research=False)
+            if research_wave:
+                await report_operation_progress("collecting_sources")
+                await report_operation_progress(
+                    "collecting_sources",
+                    event="research_started",
+                    payload={"completed": 0, "target": research_target},
+                )
+            if content_wave:
+                await report_operation_progress("creating_content")
+                await report_operation_progress(
+                    "creating_content",
+                    event="content_generation_started",
+                    payload={"completed": 0, "target": content_target},
+                )
             wave = await scheduler.run_wave(state)
+            research_completed, _ = _wave_progress_counts(
+                ready_nodes, wave.outcomes, research=True
+            )
+            content_completed, _ = _wave_progress_counts(
+                ready_nodes, wave.outcomes, research=False
+            )
+            if research_completed:
+                await report_operation_progress("checking_evidence")
+                await report_operation_progress(
+                    "checking_evidence",
+                    event="research_completed",
+                    payload={
+                        "completed": research_completed,
+                        "target": research_target,
+                    },
+                )
+            if content_wave:
+                await report_operation_progress(
+                    "creating_content",
+                    event="content_generation_completed",
+                    payload={
+                        "completed": content_completed,
+                        "target": content_target,
+                    },
+                )
             if wave.cancelled:
                 cancelled = True
                 break

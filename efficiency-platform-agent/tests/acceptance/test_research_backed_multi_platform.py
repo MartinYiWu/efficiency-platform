@@ -26,7 +26,9 @@ def _build_agent(content: ContentProvider, research: ResearchProvider):
     registry = ModelProviderRegistry()
     registry.register("offline", content)
     return build_operation_agent(
-        ModelRuntime(Selector(), registry), research_provider=research
+        ModelRuntime(Selector(), registry),
+        research_provider=research,
+        deliverable_set_contract_version="deliverable-set/1",
     )
 
 

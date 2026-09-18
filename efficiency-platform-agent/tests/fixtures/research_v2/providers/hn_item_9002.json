@@ -1,0 +1,9 @@
+{
+  "id": 9002,
+  "type": "story",
+  "title": "Ask HN fixture",
+  "text": "Community supplied text",
+  "score": 10,
+  "descendants": 3,
+  "by": "fixture-user"
+}

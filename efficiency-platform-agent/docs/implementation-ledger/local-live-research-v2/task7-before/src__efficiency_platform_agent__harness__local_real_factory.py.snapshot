@@ -1,0 +1,453 @@
+"""本地真实 DeepSeek 联调的显式组合根。"""
+
+from __future__ import annotations
+
+import time
+import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Literal, cast
+
+import httpx
+from fastapi import FastAPI
+
+from efficiency_platform_agent.agents.conversation.general_agent import (
+    GeneralConversationAgent,
+)
+from efficiency_platform_agent.api.app import create_app
+from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.capabilities.research.public_sources import (
+    FreePublicResearchProvider,
+)
+from efficiency_platform_agent.configuration.integration import (
+    IntegrationGate,
+    S7IntegrationSettings,
+)
+from efficiency_platform_agent.configuration.research import ResearchPipelineSettings
+from efficiency_platform_agent.contracts.research_ports_v2 import ResearchServiceV2
+from efficiency_platform_agent.conversation.direct_submission import (
+    DirectConversationSubmissionStore,
+)
+from efficiency_platform_agent.conversation.intent_v2_adapter import (
+    IntentV2ConversationAdapter,
+    IntentV2PreparationDelegate,
+    PipelineVersionSnapshotV2,
+)
+from efficiency_platform_agent.conversation.service import (
+    ConversationService,
+    ConversationSubmissionStore,
+)
+from efficiency_platform_agent.core.budget import BudgetGuard
+from efficiency_platform_agent.core.diagnostics import NoopDiagnosticRecorder
+from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
+from efficiency_platform_agent.core.ports import ModelProvider
+from efficiency_platform_agent.core.run import ExecutionBudget
+from efficiency_platform_agent.harness.operation_agent_factory import (
+    build_operation_agent,
+)
+from efficiency_platform_agent.harness.research_v2_adapter import (
+    ResearchBriefStoreV2,
+    ResearchV2ProviderAdapter,
+)
+from efficiency_platform_agent.observability.local_execution_log import (
+    LocalExecutionLogger,
+)
+from efficiency_platform_agent.orchestration.builders.conversation_direct import (
+    build_conversation_direct_registration,
+)
+from efficiency_platform_agent.orchestration.builders.operation_runtime import (
+    build_operation_multi_agent_registration,
+)
+from efficiency_platform_agent.orchestration.cancellation import (
+    InMemoryCancellationSignal,
+)
+from efficiency_platform_agent.orchestration.intent_interpreter import IntentInterpreter
+from efficiency_platform_agent.orchestration.registry import GraphRegistry
+from efficiency_platform_agent.orchestration.runtime import GraphRuntime
+from efficiency_platform_agent.orchestration.scenario_resolver import ScenarioResolver
+from efficiency_platform_agent.persistence.in_memory import (
+    InMemoryRunEventStore,
+    InMemoryRunRepository,
+)
+from efficiency_platform_agent.providers.deepseek_stream import (
+    DeepSeekStreamingProvider,
+)
+from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
+from efficiency_platform_agent.routing.strategy_router import StrategyRouter
+from efficiency_platform_agent.runtime.event_hub import EventHub
+
+from .live_acceptance import (
+    ConversationLiveAcceptanceRunner,
+    InMemoryLiveAcceptanceBudgetBinder,
+    LiveAcceptanceAuthorizationStore,
+    LiveAcceptanceBudgetBinder,
+    LiveAcceptanceService,
+)
+from .service import AgentRuntimeService
+
+# 运营多平台生成单节点允许 120 秒，HTTP Provider 上限必须与之对齐。
+_OPERATION_MODEL_TIMEOUT_MS = 120_000
+
+
+class _SystemClock:
+    """本地服务使用的毫秒时钟。"""
+
+    def now_epoch_ms(self) -> int:
+        return int(time.time() * 1000)
+
+
+class _UuidGenerator:
+    """生成进程内不重复且不包含用户正文的标识。"""
+
+    def new_run_id(self) -> str:
+        return f"run-{uuid.uuid4().hex}"
+
+    def new_event_id(self) -> str:
+        return f"event-{uuid.uuid4().hex}"
+
+
+class _RunScopedModelCancellation:
+    """为共享模型运行时提供按异步调用隔离的 Run 取消探针。"""
+
+    def __init__(self, cancellation: InMemoryCancellationSignal) -> None:
+        self.cancellation = cancellation
+        self.run_id: ContextVar[str | None] = ContextVar("model_run_id", default=None)
+
+    @contextmanager
+    def bind(self, run_id: str) -> Iterator[None]:
+        """只在当前模型调用链绑定 Run，退出后恢复前一上下文。"""
+        token = self.run_id.set(run_id)
+        try:
+            yield
+        finally:
+            self.run_id.reset(token)
+
+    async def wait_requested(self) -> bool:
+        """非阻塞读取当前 Run 的既有取消状态。"""
+        run_id = self.run_id.get()
+        return run_id is not None and await self.cancellation.is_requested(run_id)
+
+
+@dataclass(slots=True)
+class LocalAgentApplication:
+    """持有应用、运行服务及由组合根创建的 HTTP 客户端。"""
+
+    app: FastAPI
+    runtime: AgentRuntimeService
+    conversation: ConversationService
+    event_hub: EventHub
+    http_client: Any | None = None
+    research_client: Any | None = None
+
+    async def close(self) -> None:
+        """等待后台任务并关闭组合根拥有的客户端。"""
+        await self.runtime.wait_for_background_tasks()
+        if self.http_client is not None:
+            await self.http_client.aclose()
+        if self.research_client is not None:
+            close = getattr(self.research_client, "close", None)
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+
+
+def _secret(settings: S7IntegrationSettings, name: str) -> str:
+    value = getattr(settings, name)
+    if value is None or not value.get_secret_value().strip():
+        raise ValueError(f"缺少本地真实运行配置: {name}")
+    return value.get_secret_value()
+
+
+def _candidate(candidate_id: str, provider_id: str, model: str, tier: ModelTier):
+    return ModelCandidate(
+        candidate_id,
+        provider_id,
+        model,
+        tier,
+        True,
+        False,
+        64_000,
+        True,
+        True,
+    )
+
+
+def build_local_agent_application(
+    settings: S7IntegrationSettings | None = None,
+    *,
+    env_file: str | Path = ".env",
+    provider: ModelProvider | None = None,
+    test_mode: bool = False,
+    http_client: Any | None = None,
+    research_provider: Any | None = None,
+    research_v2_settings: ResearchPipelineSettings | None = None,
+    intent_v2_delegate: IntentV2PreparationDelegate | None = None,
+    research_v2_source_registry: object | None = None,
+    research_v2_tool_runtime: object | None = None,
+    research_service_v2: object | None = None,
+    intent_v2_state_store: object | None = None,
+    research_v2_state_store: object | None = None,
+    live_acceptance_service: LiveAcceptanceService | None = None,
+    live_acceptance_authorizations: LiveAcceptanceAuthorizationStore | None = None,
+    live_acceptance_budget_binder: LiveAcceptanceBudgetBinder | None = None,
+    deliverable_set_contract_version: Literal["deliverable-set/1", "deliverable-set/2"]
+    | None = None,
+) -> LocalAgentApplication:
+    """默认装配真实 DeepSeek；Fake Provider 必须显式开启测试模式。"""
+    if provider is not None and not test_mode:
+        raise ValueError("自定义 Provider 仅允许显式测试模式")
+    if research_provider is not None and not test_mode:
+        raise ValueError("自定义 Research Provider 仅允许显式测试模式")
+    if live_acceptance_service is not None and any(
+        item is not None
+        for item in (
+            live_acceptance_authorizations,
+            live_acceptance_budget_binder,
+        )
+    ):
+        raise ValueError("LIVE_ACCEPTANCE_COMPOSITION_CONFLICT")
+    if (live_acceptance_authorizations is None) != (
+        live_acceptance_budget_binder is None
+    ):
+        raise ValueError("LIVE_ACCEPTANCE_COMPOSITION_INCOMPLETE")
+    effective_live_acceptance_binder = (
+        live_acceptance_service.budget_binder
+        if live_acceptance_service is not None
+        else live_acceptance_budget_binder
+    )
+    if not test_mode and isinstance(
+        effective_live_acceptance_binder,
+        InMemoryLiveAcceptanceBudgetBinder,
+    ):
+        raise RuntimeError("LIVE_ACCEPTANCE_PERSISTENCE_NOT_READY")
+    resolved = settings or S7IntegrationSettings.from_env_file(env_file)
+    resolved_research_v2 = research_v2_settings or ResearchPipelineSettings()
+    if resolved_research_v2.v2_enabled and any(
+        item is None
+        for item in (
+            intent_v2_delegate,
+            research_v2_source_registry,
+            research_v2_tool_runtime,
+            research_service_v2,
+            intent_v2_state_store,
+            research_v2_state_store,
+        )
+    ):
+        raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+    if resolved_research_v2.v2_enabled:
+        bindings = (
+            ("source_registry", research_v2_source_registry),
+            ("tool_runtime", research_v2_tool_runtime),
+            ("research_service", research_service_v2),
+            ("intent_state_store", intent_v2_state_store),
+            ("research_state_store", research_v2_state_store),
+        )
+        if any(
+            getattr(intent_v2_delegate, name, None) is not dependency
+            for name, dependency in bindings
+        ):
+            raise RuntimeError("RESEARCH_V2_COMPOSITION_BINDING_MISMATCH")
+    pipeline_snapshot = PipelineVersionSnapshotV2(
+        intent_pipeline_version=resolved_research_v2.intent_pipeline_version,
+        research_pipeline_version=resolved_research_v2.research_pipeline_version,
+        research_replan_enabled=resolved_research_v2.research_replan_enabled,
+        research_source_allowlist=resolved_research_v2.research_source_allowlist,
+        research_policy_version=resolved_research_v2.research_policy_version,
+        state_backend=resolved_research_v2.state_backend,
+        runtime_mode=resolved_research_v2.runtime_mode,
+        rollout_mode=resolved_research_v2.rollout_mode,
+        rollout_tenant_allowlist=resolved_research_v2.rollout_tenant_allowlist,
+    )
+    intent_v2_adapter = IntentV2ConversationAdapter(
+        pipeline_snapshot,
+        intent_v2_delegate,
+    )
+    intent_v2_adapter.assert_runtime_ready(
+        runtime_mode=resolved_research_v2.runtime_mode
+    )
+    local_execution_logger = None if test_mode else LocalExecutionLogger()
+    execution_logger = local_execution_logger or NoopDiagnosticRecorder()
+    model_names = {
+        ModelTier.FAST: _secret(resolved, "deepseek_fast_model"),
+        ModelTier.BALANCED: _secret(resolved, "deepseek_balanced_model"),
+        ModelTier.STRONG: _secret(resolved, "deepseek_strong_model"),
+    }
+    owns_client = provider is None and http_client is None
+    client = http_client
+    if provider is None:
+        client = client or httpx.AsyncClient()
+        base_url = _secret(resolved, "deepseek_base_url")
+        api_key = _secret(resolved, "deepseek_api_key")
+
+    provider_registry = ModelProviderRegistry()
+    candidates: list[ModelCandidate] = []
+    for tier, model in model_names.items():
+        provider_id = f"deepseek_{tier.value}"
+        current = provider
+        if current is None:
+            current = DeepSeekStreamingProvider(
+                client,
+                model,
+                api_key=api_key,
+                base_url=base_url,
+                timeout_ms=_OPERATION_MODEL_TIMEOUT_MS,
+                diagnostic_recorder=execution_logger,
+            )
+        provider_registry.register(provider_id, current)
+        candidates.append(_candidate(provider_id, provider_id, model, tier))
+
+    cancellation = InMemoryCancellationSignal()
+    model_cancellation = _RunScopedModelCancellation(cancellation)
+    model_runtime = ModelRuntime(
+        ModelPolicyRouter(candidates),
+        provider_registry,
+        cancellation_signal=model_cancellation,
+        diagnostic_recorder=execution_logger,
+    )
+    if local_execution_logger is not None:
+        local_execution_logger.log_capability("deepseek_chat", enabled=True)
+    budget = ExecutionBudget(40, 10, 64_000, 32_000, 300_000, 1_000_000)
+    research_client = None
+    research_enabled = resolved.gates.get(
+        IntegrationGate.DEEPSEEK_WEB_SEARCH.value, False
+    )
+    if resolved_research_v2.v2_enabled and research_enabled:
+        raise ValueError("RESEARCH_V2_LEGACY_SEARCH_FORBIDDEN")
+    research_reason_code: str | None = None
+    if resolved_research_v2.v2_enabled:
+        research_provider = ResearchV2ProviderAdapter(
+            cast(ResearchServiceV2, research_service_v2),
+            cast(ResearchBriefStoreV2, research_v2_state_store),
+        )
+    else:
+        if not research_enabled:
+            research_provider = None
+            research_reason_code = "RESEARCH_GATE_DISABLED"
+        if research_provider is None and research_enabled:
+            research_provider = FreePublicResearchProvider(recorder=execution_logger)
+    if research_provider is None and research_reason_code is None:
+        research_reason_code = "RESEARCH_PROVIDER_NOT_CONFIGURED"
+    resolved_deliverable_set_contract_version = deliverable_set_contract_version or (
+        "deliverable-set/2"
+        if isinstance(research_provider, ResearchV2ProviderAdapter)
+        else "deliverable-set/1"
+    )
+    if local_execution_logger is not None:
+        local_execution_logger.log_capability(
+            "free_public_research",
+            enabled=research_provider is not None,
+            reason_code=research_reason_code,
+        )
+    operation_agent = build_operation_agent(
+        model_runtime,
+        budget=budget,
+        cancellation=cancellation,
+        research_provider=research_provider,
+        diagnostic_recorder=execution_logger,
+        research_unavailable_code=(
+            research_reason_code or "RESEARCH_PROVIDER_NOT_CONFIGURED"
+        ),
+        deliverable_set_contract_version=resolved_deliverable_set_contract_version,
+    )
+    if resolved_research_v2.v2_enabled:
+        submissions = getattr(intent_v2_delegate, "submissions", None)
+        if not isinstance(submissions, ConversationSubmissionStore):
+            raise RuntimeError("RESEARCH_V2_SUBMISSION_STORE_MISMATCH")
+    else:
+        submissions = ConversationSubmissionStore()
+    direct_submissions = DirectConversationSubmissionStore()
+    event_hub = EventHub()
+    runtime_service: AgentRuntimeService | None = None
+
+    async def publish_conversation_delta(run_id: str, delta: str) -> None:
+        """把 Graph 的已治理正文交给唯一 Harness 决定是否仍可发布。"""
+        if runtime_service is None:
+            raise RuntimeError("本地 Harness 尚未完成装配")
+        await runtime_service.publish_assistant_delta(run_id, delta)
+
+    registry = GraphRegistry()
+    registry.register(
+        build_conversation_direct_registration(
+            GeneralConversationAgent(model_runtime),
+            direct_submissions.resolve,
+            model_call_scope=model_cancellation.bind,
+            output_publisher=publish_conversation_delta,
+        )
+    )
+    registry.register(
+        build_operation_multi_agent_registration(operation_agent, submissions.resolve)
+    )
+    clock = _SystemClock()
+    graph_runtime = GraphRuntime(
+        registry,
+        cancellation_signal=cancellation,
+        clock=clock,
+        diagnostic_recorder=execution_logger,
+    )
+    runtime = AgentRuntimeService(
+        repository=InMemoryRunRepository(),
+        event_store=InMemoryRunEventStore(),
+        router=StrategyRouter(registry.available_modes()),
+        graph_runtime=graph_runtime,
+        budget_guard=BudgetGuard(),
+        budget=budget,
+        clock=clock,
+        id_generator=_UuidGenerator(),
+        cancellation_signal=cancellation,
+        event_hub=event_hub,
+        diagnostic_recorder=execution_logger,
+    )
+    runtime_service = runtime
+    if local_execution_logger is not None:
+        runtime.add_run_event_listener(local_execution_logger.on_run_event)
+        runtime.add_run_state_listener(local_execution_logger.on_run_state)
+    conversation = ConversationService(
+        runtime=runtime,
+        # 真实模型结构化意图首包存在波动，组合根在 Run 总预算内给意图阶段 60 秒。
+        interpreter=IntentInterpreter(model_runtime, timeout_ms=60_000),
+        resolver=ScenarioResolver(),
+        submissions=submissions,
+        direct_submissions=direct_submissions,
+        intent_v2_coordinator=intent_v2_adapter,
+    )
+    resolved_live_acceptance_service = live_acceptance_service
+    if live_acceptance_authorizations is not None:
+        assert live_acceptance_budget_binder is not None
+        resolved_live_acceptance_service = LiveAcceptanceService(
+            authorizations=live_acceptance_authorizations,
+            budget_binder=live_acceptance_budget_binder,
+            runner=ConversationLiveAcceptanceRunner(conversation, runtime),
+        )
+    app = create_app(
+        runtime,
+        event_hub=event_hub,
+        conversation_service=conversation,
+        live_acceptance_service=resolved_live_acceptance_service,
+    )
+    app.state.local_test_mode = test_mode
+    app.state.research_v2_enabled = resolved_research_v2.v2_enabled
+    app.state.research_v2_production_ready = resolved_research_v2.production_ready
+    app.state.live_acceptance_enabled = resolved_live_acceptance_service is not None
+    return LocalAgentApplication(
+        app,
+        runtime,
+        conversation,
+        event_hub,
+        client if owns_client else None,
+        research_client,
+    )
+
+
+build_local_real_app = build_local_agent_application
+
+
+__all__ = [
+    "LocalAgentApplication",
+    "build_local_agent_application",
+    "build_local_real_app",
+]

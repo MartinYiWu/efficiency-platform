@@ -23,6 +23,7 @@ class ScenarioContractTests(unittest.TestCase):
                 "task_spec",
                 "profile_candidates",
                 "evidence_pack",
+                "referenced_inputs",
             },
         )
         self.assertNotIn("operation_plan", names)

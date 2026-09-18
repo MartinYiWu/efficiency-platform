@@ -1,0 +1,458 @@
+"""两轮会话经过场景与真实 Supervisor，只有 Provider 使用固定离线边界。"""
+
+from copy import deepcopy
+
+import pytest
+
+from efficiency_platform_agent.contracts.conversation import ConversationMessageV1
+from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
+from efficiency_platform_agent.contracts.intent import (
+    IntentEnvelopeV1,
+    IntentRequirementsV1,
+)
+from efficiency_platform_agent.contracts.responses import RunViewV1, UsageV1
+from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
+from efficiency_platform_agent.harness.errors import HarnessError
+from tests.api.test_conversation_routes import (
+    RecordingRuntime,
+    StubInterpreter,
+    service,
+)
+from tests.contracts.test_deliverable_v2_contracts import ranked_digest_payload
+from tests.integration.test_operation_deliverable_v2 import (
+    ContentProviderV2,
+    build_test_agent,
+)
+
+
+class ReferenceRuntime(RecordingRuntime):
+    """保留第一轮的权威终态视图，记录后续受租户约束的读取。"""
+
+    def __init__(self):
+        super().__init__()
+        self.views = {}
+        self.reads = []
+
+    async def get_run(self, run_id, tenant_id):
+        self.reads.append((run_id, tenant_id))
+        if (tenant_id, run_id) not in self.views:
+            raise HarnessError("RUN_NOT_FOUND", "运行不存在", category="request")
+        return self.views[(tenant_id, run_id)]
+
+
+class InitialIntentOnly(StubInterpreter):
+    """后续显式引用必须在意图模型之前完成校验与绑定。"""
+
+    async def interpret(self, text, context):
+        assert self.intents, "上一轮显式引用不应调用意图模型"
+        return await super().interpret(text, context)
+
+
+async def first_round(*, status=RunStatus.SUCCEEDED, mutate=None):
+    """先通过真实会话服务提交研究轮，再由隔离运行端口报告终态。"""
+    runtime = ReferenceRuntime()
+    interpreter = InitialIntentOnly(
+        [
+            IntentEnvelopeV1(
+                domain="research",
+                goal="整理行业动态",
+                task_type="industry_digest",
+                needs_research=True,
+                needs_multi_agent=True,
+                confidence=1,
+                requirements=IntentRequirementsV1(
+                    topic="行业动态", time_window="最近7天"
+                ),
+            )
+        ]
+    )
+    facade = service(runtime, interpreter, fast_path_detector=None)
+    first = await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="整理行业动态",
+            request_id="first",
+            user_id="user-a",
+        ),
+    )
+    await runtime.wait()
+    payload = ranked_digest_payload()
+    payload["run_id"] = first.run_id
+    digest = payload["deliverables"][0]
+    digest["content"]["items"].append(
+        {
+            **deepcopy(digest["content"]["items"][0]),
+            "rank": 2,
+            "item_id": "item-2",
+            "title": "禁止泄漏的第二条",
+            "summary": "第二条独占事实",
+            "source_refs": ["citation-2"],
+        }
+    )
+    digest["citations"].append(
+        {
+            **deepcopy(digest["citations"][0]),
+            "citation_id": "citation-2",
+            "url": "https://example.com/second-only",
+            "supports_item_ids": ["item-2"],
+        }
+    )
+    payload["provenance"].update(
+        candidate_count=2, merged_event_count=2, retained_count=2
+    )
+    DeliverableSetV2.model_validate(payload)
+    if mutate:
+        mutate(payload)
+    view = RunViewV1(
+        run_id=first.run_id,
+        request_id="first",
+        status=status,
+        strategy=StrategyMode.MULTI_AGENT,
+        output={"deliverable_set": payload},
+        usage=UsageV1(
+            input_tokens=0, output_tokens=0, cost_microunits=0, estimated=False
+        ),
+    )
+    runtime.views[("tenant-a", first.run_id)] = view
+    await facade.on_run_state(view)
+    return runtime, facade, interpreter, payload
+
+
+async def submit_rewrite(
+    facade,
+    runtime,
+    *,
+    tenant="tenant-a",
+    user="user-a",
+    conversation="conversation-a",
+    rank=1,
+):
+    result = await facade.submit(
+        conversation,
+        tenant,
+        ConversationMessageV1(
+            message=f"把上一轮第{rank}条改写成小红书文案",
+            request_id="rewrite",
+            user_id=user,
+        ),
+    )
+    await runtime.wait()
+    return result
+
+
+@pytest.mark.asyncio
+async def test_two_rounds_pass_only_ranked_item_and_source_closure_to_model():
+    runtime, facade, interpreter, payload = await first_round()
+    second = await submit_rewrite(facade, runtime)
+    source = facade.submissions._entries[("tenant-a", "rewrite")].submission
+    provider = ContentProviderV2()
+    execution = await build_test_agent(provider).execute(source, run_id=second.run_id)
+    assert execution.deliverables is not None
+    assert len(provider.calls) == 1
+    raw = provider.calls[0]
+    assert len(raw["input_deliverables"]) == 1
+    assert (
+        raw["input_deliverables"][0]["item"]
+        == payload["deliverables"][0]["content"]["items"][0]
+    )
+    assert [c["citation_id"] for c in raw["citations"]] == ["citation-1"]
+    assert "禁止泄漏" not in str(raw)
+    assert "second-only" not in str(raw)
+    assert interpreter.context_sizes == [0]
+    assert source.referenced_inputs[0].source_run_id == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_reference_rejects_citation_not_supporting_selected_item_before_model():
+    def break_selected_item_closure(value):
+        value["deliverables"][0]["citations"][0]["supports_item_ids"] = ["item-2"]
+
+    runtime, facade, interpreter, _ = await first_round(
+        mutate=break_selected_item_closure
+    )
+    provider = ContentProviderV2()
+    caught = None
+
+    try:
+        second = await submit_rewrite(facade, runtime)
+        source = facade.submissions._entries[("tenant-a", "rewrite")].submission
+        await build_test_agent(provider).execute(source, run_id=second.run_id)
+    except HarnessError as error:
+        caught = error
+
+    assert (caught.code if caught else None, len(provider.calls)) == (
+        "CONVERSATION_REFERENCE_UNAVAILABLE",
+        0,
+    )
+    assert interpreter.context_sizes == [0]
+    assert ("tenant-a", "rewrite") not in facade.submissions._entries
+
+
+@pytest.mark.asyncio
+async def test_second_rank_keeps_its_original_rank_without_other_item_sources():
+    runtime, facade, _, payload = await first_round()
+    second = await submit_rewrite(facade, runtime, rank=2)
+    source = facade.submissions._entries[("tenant-a", "rewrite")].submission
+    provider = ContentProviderV2()
+    await build_test_agent(provider).execute(source, run_id=second.run_id)
+    raw = provider.calls[0]
+    assert (
+        raw["input_deliverables"][0]["item"]
+        == payload["deliverables"][0]["content"]["items"][1]
+    )
+    assert [c["citation_id"] for c in raw["citations"]] == ["citation-2"]
+
+
+@pytest.mark.asyncio
+async def test_reference_closure_preserves_distinct_ids_for_the_same_source_url():
+    def shared_url(value):
+        digest = value["deliverables"][0]
+        digest["citations"].append(
+            {**digest["citations"][0], "citation_id": "citation-extra"}
+        )
+        digest["content"]["items"][0]["source_refs"].append("citation-extra")
+
+    runtime, facade, _, _ = await first_round(mutate=shared_url)
+    second = await submit_rewrite(facade, runtime)
+    provider = ContentProviderV2()
+    await build_test_agent(provider).execute(
+        facade.submissions._entries[("tenant-a", "rewrite")].submission,
+        run_id=second.run_id,
+    )
+    assert [c["citation_id"] for c in provider.calls[0]["citations"]] == [
+        "citation-1",
+        "citation-extra",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_unspecified_platform_requests_clarification_without_model():
+    runtime, facade, interpreter, _ = await first_round()
+    await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="改写第1条",
+            request_id="rewrite",
+            user_id="user-a",
+        ),
+    )
+    with pytest.raises(HarnessError) as error:
+        await runtime.wait()
+    assert error.value.code == "CONVERSATION_REFERENCE_PLATFORM_REQUIRED"
+    assert interpreter.context_sizes == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"tenant": "tenant-b"},
+        {"user": "user-b"},
+        {"conversation": "conversation-b"},
+        {"rank": 3},
+        {"rank": 0},
+        {"rank": -1},
+    ],
+)
+async def test_invalid_reference_never_calls_intent_or_content_model(change):
+    runtime, facade, interpreter, _ = await first_round()
+    with pytest.raises(HarnessError, match="上一轮"):
+        await submit_rewrite(facade, runtime, **change)
+    assert interpreter.context_sizes == [0]
+    assert ("tenant-a", "rewrite") not in facade.submissions._entries
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status", [RunStatus.RUNNING, RunStatus.WAITING_INPUT, RunStatus.FAILED]
+)
+async def test_previous_non_success_run_is_rejected_without_model(status):
+    runtime, facade, interpreter, _ = await first_round(status=status)
+    with pytest.raises(HarnessError, match="上一轮"):
+        await submit_rewrite(facade, runtime)
+    assert interpreter.context_sizes == [0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.update(contract_version="deliverable-set/1"),
+        lambda value: value["deliverables"][0]["content"]["items"][0].update(
+            source_refs=["missing"]
+        ),
+        lambda value: value["deliverables"][0]["content"]["items"][1].update(rank=1),
+        lambda value: value.update(run_id="another-run"),
+    ],
+)
+async def test_invalid_v2_is_rejected_without_model(mutation):
+    runtime, facade, interpreter, _ = await first_round(mutate=mutation)
+    with pytest.raises(HarnessError, match="上一轮"):
+        await submit_rewrite(facade, runtime)
+    assert interpreter.context_sizes == [0]
+
+
+@pytest.mark.asyncio
+async def test_latest_queued_run_blocks_fallback_to_older_success():
+    runtime, facade, interpreter, _ = await first_round()
+    interpreter.intents.append(
+        IntentEnvelopeV1(
+            domain="chat",
+            goal="解释概念",
+            task_type="general_chat",
+            confidence=1,
+        )
+    )
+    queued = await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="解释概念",
+            request_id="middle",
+            user_id="user-a",
+        ),
+    )
+    runtime.views[("tenant-a", queued.run_id)] = RunViewV1(
+        run_id=queued.run_id,
+        request_id="middle",
+        status=RunStatus.RUNNING,
+        strategy=StrategyMode.DIRECT,
+        usage=UsageV1(
+            input_tokens=0, output_tokens=0, cost_microunits=0, estimated=False
+        ),
+    )
+    await runtime.wait()
+    with pytest.raises(HarnessError, match="上一轮"):
+        await submit_rewrite(facade, runtime)
+    assert runtime.reads == [(queued.run_id, "tenant-a")]
+
+
+@pytest.mark.asyncio
+async def test_two_real_api_rounds_use_ranked_v2_then_selected_content():
+    """真实 API、Run 生命周期、Scenario 与 Supervisor，研究/模型仅离线替身。"""
+    import httpx
+
+    from efficiency_platform_agent.capabilities.research.v2.delivery import (
+        DeliveryPackBuilder,
+    )
+    from efficiency_platform_agent.harness.local_real_factory import (
+        build_local_agent_application,
+    )
+    from efficiency_platform_agent.harness.research_v2_adapter import (
+        ResearchV2ProviderAdapter,
+    )
+    from tests.unit.capabilities.research_v2._delivery_support import (
+        delivery_facts,
+        research_outcome,
+    )
+    from tests.unit.harness.test_local_real_factory import synthetic_settings
+
+    class BriefStore:
+        async def get_brief(self, tenant_id, task_id, run_id=None):
+            active = next(iter(bundle.conversation._active_runs))
+            assert run_id == active
+            brief, *_ = delivery_facts()
+            return brief.model_copy(
+                update={
+                    "trusted_context": brief.trusted_context.model_copy(
+                        update={
+                            "tenant_id": tenant_id,
+                            "task_id": task_id,
+                            "run_id": active,
+                        },
+                    )
+                }
+            )
+
+    class Research:
+        async def research(self, brief, runtime_context):
+            _, snapshot, *_ = delivery_facts()
+            snapshot = snapshot.model_copy(
+                update={"brief_digest": brief.canonical_digest()}
+            )
+            outcome = research_outcome(brief)
+            return outcome.model_copy(
+                update={
+                    "delivery": DeliveryPackBuilder().build(brief, outcome, snapshot),
+                }
+            )
+
+    provider = ContentProviderV2()
+    bundle = build_local_agent_application(
+        synthetic_settings().model_copy(
+            update={"gates": {"deepseek_web_search": True}}
+        ),
+        provider=provider,
+        test_mode=True,
+        research_provider=ResearchV2ProviderAdapter(Research(), BriefStore()),
+    )
+    headers = {"X-Tenant-ID": "tenant-a"}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=bundle.app), base_url="http://test"
+        ) as client:
+            first = await client.post(
+                "/v1/conversations/api-two-round/messages",
+                headers=headers,
+                json={
+                    "message": "收集最近7天AI行业动态",
+                    "request_id": "api-first",
+                    "user_id": "user-a",
+                },
+            )
+            assert first.status_code == 201
+            await bundle.runtime.wait_for_background_tasks()
+            first_view = await bundle.runtime.get_run(
+                first.json()["run_id"], "tenant-a"
+            )
+            assert first_view.status is RunStatus.SUCCEEDED
+            digest = first_view.output["deliverable_set"]["deliverables"][0]
+            assert digest["deliverable_kind"] == "ranked_digest"
+            assert provider.calls == []
+            second = await client.post(
+                "/v1/conversations/api-two-round/messages",
+                headers=headers,
+                json={
+                    "message": "把上一轮第1条改写成小红书文案",
+                    "request_id": "api-second",
+                    "user_id": "user-a",
+                },
+            )
+            assert second.status_code == 201
+            await bundle.runtime.wait_for_background_tasks()
+            second_view = await bundle.runtime.get_run(
+                second.json()["run_id"], "tenant-a"
+            )
+            assert second_view.status is RunStatus.SUCCEEDED
+            assert len(provider.calls) == 1
+            assert (
+                provider.calls[0]["input_deliverables"][0]["item"]
+                == digest["content"]["items"][0]
+            )
+            assert provider.calls[0]["citations"] == digest["citations"]
+            assert (
+                second_view.output["deliverable_set"]["deliverables"][0]["citations"]
+                == digest["citations"]
+            )
+            third = await client.post(
+                "/v1/conversations/api-two-round/messages",
+                headers=headers,
+                json={
+                    "message": "把上一轮第1条改写成公众号文案",
+                    "request_id": "api-third",
+                    "user_id": "user-a",
+                },
+            )
+            assert third.status_code == 201
+            await bundle.runtime.wait_for_background_tasks()
+            third_view = await bundle.runtime.get_run(
+                third.json()["run_id"], "tenant-a"
+            )
+            assert third_view.status is RunStatus.FAILED
+            assert third_view.error.code == "CONVERSATION_REFERENCE_UNAVAILABLE"
+            assert third_view.usage.input_tokens == third_view.usage.output_tokens == 0
+            assert len(provider.calls) == 1
+    finally:
+        await bundle.close()

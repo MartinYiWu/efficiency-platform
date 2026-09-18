@@ -6,10 +6,20 @@ from .integration import (
     IntegrationGate,
     S7IntegrationSettings,
 )
+from .research import (
+    ResearchPipelineSettings,
+    ResearchPolicySettings,
+    ResearchSourceConfig,
+    ResearchSourceSettings,
+)
 
 __all__ = [
     "GateAction",
     "GateAuthorization",
     "IntegrationGate",
+    "ResearchPipelineSettings",
+    "ResearchPolicySettings",
+    "ResearchSourceConfig",
+    "ResearchSourceSettings",
     "S7IntegrationSettings",
 ]

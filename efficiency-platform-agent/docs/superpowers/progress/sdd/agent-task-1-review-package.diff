@@ -1,0 +1,771 @@
+NON-GIT REVIEW PACKAGE
+Base: task-start filesystem snapshot
+Head: current filesystem after Agent Task 1
+
+FILE STAT
+src\efficiency_platform_agent\contracts\deliverables.py	12147 bytes	SHA256 6F32D06E8613D224C391448476FFBA42F139512B6613D322741E0AEDF1A8BD49
+
+DIFF src\efficiency_platform_agent\contracts\deliverables.py
+--- a/src\efficiency_platform_agent\contracts\deliverables.py
++++ b/src\efficiency_platform_agent\contracts\deliverables.py
+@@ -2,9 +2,12 @@
+ 
+ from __future__ import annotations
+ 
+-from typing import Literal
++from datetime import datetime, timedelta
++from typing import Annotated, Literal
+ 
+-from pydantic import BaseModel, ConfigDict, Field
++from pydantic import BaseModel, ConfigDict, Field, model_validator
++
++from efficiency_platform_agent.contracts.stream_events import JsonValue
+ 
+ 
+ class CitationV1(BaseModel):
+@@ -47,4 +50,301 @@
+     degraded: bool = Field(default=False, description="是否存在部分失败或降级。")
+ 
+ 
+-__all__ = ["CitationV1", "DeliverableSetV1", "DeliverableV1"]
++class _OperationContractV2Model(BaseModel):
++    """V2 运营交付契约的统一失败关闭与冻结基类。"""
++
++    model_config = ConfigDict(extra="forbid", frozen=True)
++
++
++ConfidenceV2 = Literal["high", "medium", "low"]
++VerificationStatusV2 = Literal[
++    "verified", "partially_verified", "unverified", "conflicted"
++]
++RankingBasisV2 = Literal["importance", "recency", "heat", "mixed"]
++NextActionTypeV2 = Literal[
++    "rewrite_for_platform",
++    "expand_item",
++    "generate_script",
++    "replace_candidates",
++    "show_sources",
++    "refine_constraints",
++]
++
++
++class CitationV2(_OperationContractV2Model):
++    """可关联到具体候选条目的 V2 来源引用。"""
++
++    citation_id: str
++    url: str
++    title: str | None = None
++    source: str | None = None
++    published_at: str | None = None
++    source_type: Literal["api", "rss", "public_page", "official", "community"]
++    source_tier: Literal["primary", "secondary", "community"]
++    verification_status: VerificationStatusV2
++    supports_item_ids: list[str] = Field(default_factory=list, max_length=100)
++    independent_source_group: str | None = None
++
++
++class RankedItemV2(_OperationContractV2Model):
++    """排名摘要中的一个类型化候选条目。"""
++
++    item_id: str
++    rank: int = Field(ge=1, le=100)
++    title: str = Field(min_length=1, max_length=500)
++    occurred_at: str | None = None
++    summary: str = Field(min_length=1, max_length=2_000)
++    why_it_matters: str = Field(min_length=1, max_length=1_000)
++    content_angles: list[str] = Field(default_factory=list, max_length=10)
++    metrics: list[str] = Field(default_factory=list, max_length=20)
++    source_refs: list[str] = Field(default_factory=list, max_length=20)
++    confidence: ConfidenceV2
++    verification_status: VerificationStatusV2
++
++
++class RankedDigestContentV2(_OperationContractV2Model):
++    """经过筛选和排序的研究摘要内容。"""
++
++    kind: Literal["ranked_digest"] = "ranked_digest"
++    selection_summary: str = Field(min_length=1, max_length=2_000)
++    ranking_basis: RankingBasisV2
++    items: list[RankedItemV2] = Field(min_length=1, max_length=100)
++
++
++class PlatformContentV2(_OperationContractV2Model):
++    """可直接面向指定平台使用的内容。"""
++
++    kind: Literal["platform_content"] = "platform_content"
++    body_markdown: str = Field(min_length=1, max_length=100_000)
++    hashtags: list[str] = Field(default_factory=list, max_length=100)
++    format_notes: list[str] = Field(default_factory=list, max_length=50)
++
++
++class ActionPhaseV2(_OperationContractV2Model):
++    """行动方案中的一个实施阶段。"""
++
++    phase_id: str
++    title: str
++    actions: list[str] = Field(min_length=1, max_length=50)
++    metrics: list[str] = Field(default_factory=list, max_length=20)
++
++
++class ActionPlanContentV2(_OperationContractV2Model):
++    """面向运营执行的分阶段行动方案。"""
++
++    kind: Literal["action_plan"] = "action_plan"
++    goal: str
++    audience: str
++    phases: list[ActionPhaseV2] = Field(min_length=1, max_length=20)
++    metrics: list[str] = Field(default_factory=list, max_length=50)
++    assumptions: list[str] = Field(default_factory=list, max_length=50)
++
++
++class FindingV2(_OperationContractV2Model):
++    """诊断内容中的一个问题与建议。"""
++
++    finding_id: str
++    title: str
++    evidence: list[str] = Field(default_factory=list, max_length=50)
++    priority: Literal["high", "medium", "low"]
++    recommendation: str
++
++
++class DiagnosisContentV2(_OperationContractV2Model):
++    """运营质量诊断内容。"""
++
++    kind: Literal["diagnosis"] = "diagnosis"
++    findings: list[FindingV2] = Field(min_length=1, max_length=50)
++    data_gaps: list[str] = Field(default_factory=list, max_length=50)
++
++
++class RetrospectiveContentV2(_OperationContractV2Model):
++    """运营结果复盘内容。"""
++
++    kind: Literal["retrospective"] = "retrospective"
++    objectives: list[str] = Field(min_length=1, max_length=50)
++    outcomes: list[str] = Field(default_factory=list, max_length=50)
++    gaps: list[str] = Field(default_factory=list, max_length=50)
++    causes: list[str] = Field(default_factory=list, max_length=50)
++    next_steps: list[str] = Field(min_length=1, max_length=50)
++
++
++OperationContentV2 = Annotated[
++    RankedDigestContentV2
++    | PlatformContentV2
++    | ActionPlanContentV2
++    | DiagnosisContentV2
++    | RetrospectiveContentV2,
++    Field(discriminator="kind"),
++]
++
++
++class WarningV2(_OperationContractV2Model):
++    """面向用户的结构化降级或质量提醒。"""
++
++    code: str = Field(min_length=1, max_length=100)
++    message: str = Field(min_length=1, max_length=1_000)
++
++
++class OperationDeliverableBaseV2(_OperationContractV2Model):
++    """所有 V2 运营交付物共享的展示字段。"""
++
++    contract_version: Literal["deliverable/2"] = "deliverable/2"
++    deliverable_id: str = Field(min_length=1, max_length=100)
++    platform: str = Field(min_length=1, max_length=100)
++    title: str = Field(min_length=1, max_length=500)
++    lead: str = Field(min_length=1, max_length=2_000)
++    citations: list[CitationV2] = Field(default_factory=list, max_length=100)
++    copy_text: str = Field(min_length=1, max_length=100_000)
++    warnings: list[WarningV2] = Field(default_factory=list, max_length=100)
++
++
++class RankedDigestDeliverableV2(OperationDeliverableBaseV2):
++    """排名摘要交付物。"""
++
++    deliverable_kind: Literal["ranked_digest"] = "ranked_digest"
++    content: RankedDigestContentV2
++
++
++class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
++    """平台内容交付物。"""
++
++    deliverable_kind: Literal["platform_content"] = "platform_content"
++    content: PlatformContentV2
++
++
++class ActionPlanDeliverableV2(OperationDeliverableBaseV2):
++    """行动方案交付物。"""
++
++    deliverable_kind: Literal["action_plan"] = "action_plan"
++    content: ActionPlanContentV2
++
++
++class DiagnosisDeliverableV2(OperationDeliverableBaseV2):
++    """质量诊断交付物。"""
++
++    deliverable_kind: Literal["diagnosis"] = "diagnosis"
++    content: DiagnosisContentV2
++
++
++class RetrospectiveDeliverableV2(OperationDeliverableBaseV2):
++    """运营复盘交付物。"""
++
++    deliverable_kind: Literal["retrospective"] = "retrospective"
++    content: RetrospectiveContentV2
++
++
++OperationDeliverableV2 = Annotated[
++    RankedDigestDeliverableV2
++    | PlatformContentDeliverableV2
++    | ActionPlanDeliverableV2
++    | DiagnosisDeliverableV2
++    | RetrospectiveDeliverableV2,
++    Field(discriminator="deliverable_kind"),
++]
++
++
++class DeliverySummaryV2(_OperationContractV2Model):
++    """面向用户的 V2 交付完成摘要。"""
++
++    message: str
++    result_count: int = Field(ge=0)
++    complete: bool
++
++
++class DeliveryProvenanceV2(_OperationContractV2Model):
++    """研究收集与筛选过程的可审计计数和时间窗。"""
++
++    source_count: int = Field(ge=0)
++    verified_source_count: int = Field(ge=0)
++    candidate_count: int = Field(ge=0)
++    merged_event_count: int = Field(ge=0)
++    retained_count: int = Field(ge=0)
++    eliminated_count: int = Field(ge=0)
++    collection_window_start: datetime | None = None
++    collection_window_end: datetime | None = None
++    ranking_basis: RankingBasisV2 | None = None
++
++    @model_validator(mode="after")
++    def validate_invariants(self) -> DeliveryProvenanceV2:
++        """校验来源计数和 UTC 收集时间窗不变量。"""
++
++        if self.verified_source_count > self.source_count:
++            raise ValueError("已核验来源数不得超过来源总数")
++        start = self.collection_window_start
++        end = self.collection_window_end
++        if (start is None) != (end is None):
++            raise ValueError("收集时间窗起止必须同时为空或同时存在")
++        if start is None or end is None:
++            return self
++        if start.utcoffset() != timedelta(0) or end.utcoffset() != timedelta(0):
++            raise ValueError("收集时间窗必须使用 UTC aware datetime")
++        if start >= end:
++            raise ValueError("收集时间窗开始时间必须早于结束时间")
++        return self
++
++
++class NextActionV2(_OperationContractV2Model):
++    """只生成下一轮输入、不自动执行的建议动作。"""
++
++    action_id: str
++    action_type: NextActionTypeV2
++    label: str
++    target_deliverable_id: str | None = None
++    target_item_ids: list[str] = Field(default_factory=list)
++    intent_patch: dict[str, JsonValue] = Field(default_factory=dict, max_length=50)
++    requires_user_input: bool
++
++
++class DeliverableSetV2(_OperationContractV2Model):
++    """一次运营任务的完整 V2 结构化交付集合。"""
++
++    contract_version: Literal["deliverable-set/2"] = "deliverable-set/2"
++    run_id: str
++    intent_revision: int = Field(ge=0)
++    summary: DeliverySummaryV2
++    deliverables: list[OperationDeliverableV2] = Field(max_length=20)
++    next_actions: list[NextActionV2] = Field(default_factory=list, max_length=20)
++    provenance: DeliveryProvenanceV2 | None = None
++    degraded: bool = False
++    warnings: list[WarningV2] = Field(default_factory=list, max_length=100)
++
++
++DeliverableSet = Annotated[
++    DeliverableSetV1 | DeliverableSetV2,
++    Field(discriminator="contract_version"),
++]
++
++
++__all__ = [
++    "ActionPhaseV2",
++    "ActionPlanContentV2",
++    "ActionPlanDeliverableV2",
++    "CitationV1",
++    "CitationV2",
++    "ConfidenceV2",
++    "DeliverableSet",
++    "DeliverableSetV1",
++    "DeliverableSetV2",
++    "DeliverableV1",
++    "DeliveryProvenanceV2",
++    "DeliverySummaryV2",
++    "DiagnosisContentV2",
++    "DiagnosisDeliverableV2",
++    "FindingV2",
++    "NextActionTypeV2",
++    "NextActionV2",
++    "OperationContentV2",
++    "OperationDeliverableBaseV2",
++    "OperationDeliverableV2",
++    "PlatformContentDeliverableV2",
++    "PlatformContentV2",
++    "RankedDigestContentV2",
++    "RankedDigestDeliverableV2",
++    "RankedItemV2",
++    "RankingBasisV2",
++    "RetrospectiveContentV2",
++    "RetrospectiveDeliverableV2",
++    "VerificationStatusV2",
++    "WarningV2",
++]
+
+src\efficiency_platform_agent\agents\operation\delivery_kind.py	1826 bytes	SHA256 3135FF11B726FE899352E1E826A37F2E9D82494674036F574A872B63D14B894A
+
+DIFF src\efficiency_platform_agent\agents\operation\delivery_kind.py
+--- a/src\efficiency_platform_agent\agents\operation\delivery_kind.py
++++ b/src\efficiency_platform_agent\agents\operation\delivery_kind.py
+@@ -0,0 +1,50 @@
++"""运营 Specialist 能力到 V2 交付类型的稳定映射。"""
++
++from __future__ import annotations
++
++from typing import Literal
++
++from efficiency_platform_agent.agents.operation.definition import (
++    OperationSpecialistCapabilityId,
++)
++
++DeliverableKindV2 = Literal[
++    "ranked_digest",
++    "platform_content",
++    "action_plan",
++    "diagnosis",
++    "retrospective",
++]
++
++_KIND_BY_CAPABILITY: dict[OperationSpecialistCapabilityId, DeliverableKindV2] = {
++    OperationSpecialistCapabilityId.RESEARCH_INSIGHT: "ranked_digest",
++    OperationSpecialistCapabilityId.CONTENT_CREATE: "platform_content",
++    OperationSpecialistCapabilityId.CHANNEL_CONTENT: "platform_content",
++    OperationSpecialistCapabilityId.BRAND_STRATEGY: "action_plan",
++    OperationSpecialistCapabilityId.IP_STRATEGY: "action_plan",
++    OperationSpecialistCapabilityId.PRODUCT_PLAN: "action_plan",
++    OperationSpecialistCapabilityId.CAMPAIGN_PLAN: "action_plan",
++    OperationSpecialistCapabilityId.USER_GROWTH_PLAN: "action_plan",
++    OperationSpecialistCapabilityId.COMMUNITY_PLAN: "action_plan",
++    OperationSpecialistCapabilityId.QUALITY_REVIEW: "diagnosis",
++    OperationSpecialistCapabilityId.ANALYTICS_REVIEW: "retrospective",
++}
++
++
++def deliverable_kind_for(
++    capability_id: OperationSpecialistCapabilityId | str,
++    platform: str,
++    research: bool,
++) -> DeliverableKindV2:
++    """返回能力对应的交付类型，未知能力失败关闭。"""
++
++    if research and platform == "research":
++        return "ranked_digest"
++    try:
++        normalized_capability_id = OperationSpecialistCapabilityId(capability_id)
++        return _KIND_BY_CAPABILITY[normalized_capability_id]
++    except (KeyError, ValueError) as exc:
++        raise ValueError("DELIVERABLE_KIND_UNSUPPORTED") from exc
++
++
++__all__ = ["DeliverableKindV2", "deliverable_kind_for"]
+
+tests\contracts\test_deliverable_v2_contracts.py	7191 bytes	SHA256 6ED00B2FD1996ED8990185D7C6515112809EFCC46B19C442DAA38E3FC0C1567E
+
+DIFF tests\contracts\test_deliverable_v2_contracts.py
+--- a/tests\contracts\test_deliverable_v2_contracts.py
++++ b/tests\contracts\test_deliverable_v2_contracts.py
+@@ -0,0 +1,214 @@
++"""运营 Deliverable V2 契约的判别、边界与不变量测试。"""
++
++from __future__ import annotations
++
++from copy import deepcopy
++from datetime import UTC, datetime
++from typing import Any
++
++import pytest
++from pydantic import TypeAdapter, ValidationError
++
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSet,
++    DeliverableSetV1,
++    DeliverableSetV2,
++    NextActionTypeV2,
++    NextActionV2,
++)
++
++
++def ranked_digest_payload() -> dict[str, Any]:
++    """返回不依赖网络的完整 V2 排名摘要样本。"""
++
++    return {
++        "contract_version": "deliverable-set/2",
++        "run_id": "run-1",
++        "intent_revision": 0,
++        "summary": {
++            "message": "已完成候选事件排序。",
++            "result_count": 1,
++            "complete": True,
++        },
++        "deliverables": [
++            {
++                "contract_version": "deliverable/2",
++                "deliverable_id": "deliverable-1",
++                "deliverable_kind": "ranked_digest",
++                "platform": "research",
++                "title": "本周热点摘要",
++                "lead": "按重要性与时效性筛选出一个候选事件。",
++                "citations": [
++                    {
++                        "citation_id": "citation-1",
++                        "url": "https://example.com/article",
++                        "title": "示例来源",
++                        "source": "示例站点",
++                        "published_at": "2026-09-16T08:00:00Z",
++                        "source_type": "official",
++                        "source_tier": "primary",
++                        "verification_status": "verified",
++                        "supports_item_ids": ["item-1"],
++                        "independent_source_group": "example.com",
++                    }
++                ],
++                "content": {
++                    "kind": "ranked_digest",
++                    "selection_summary": "保留一个已核验候选事件。",
++                    "ranking_basis": "mixed",
++                    "items": [
++                        {
++                            "item_id": "item-1",
++                            "rank": 1,
++                            "title": "示例事件",
++                            "occurred_at": "2026-09-16T08:00:00Z",
++                            "summary": "这是用于契约测试的离线事件摘要。",
++                            "why_it_matters": "它可以验证类型化排名条目与引用关系。",
++                            "content_angles": ["契约治理"],
++                            "metrics": ["来源数=1"],
++                            "source_refs": ["citation-1"],
++                            "confidence": "high",
++                            "verification_status": "verified",
++                        }
++                    ],
++                },
++                "copy_text": "1. 示例事件：这是用于契约测试的离线事件摘要。",
++                "warnings": [],
++            }
++        ],
++        "next_actions": [],
++        "provenance": {
++            "source_count": 1,
++            "verified_source_count": 1,
++            "candidate_count": 1,
++            "merged_event_count": 1,
++            "retained_count": 1,
++            "eliminated_count": 0,
++            "collection_window_start": "2026-09-15T00:00:00Z",
++            "collection_window_end": "2026-09-17T00:00:00Z",
++            "ranking_basis": "mixed",
++        },
++        "degraded": False,
++        "warnings": [],
++    }
++
++
++def test_ranked_digest_v2_requires_typed_items_and_rejects_unknown_fields() -> None:
++    payload = ranked_digest_payload()
++
++    parsed = DeliverableSetV2.model_validate(payload)
++
++    assert parsed.deliverables[0].content.kind == "ranked_digest"
++    payload["deliverables"][0]["content"]["unexpected"] = True
++    with pytest.raises(ValidationError):
++        DeliverableSetV2.model_validate(payload)
++
++
++def test_deliverable_v2_rejects_discriminator_mismatch() -> None:
++    payload = ranked_digest_payload()
++    payload["deliverables"][0]["deliverable_kind"] = "platform_content"
++
++    with pytest.raises(ValidationError):
++        DeliverableSetV2.model_validate(payload)
++
++
++def test_deliverable_set_union_dispatches_only_by_contract_version() -> None:
++    adapter: TypeAdapter[DeliverableSet] = TypeAdapter(DeliverableSet)
++
++    parsed = adapter.validate_python(ranked_digest_payload())
++
++    assert isinstance(parsed, DeliverableSetV2)
++    v1 = adapter.validate_python(
++        {
++            "contract_version": "deliverable-set/1",
++            "deliverables": [],
++            "summary": "既有 V1 仍可解析",
++            "degraded": False,
++        }
++    )
++    assert isinstance(v1, DeliverableSetV1)
++
++
++@pytest.mark.parametrize(
++    "action_type",
++    [
++        "rewrite_for_platform",
++        "expand_item",
++        "generate_script",
++        "replace_candidates",
++        "show_sources",
++        "refine_constraints",
++    ],
++)
++def test_next_action_accepts_every_registered_action_type(
++    action_type: NextActionTypeV2,
++) -> None:
++    action = NextActionV2(
++        action_id="action-1",
++        action_type=action_type,
++        label="继续处理",
++        target_deliverable_id=None,
++        target_item_ids=[],
++        intent_patch={"platform": "xiaohongshu", "research": True},
++        requires_user_input=False,
++    )
++
++    assert action.action_type == action_type
++
++
++def test_next_action_takes_an_isolated_strict_json_snapshot() -> None:
++    intent_patch = {"nested": {"items": ["first"]}}
++    action = NextActionV2(
++        action_id="action-1",
++        action_type="refine_constraints",
++        label="调整约束",
++        target_deliverable_id=None,
++        target_item_ids=[],
++        intent_patch=intent_patch,
++        requires_user_input=True,
++    )
++
++    intent_patch["nested"]["items"].append("later")
++
++    assert action.intent_patch == {"nested": {"items": ["first"]}}
++    with pytest.raises(ValidationError):
++        NextActionV2(
++            action_id="action-2",
++            action_type="refine_constraints",
++            label="调整约束",
++            target_deliverable_id=None,
++            target_item_ids=[],
++            intent_patch={"not_json": datetime.now(UTC)},
++            requires_user_input=True,
++        )
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("verified_source_count", 2),
++        ("collection_window_end", None),
++        ("collection_window_end", "2026-09-14T00:00:00Z"),
++        ("collection_window_start", "2026-09-15T00:00:00"),
++    ],
++)
++def test_provenance_rejects_invalid_counts_and_time_windows(
++    field: str, value: object
++) -> None:
++    payload = ranked_digest_payload()
++    payload["provenance"][field] = value
++
++    with pytest.raises(ValidationError):
++        DeliverableSetV2.model_validate(payload)
++
++
++def test_v2_models_are_frozen_and_do_not_share_input_state() -> None:
++    payload = ranked_digest_payload()
++    parsed = DeliverableSetV2.model_validate(payload)
++    original = deepcopy(parsed.model_dump())
++
++    payload["deliverables"][0]["content"]["items"][0]["title"] = "后改标题"
++
++    assert parsed.model_dump() == original
++    with pytest.raises(ValidationError):
++        parsed.degraded = True
+
+tests\unit\agents\operation\test_delivery_kind.py	1486 bytes	SHA256 17875DA7F64EA7EF75FB0BC9CF0904B94F1DDC9DB32B18AE0DE0D9ECE90E6F60
+
+DIFF tests\unit\agents\operation\test_delivery_kind.py
+--- a/tests\unit\agents\operation\test_delivery_kind.py
++++ b/tests\unit\agents\operation\test_delivery_kind.py
+@@ -0,0 +1,51 @@
++"""运营 Specialist 到 V2 交付类型的稳定映射测试。"""
++
++from __future__ import annotations
++
++import pytest
++
++from efficiency_platform_agent.agents.operation.definition import (
++    OperationSpecialistCapabilityId,
++)
++from efficiency_platform_agent.agents.operation.delivery_kind import (
++    deliverable_kind_for,
++)
++
++
++def test_specialist_capability_maps_to_stable_delivery_kind() -> None:
++    assert (
++        deliverable_kind_for("operation.research.insight", "research", True)
++        == "ranked_digest"
++    )
++    assert (
++        deliverable_kind_for("operation.channel.content", "xiaohongshu", False)
++        == "platform_content"
++    )
++    assert (
++        deliverable_kind_for("operation.campaign.plan", "活动策划", False)
++        == "action_plan"
++    )
++    assert (
++        deliverable_kind_for("operation.quality.review", "内容诊断", False)
++        == "diagnosis"
++    )
++    assert (
++        deliverable_kind_for("operation.analytics.review", "运营复盘", False)
++        == "retrospective"
++    )
++
++
++def test_delivery_kind_accepts_the_canonical_capability_enum() -> None:
++    assert (
++        deliverable_kind_for(
++            OperationSpecialistCapabilityId.CONTENT_CREATE,
++            "wechat",
++            False,
++        )
++        == "platform_content"
++    )
++
++
++def test_unknown_capability_fails_closed() -> None:
++    with pytest.raises(ValueError, match="^DELIVERABLE_KIND_UNSUPPORTED$"):
++        deliverable_kind_for("operation.unknown", "unknown", False)
+
+docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md	5464 bytes	SHA256 F7200291642F304051B10F8CEA459AD64052B637670AA741080B7D9003814C00
+
+DIFF docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+--- a/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
++++ b/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+@@ -0,0 +1,99 @@
++# 运营 Agent 专业化交付与质量闭环进度
++
++| 属性 | 内容 |
++|---|---|
++| 状态 | 实施中；Task 1 已完成离线验证 |
++| 负责人 | Agent 平台实施负责人 |
++| 适用范围 | 纯 Agent 侧运营交付契约、质量闭环与离线测试 |
++| 更新时间 | 2026-09-17 |
++| 关联计划 | [运营 Agent 专业化交付与质量闭环实施计划](../plans/2026-09-17-运营Agent专业化交付与质量闭环-实施计划.md) |
++
++> 本账本按任务顺序只追加记录，不覆盖历史。本项目永久不是 Git 仓库；所有任务均以文件快照、命令输出和本账本作为变更证据。
++
++## Task 1：冻结 Deliverable V2 契约与交付类型映射
++
++### 实施结果
++
++- 新增基于 `OperationSpecialistCapabilityId` 唯一目录的 11 项能力到 5 类 V2 交付类型映射；未知能力以 `DELIVERABLE_KIND_UNSUPPORTED` 失败关闭。
++- 新增排名摘要、平台内容、行动方案、诊断和复盘五类具体内容与交付模型，并分别以 `kind` 和 `deliverable_kind` 作为判别字段。
++- 新增 V2 摘要、来源、后续动作、provenance 和集合契约；所有 V2 模型统一使用 `extra="forbid"` 与 `frozen=True`。
++- `NextActionV2.intent_patch` 复用严格 `JsonValue`，拒绝 datetime 等非 JSON Python 对象并隔离输入快照。
++- provenance 校验非负计数、已核验来源数上界、成对 UTC aware 时间窗及严格递增时间区间。
++- 新增 `DeliverableSet` 版本判别联合，仅由 `contract_version` 在 V1/V2 间分派。
++
++### RED 证据
++
++命令：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py -q
++```
++
++结果：退出码 `1`，收集阶段按预期失败。关键输出：
++
++```text
++ImportError: cannot import name 'DeliverableSet' from 'efficiency_platform_agent.contracts.deliverables'
++ModuleNotFoundError: No module named 'efficiency_platform_agent.agents.operation.delivery_kind'
++2 errors in 0.66s
++```
++
++### GREEN 与回归证据
++
++目标测试：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py -q
++```
++
++结果：退出码 `0`，`18 passed in 0.47s`。
++
++最终契约回归：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py tests/contracts/test_stream_event_contracts.py -q
++```
++
++结果：退出码 `0`，`38 passed in 0.48s`。
++
++全量回归：
++
++```powershell
++.venv\Scripts\python.exe -m pytest -q
++```
++
++结果：退出码 `0`，`1585 passed, 9 skipped, 2 warnings, 280 subtests passed in 54.71s`。两条 warning 来自既有 Starlette deprecated alias 与 Polars Excel future behavior，不在 Task 1 修改路径内。
++
++质量门禁：
++
++```powershell
++.venv\Scripts\python.exe -m pytest tests/architecture/test_dependency_rules.py -q
++.venv\Scripts\python.exe -m compileall -q src tests
++.venv\Scripts\python.exe -m ruff check src/efficiency_platform_agent/contracts/deliverables.py src/efficiency_platform_agent/agents/operation/delivery_kind.py tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py
++.venv\Scripts\python.exe -m ruff format --check src/efficiency_platform_agent/contracts/deliverables.py src/efficiency_platform_agent/agents/operation/delivery_kind.py tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py
++.venv\Scripts\python.exe -m mypy src/efficiency_platform_agent/contracts/deliverables.py src/efficiency_platform_agent/agents/operation/delivery_kind.py tests/contracts/test_deliverable_v2_contracts.py tests/unit/agents/operation/test_delivery_kind.py
++```
++
++结果依次为：`12 passed, 47 subtests passed`；源码编译退出码 `0`；`All checks passed!`；`4 files already formatted`；`Success: no issues found in 4 source files`。
++
++### DeliverableSetV1 保持性检查
++
++- `CitationV1`、`DeliverableV1`、`DeliverableSetV1` 三个类的原有字段、约束、默认值与类体未修改；V2 代码追加在 V1 定义之后。
++- AST 源码快照检查：`V1_CLASS_COUNT=3`，三类合并源码 SHA256 为 `37E7B7906FA293619EE439D92D6EFE81A3B2DC0134C6F38D3EE146F8E4F260A4`。
++- 既有 `tests/contracts/test_stream_event_contracts.py` 单独回归为 `20 passed in 0.44s`；联合回归亦通过。
++
++### 文件快照清单
++
++| 文件 | SHA256 / 状态 |
++|---|---|
++| `src/efficiency_platform_agent/contracts/deliverables.py` | `6F32D06E8613D224C391448476FFBA42F139512B6613D322741E0AEDF1A8BD49` |
++| `src/efficiency_platform_agent/agents/operation/delivery_kind.py` | `3135FF11B726FE899352E1E826A37F2E9D82494674036F574A872B63D14B894A` |
++| `tests/contracts/test_deliverable_v2_contracts.py` | `6ED00B2FD1996ED8990185D7C6515112809EFCC46B19C442DAA38E3FC0C1567E` |
++| `tests/unit/agents/operation/test_delivery_kind.py` | `17875DA7F64EA7EF75FB0BC9CF0904B94F1DDC9DB32B18AE0DE0D9ECE90E6F60` |
++| 本进度账本 | 已创建；后续任务只追加 |
++| `docs/superpowers/progress/sdd/agent-task-1-report.md` | 已创建独立实施报告 |
++
++### 边界与遗留
++
++- 本任务仅冻结离线契约与映射，未接入网络、Provider、数据库、Java/UI 或生产运行时。
++- 未执行任何 Git 命令，也未创建提交。
++- 任务内无阻断担忧；全量回归保留两条既有依赖 warning，后续应由对应组件任务治理。
+

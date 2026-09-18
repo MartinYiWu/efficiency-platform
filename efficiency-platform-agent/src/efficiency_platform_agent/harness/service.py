@@ -6,9 +6,12 @@ import asyncio
 import copy
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from time import perf_counter
 from typing import Any, cast
 
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV1,
+    DeliverableSetV2,
+)
 from efficiency_platform_agent.contracts.events import EventType, RunEventV1
 from efficiency_platform_agent.contracts.requests import (
     CancelRunRequestV1,
@@ -21,7 +24,10 @@ from efficiency_platform_agent.contracts.responses import (
     RunViewV1,
     UsageV1,
 )
-from efficiency_platform_agent.contracts.stream_events import StreamEventName
+from efficiency_platform_agent.contracts.stream_events import (
+    OperationVisiblePhase,
+    StreamEventName,
+)
 from efficiency_platform_agent.core.budget import (
     BudgetCharge,
     BudgetExhaustedError,
@@ -66,6 +72,9 @@ from efficiency_platform_agent.routing.strategy_router import (
     StrategyRouter,
 )
 from efficiency_platform_agent.runtime.event_hub import EventHub
+from efficiency_platform_agent.runtime.operation_progress import (
+    bind_operation_progress,
+)
 
 from .errors import HarnessError, normalize_error
 
@@ -151,51 +160,6 @@ def _budget_dict(state: BudgetState) -> dict[str, Any]:
     }
 
 
-_RESEARCH_MARKERS = frozenset(
-    {
-        "搜索",
-        "收集",
-        "检索",
-        "联网",
-        "热点",
-        "新闻",
-        "动态",
-        "最新",
-        "近期",
-        "最近",
-        "来源",
-    }
-)
-_NEGATED_RESEARCH_MARKERS = frozenset(
-    {"不需要联网", "无需联网", "不用联网", "不联网", "无需搜索", "不要联网"}
-)
-
-
-def _operation_requires_research(text: str) -> bool:
-    """仅依据用户可见文本识别明确研究请求，不把模型内部状态带入事件。"""
-
-    normalized = text.strip().lower()
-    if any(marker in normalized for marker in _NEGATED_RESEARCH_MARKERS):
-        return False
-    return bool(normalized) and any(marker in normalized for marker in _RESEARCH_MARKERS)
-
-
-def _phase_count(result: GraphExecutionResult, *, default: int = 1) -> int:
-    """从已治理图结果提取数量摘要，提取失败时使用稳定的最小值。"""
-
-    if result.output is None:
-        return 0
-    output = _plain(result.output)
-    if not isinstance(output, Mapping):
-        return default
-    deliverable_set = output.get("deliverable_set")
-    if isinstance(deliverable_set, Mapping):
-        deliverables = deliverable_set.get("deliverables")
-        if isinstance(deliverables, (list, tuple)):
-            return len(deliverables)
-    return default
-
-
 class AgentRuntimeService:
     """S2 Harness 的唯一公开运行服务。"""
 
@@ -235,6 +199,7 @@ class AgentRuntimeService:
         self._realtime_output_run_tenants: dict[str, str] = {}
         self._realtime_output_runs: set[str] = set()
         self._assistant_started_runs: set[str] = set()
+        self._published_operation_phases: dict[str, set[OperationVisiblePhase]] = {}
         self._run_event_listeners: list[
             Callable[[RunEventRecord], Awaitable[None]]
         ] = []
@@ -328,7 +293,9 @@ class AgentRuntimeService:
             run_id=record.run_id, request_id=original.request_id
         ):
             try:
-                return await self._prepare_and_execute_pipeline(record, original, prepare)
+                return await self._prepare_and_execute_pipeline(
+                    record, original, prepare
+                )
             except Exception as error:  # noqa: BLE001 - 准备阶段不得泄露模型异常
                 self._record_exception(
                     "pipeline_preparation_failed", "PIPELINE_PREPARATION_FAILED", error
@@ -632,7 +599,9 @@ class AgentRuntimeService:
     ) -> RunViewV1 | None:
         """执行已排队 Run，并将后台边界异常归一化为失败状态。"""
 
-        with bind_diagnostic_context(run_id=record.run_id, request_id=request.request_id):
+        with bind_diagnostic_context(
+            run_id=record.run_id, request_id=request.request_id
+        ):
             try:
                 return await self._execute_queued(record, request)
             except Exception as error:  # noqa: BLE001 - 后台任务不得泄露未观察异常
@@ -642,7 +611,9 @@ class AgentRuntimeService:
                     getattr(error, "code", "BACKGROUND_EXECUTION_FAILED"),
                     error,
                     stage="background.execute",
-                    strategy=(current.strategy if current is not None else record.strategy),
+                    strategy=(
+                        current.strategy if current is not None else record.strategy
+                    ),
                 )
                 return await self._settle_background_failure(record, request, error)
 
@@ -656,28 +627,23 @@ class AgentRuntimeService:
         ):
             return await self._execute_queued_with_context(record, request)
 
-    async def _publish_operation_phase(
+    async def _publish_bound_operation_progress(
         self,
         run_id: str,
         event: StreamEventName,
-        *,
-        phase: str,
-        count: int = 0,
-        duration_ms: int = 0,
-        degraded: bool = False,
-        error_code: str | None = None,
+        phase: OperationVisiblePhase,
+        payload: Mapping[str, Any],
     ) -> None:
-        """发布不含内部实现细节的运营阶段摘要。"""
+        """只发布当前 Run 真实节点报告的安全阶段，并对开始事件去重。"""
 
-        payload: dict[str, Any] = {
-            "phase": phase,
-            "count": max(0, count),
-            "duration_ms": max(0, duration_ms),
-            "degraded": degraded,
-        }
-        if error_code is not None:
-            payload["error_code"] = error_code
-        await self.event_hub.publish_next(run_id, event, payload)
+        if event == "phase_started":
+            published = self._published_operation_phases.setdefault(run_id, set())
+            if phase in published:
+                return
+            published.add(phase)
+        await self.event_hub.publish_next(
+            run_id, event, {**dict(payload), "phase": phase}
+        )
 
     async def _execute_queued_with_context(
         self, record: RunRecord, request: CreateRunRequestV1
@@ -744,26 +710,6 @@ class AgentRuntimeService:
             )
             self._realtime_output_run_tenants[record.run_id] = request.tenant_id
             await self._event(record, "run_started")
-            await self.event_hub.publish_next(
-                record.run_id, "phase_started", {"phase": "scenario_execution"}
-            )
-            operation_request = selection.mode is StrategyMode.MULTI_AGENT
-            research_request = operation_request and _operation_requires_research(
-                request.input_text
-            )
-            phase_started_at = perf_counter()
-            if research_request:
-                await self._publish_operation_phase(
-                    record.run_id,
-                    "research_started",
-                    phase="research",
-                )
-            elif operation_request:
-                await self._publish_operation_phase(
-                    record.run_id,
-                    "content_generation_started",
-                    phase="content_generation",
-                )
             state: dict[str, object] = {
                 "run_id": record.run_id,
                 "tenant_id": request.tenant_id,
@@ -789,7 +735,18 @@ class AgentRuntimeService:
                 "next_status": None,
             }
             with bind_diagnostic_context(strategy=selection.mode.value):
-                result = await self.graph_runtime.execute(selection, state)
+
+                async def publish_progress(
+                    event: StreamEventName,
+                    phase: OperationVisiblePhase,
+                    payload: Mapping[str, Any],
+                ) -> None:
+                    await self._publish_bound_operation_progress(
+                        record.run_id, event, phase, payload
+                    )
+
+                with bind_operation_progress(publish_progress):
+                    result = await self.graph_runtime.execute(selection, state)
                 # 取消请求一旦被受理，晚到的图结果不得覆盖取消终态。
                 if await self._is_cancelled(record.run_id) and isinstance(
                     result, GraphExecutionResult
@@ -807,39 +764,6 @@ class AgentRuntimeService:
                     != record.budget_state.deadline_epoch_ms
                 ):
                     result = replace(result, budget_state=record.budget_state)
-                if operation_request and result.next_status is RunStatus.SUCCEEDED:
-                    elapsed_ms = int((perf_counter() - phase_started_at) * 1000)
-                    if research_request:
-                        await self._publish_operation_phase(
-                            record.run_id,
-                            "research_completed",
-                            phase="research",
-                            count=1,
-                            duration_ms=elapsed_ms,
-                            degraded=result.degraded,
-                        )
-                        await self._publish_operation_phase(
-                            record.run_id,
-                            "content_generation_started",
-                            phase="content_generation",
-                        )
-                    deliverable_count = _phase_count(result, default=1)
-                    await self._publish_operation_phase(
-                        record.run_id,
-                        "content_generation_completed",
-                        phase="content_generation",
-                        count=deliverable_count,
-                        duration_ms=elapsed_ms,
-                        degraded=result.degraded,
-                    )
-                    await self._publish_operation_phase(
-                        record.run_id,
-                        "quality_checked",
-                        phase="quality_check",
-                        count=deliverable_count,
-                        duration_ms=elapsed_ms,
-                        degraded=result.degraded,
-                    )
                 return await self._apply_graph_result(record, result)
         except HarnessError:
             raise
@@ -1027,6 +951,7 @@ class AgentRuntimeService:
         self._assistant_started_runs.discard(record.run_id)
         if target is not RunStatus.WAITING_INPUT:
             self._pipeline_usage.pop(record.run_id, None)
+            self._published_operation_phases.pop(record.run_id, None)
         return view
 
     async def get_run(self, run_id: str, tenant_id: str) -> RunViewV1:
@@ -1349,10 +1274,38 @@ class AgentRuntimeService:
                     )
         deliverable_set = output.get("deliverable_set")
         if isinstance(deliverable_set, Mapping):
+            delivery_version = output.get("delivery_contract_version")
+            if delivery_version is None:
+                delivery_version = deliverable_set.get(
+                    "contract_version", "deliverable-set/1"
+                )
+            try:
+                if delivery_version == "deliverable-set/2":
+                    validated = DeliverableSetV2.model_validate(
+                        dict(deliverable_set)
+                    ).model_dump(mode="json")
+                elif delivery_version == "deliverable-set/1":
+                    validated = DeliverableSetV1.model_validate(
+                        dict(deliverable_set)
+                    ).model_dump(mode="json")
+                else:
+                    raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
+            except (TypeError, ValueError):
+                await self.event_hub.publish_next(
+                    record.run_id,
+                    "stream_error",
+                    {
+                        "code": "DELIVERABLE_SET_INVALID",
+                        "category": "presentation",
+                        "retryable": False,
+                        "safe_message": "交付结果校验失败",
+                    },
+                )
+                return True
             await self.event_hub.publish_next(
                 record.run_id,
                 "deliverable",
-                {"deliverable_set": dict(deliverable_set)},
+                {"deliverable_set": validated},
             )
         return presentation_degraded
 

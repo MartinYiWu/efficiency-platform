@@ -1,0 +1,494 @@
+"""通过真实 Supervisor 验证 V2 集合聚合与显式输出版本。"""
+
+import json
+
+import pytest
+
+from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
+from efficiency_platform_agent.core.multi_agent import CompletionStatus
+from efficiency_platform_agent.core.run import (
+    ProviderMessage,
+    ProviderResult,
+    ProviderUsage,
+)
+from efficiency_platform_agent.harness.operation_agent_factory import (
+    build_operation_agent,
+)
+from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+from tests.integration.test_operation_agent_runtime import (
+    ContentProvider,
+    Selector,
+    submission,
+)
+
+
+class ContentProviderV2:
+    """提供平台独立的严格 V2 模型草稿。"""
+
+    descriptor = None
+
+    def __init__(self, failed_platform=None):
+        self.failed_platform = failed_platform
+        self.calls = []
+
+    async def complete(self, request):
+        raw = json.loads(request.messages[-1].content)
+        self.calls.append(raw)
+        if raw["platform"] == self.failed_platform:
+            raise RuntimeError("离线平台故障")
+        value = {
+            "contract_version": "deliverable/2",
+            "deliverable_id": raw["deliverable_id"],
+            "deliverable_kind": "platform_content",
+            "platform": raw["platform"],
+            "title": raw["platform"] + " 发布内容",
+            "lead": "面向渠道的独立发布内容",
+            "content": {
+                "kind": "platform_content",
+                "body_markdown": raw["platform"] + " 专属正文。",
+                "hashtags": ["#新品"],
+                "format_notes": [],
+            },
+            "citations": [],
+            "copy_text": "",
+            "warnings": [],
+        }
+        return ProviderResult(
+            "operation-model/1",
+            ProviderMessage("assistant", json.dumps(value, ensure_ascii=False)),
+            ProviderUsage(10, 20, 0, 0, 0),
+        )
+
+
+def build_test_agent(provider=None, **kwargs):
+    registry = ModelProviderRegistry()
+    registry.register("offline", provider or ContentProviderV2())
+    return build_operation_agent(ModelRuntime(Selector(), registry), **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_new_run_defaults_to_complete_v2_collection():
+    result = await build_test_agent().execute(submission(), run_id="run-v2-default")
+    assert isinstance(result.deliverables, DeliverableSetV2)
+    assert result.deliverables.run_id == "run-v2-default"
+    assert result.status is CompletionStatus.COMPLETE
+    assert len(result.deliverables.deliverables) == 3
+    assert result.deliverables.summary.result_count == 3
+    assert result.deliverables.summary.complete
+    assert all(
+        item.contract_version == "deliverable/2"
+        for item in result.deliverables.deliverables
+    )
+
+
+@pytest.mark.asyncio
+async def test_operation_agent_returns_v2_and_preserves_partial_results():
+    result = await build_test_agent(
+        ContentProviderV2(failed_platform="toutiao"),
+        deliverable_set_contract_version="deliverable-set/2",
+    ).execute(submission(), run_id="run-v2-partial")
+    assert isinstance(result.deliverables, DeliverableSetV2)
+    assert result.status is CompletionStatus.PARTIAL
+    assert result.deliverables.degraded
+    assert len(result.deliverables.deliverables) == 2
+    assert not result.deliverables.summary.complete
+    assert result.deliverables.warnings
+
+
+async def test_verified_research_pack_reaches_ranked_item_and_source_provenance():
+    source, research, service, _ = research_case("PARTIAL")
+    pack = service.outcome.delivery
+    event = pack.events[0]
+    citation = event.citations[0].model_copy(
+        update={
+            "verification_status": "verified",
+            "content_scope": "platform_text",
+            "content_hash": "a" * 64,
+            "acquisition_method": "api",
+            "independent_source_group": "official-owner",
+        }
+    )
+    pack = pack.model_copy(
+        update={
+            "output_verified": True,
+            "quality_report_id": "quality-test",
+            "events": (event.model_copy(update={"citations": (citation,)}),),
+        }
+    )
+    service.outcome = service.outcome.model_copy(update={"delivery": pack})
+    result = await build_test_agent(research_provider=research).execute(
+        source, run_id="run-research-v2"
+    )
+    value = result.deliverables
+    item = value.deliverables[0].content.items[0]
+    ref = value.deliverables[0].citations[0]
+    assert item.verification_status == "verified"
+    assert ref.verification_status == "verified"
+    assert ref.content_scope == "platform_text"
+    assert ref.excerpt == citation.excerpt
+    assert ref.content_hash == citation.content_hash
+    assert ref.source_type == "api"
+    assert ref.document_id == citation.document_id
+    assert ref.independent_source_group == "official-owner"
+    assert item.source_refs == [ref.citation_id]
+    assert ref.supports_item_ids == [item.item_id]
+    assert value.provenance.verified_source_count == 1
+    assert result.status is CompletionStatus.PARTIAL and not value.summary.complete
+
+
+@pytest.mark.asyncio
+async def test_operation_agent_keeps_native_v1_only_when_configured():
+    result = await build_test_agent(
+        ContentProvider(),
+        deliverable_set_contract_version="deliverable-set/1",
+    ).execute(submission(), run_id="run-v1-projection")
+    assert result.deliverables is not None
+    assert result.deliverables.contract_version == "deliverable-set/1"
+    assert "专属内容" in result.deliverables.deliverables[0].body
+
+
+def test_unknown_collection_version_is_rejected_at_composition():
+    with pytest.raises(ValueError, match="DELIVERABLE_SET_VERSION_UNSUPPORTED"):
+        build_test_agent(deliverable_set_contract_version="deliverable-set/3")
+
+
+def research_case(outcome_name, run_id="run-research-v2"):
+    from efficiency_platform_agent.capabilities.research.v2.delivery import (
+        DeliveryPackBuilder,
+    )
+    from efficiency_platform_agent.harness.research_v2_adapter import (
+        ResearchV2ProviderAdapter,
+    )
+    from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
+    from tests.unit.capabilities.research_v2._delivery_support import (
+        delivery_facts,
+        research_outcome,
+    )
+    from tests.unit.harness.test_research_v2_provider_adapter import _Service, _Store
+
+    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+    brief, snapshot, *_ = delivery_facts(target=2 if outcome_name == "PARTIAL" else 1)
+    brief = brief.model_copy(
+        update={
+            "trusted_context": brief.trusted_context.model_copy(
+                update={
+                    "run_id": run_id,
+                    "tenant_id": source.task_spec.tenant_id,
+                    "task_id": source.task_spec.task_id,
+                }
+            )
+        }
+    )
+    snapshot = snapshot.model_copy(update={"brief_digest": brief.canonical_digest()})
+    outcome = research_outcome(brief, partial=outcome_name == "PARTIAL")
+    if outcome_name in {"NO_MATCHES", "FAILED"}:
+        outcome = outcome.model_copy(
+            update={"outcome": outcome_name, "usable_event_ids": (), "evidence_ids": ()}
+        )
+    if outcome_name != "FAILED":
+        outcome = outcome.model_copy(
+            update={"delivery": DeliveryPackBuilder().build(brief, outcome, snapshot)}
+        )
+    service = _Service(outcome)
+    adapter = ResearchV2ProviderAdapter(service, _Store(brief))
+    return source, adapter, service, brief
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome_name", ["COMPLETE", "PARTIAL", "NO_MATCHES", "FAILED"]
+)
+async def test_research_v2_terminal_state_is_deterministic(outcome_name):
+    source, research, service, brief = research_case(outcome_name)
+    provider = ContentProviderV2()
+    agent = build_test_agent(provider, research_provider=research)
+    execution = await agent.execute(source, run_id="run-research-v2")
+    assert len(service.windows) == 1
+    assert provider.calls == []
+    if outcome_name == "FAILED":
+        assert execution.status is CompletionStatus.FAILED
+        assert execution.deliverables is None
+        return
+    value = execution.deliverables
+    assert isinstance(value, DeliverableSetV2)
+    assert value.intent_revision == brief.intent_revision
+    assert value.provenance.collection_window_start == brief.time_window.start
+    assert value.provenance.collection_window_end == brief.time_window.end
+    assert value.provenance.ranking_basis == brief.ranking_mode
+    if outcome_name == "NO_MATCHES":
+        assert execution.status is CompletionStatus.COMPLETE
+        assert value.deliverables == []
+        assert value.provenance.source_count == 0
+        assert "未发现" in value.summary.message
+    else:
+        assert len(value.deliverables[0].content.items) == 1
+        assert value.deliverables[0].content.items[0].item_id == "event-1"
+        assert "9 percent" in value.deliverables[0].content.items[0].summary
+        assert value.provenance.source_count == 1
+    if outcome_name == "PARTIAL":
+        assert execution.status is CompletionStatus.PARTIAL
+        assert value.degraded
+        assert [warning.code for warning in value.warnings] == [
+            "RESEARCH_TARGET_NOT_REACHED"
+        ]
+        assert "still missing one" in value.warnings[0].message
+
+
+@pytest.mark.asyncio
+async def test_concurrent_runs_do_not_share_research_outcome_or_provenance():
+    import asyncio
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from efficiency_platform_agent.capabilities.research.v2.delivery import (
+        DeliveryPackBuilder,
+    )
+    from efficiency_platform_agent.harness.research_v2_adapter import (
+        ResearchV2ProviderAdapter,
+    )
+    from tests.unit.capabilities.research_v2._delivery_support import (
+        delivery_facts,
+        research_outcome,
+    )
+
+    source_a, _, _, brief_a = research_case("PARTIAL", "run-a")
+    source_b = replace(
+        source_a, task_spec=replace(source_a.task_spec, task_id="operation-task.other")
+    )
+    brief_b = brief_a.model_copy(
+        update={
+            "trusted_context": brief_a.trusted_context.model_copy(
+                update={"run_id": "run-b", "task_id": "operation-task.other"}
+            ),
+            "time_window": brief_a.time_window.model_copy(
+                update={
+                    "start": brief_a.time_window.start - timedelta(days=1),
+                    "end": brief_a.time_window.end - timedelta(days=1),
+                }
+            ),
+        }
+    )
+    briefs = {
+        brief_a.trusted_context.task_id: brief_a,
+        brief_b.trusted_context.task_id: brief_b,
+    }
+    arrived = asyncio.Event()
+    calls = []
+
+    class Store:
+        async def get_brief(self, tenant_id, task_id, run_id=None):
+            brief = briefs.get(task_id)
+            return (
+                brief
+                if brief
+                and brief.trusted_context.tenant_id == tenant_id
+                and (run_id is None or brief.trusted_context.run_id == run_id)
+                else None
+            )
+
+    class Service:
+        async def research(self, brief, runtime_context):
+            calls.append(brief.trusted_context.run_id)
+            if len(calls) == 2:
+                arrived.set()
+            await arrived.wait()
+            _, snapshot, *_ = delivery_facts()
+            snapshot = snapshot.model_copy(
+                update={"brief_digest": brief.canonical_digest()}
+            )
+            outcome = research_outcome(
+                brief, partial=brief.trusted_context.run_id == "run-a"
+            )
+            if brief.trusted_context.run_id == "run-b":
+                outcome = outcome.model_copy(
+                    update={"outcome": "NO_MATCHES", "usable_event_ids": ()}
+                )
+            return outcome.model_copy(
+                update={
+                    "delivery": DeliveryPackBuilder().build(brief, outcome, snapshot)
+                }
+            )
+
+    shared_adapter = ResearchV2ProviderAdapter(Service(), Store())
+    agent = build_test_agent(research_provider=shared_adapter)
+    first, second = await asyncio.wait_for(
+        asyncio.gather(
+            agent.execute(source_a, run_id="run-a"),
+            agent.execute(source_b, run_id="run-b"),
+        ),
+        5,
+    )
+    assert sorted(calls) == ["run-a", "run-b"]
+    assert first.status is CompletionStatus.PARTIAL
+    assert second.status is CompletionStatus.COMPLETE
+    assert first.deliverables.provenance.source_count == 1
+    assert second.deliverables.provenance.source_count == 0
+    assert (
+        first.deliverables.provenance.collection_window_start
+        == brief_a.time_window.start
+    )
+    assert (
+        second.deliverables.provenance.collection_window_start
+        == brief_b.time_window.start
+    )
+    assert shared_adapter.result_observer is None
+
+
+@pytest.mark.asyncio
+async def test_v2_runtime_quality_warning_degrades_collection():
+    from dataclasses import replace
+
+    from efficiency_platform_agent.agents.operation.contracts.deliverables import (
+        QualityStatus,
+    )
+
+    agent = build_test_agent()
+    original = agent.quality_gate
+
+    class WarningGate:
+        def validate(self, manifest, result):
+            return replace(
+                original.validate(manifest, result), final_status=QualityStatus.WARNING
+            )
+
+    agent.quality_gate = WarningGate()
+    result = await agent.execute(submission())
+    assert result.deliverables.degraded
+    assert "QUALITY_REPORT_WARNING" in [
+        warning.code for warning in result.deliverables.warnings
+    ]
+
+
+def test_collection_version_cannot_change_after_composition():
+    agent = build_test_agent()
+    with pytest.raises(AttributeError):
+        agent.deliverable_set_contract_version = "deliverable-set/1"
+
+
+@pytest.mark.asyncio
+async def test_v2_research_without_governed_provenance_fails_before_model():
+    from tests.integration.test_operation_agent_runtime import ResearchProvider
+    from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
+
+    provider = ContentProviderV2()
+    execution = await build_test_agent(
+        provider, research_provider=ResearchProvider()
+    ).execute(submission_from_sample(sample_by_id("industry_digest.complete/1")))
+    assert execution.deliverables is None
+    assert execution.error_code == "RESEARCH_UNAVAILABLE"
+    assert provider.calls == []
+
+
+@pytest.mark.asyncio
+async def test_local_factory_forwards_explicit_collection_version(monkeypatch):
+    from efficiency_platform_agent.harness import local_real_factory
+    from tests.unit.harness.test_local_real_factory import synthetic_settings
+
+    captured = []
+    original = local_real_factory.build_operation_agent
+
+    def build(*args, **kwargs):
+        captured.append(kwargs.get("deliverable_set_contract_version"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(local_real_factory, "build_operation_agent", build)
+    application = local_real_factory.build_local_agent_application(
+        synthetic_settings(),
+        test_mode=True,
+        deliverable_set_contract_version="deliverable-set/1",
+    )
+    await application.close()
+    assert captured == ["deliverable-set/1"]
+
+
+@pytest.mark.asyncio
+async def test_v2_research_backed_platforms_require_governed_research_before_dispatch():
+    from dataclasses import replace
+
+    from tests.integration.test_operation_agent_runtime import ResearchProvider
+
+    source = submission()
+    source = replace(
+        source, task_spec=replace(source.task_spec, requires_research=True)
+    )
+    content = ContentProviderV2()
+    research = ResearchProvider()
+    execution = await build_test_agent(content, research_provider=research).execute(
+        source
+    )
+    assert execution.status is CompletionStatus.FAILED
+    assert execution.deliverables is None
+    assert execution.error_code == "RESEARCH_UNAVAILABLE"
+    assert research.calls == []
+    assert content.calls == []
+    assert execution.usage.input_tokens == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("facts_mode", ["absent", "wrong-run", "wrong-request"])
+async def test_no_matches_warning_cannot_authorize_empty_v2_without_matching_facts(
+    monkeypatch, facts_mode
+):
+    from efficiency_platform_agent.agents.operation.specialists.contracts import (
+        SpecialistExecutionResult,
+    )
+    from efficiency_platform_agent.agents.operation.specialists.model_backed_research import (
+        ModelBackedResearchSpecialist,
+    )
+    from efficiency_platform_agent.agents.operation.specialists.runtime import (
+        encode_specialist_result,
+    )
+    from efficiency_platform_agent.core.multi_agent import BudgetUsage
+
+    source, research, service, brief = research_case("NO_MATCHES")
+    content = ContentProviderV2()
+    calls = []
+
+    async def warning_only(specialist, task):
+        calls.append(task.task_id)
+        if facts_mode != "absent":
+            recorded_brief = brief
+            if facts_mode == "wrong-run":
+                recorded_brief = brief.model_copy(
+                    update={
+                        "trusted_context": brief.trusted_context.model_copy(
+                            update={"run_id": "other-run"}
+                        )
+                    }
+                )
+            key = (source.task_spec.tenant_id, source.task_spec.task_id)
+            specialist._usage.research_results[key] = (recorded_brief, service.outcome)
+            specialist._usage.research_request_ids = {
+                key: "other-request"
+                if facts_mode == "wrong-request"
+                else f"research-{source.task_spec.task_id}"
+            }
+        return encode_specialist_result(
+            SpecialistExecutionResult(
+                "operation-specialist-result/1",
+                task.task_id,
+                (task.task_id,),
+                (),
+                None,
+                None,
+                None,
+                (),
+                ("RESEARCH_NO_MATCHES",),
+                None,
+                None,
+                None,
+                BudgetUsage(),
+            ),
+            task.parent_run_id,
+        )
+
+    monkeypatch.setattr(ModelBackedResearchSpecialist, "run", warning_only)
+    execution = await build_test_agent(content, research_provider=research).execute(
+        source, run_id="run-research-v2"
+    )
+    assert calls == ["research"]
+    assert execution.status is CompletionStatus.FAILED
+    assert execution.deliverables is None
+    assert service.windows == []
+    assert content.calls == []

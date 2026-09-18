@@ -1,0 +1,17 @@
+{
+  "version": "x04-live-authorization/1",
+  "authorization_id": "user-20260917-cluster-benchmark",
+  "approved_by": "project-owner-user",
+  "approved_at": "2026-09-17T02:55:00+00:00",
+  "expires_at": "2026-09-18T02:55:00+00:00",
+  "allowed_actions": [
+    "model_evaluation"
+  ],
+  "allowed_case_ids": [
+    "ordinary_chat"
+  ],
+  "allowed_tenant_ids": [
+    "tenant-x04-acceptance"
+  ],
+  "max_budget_microunits": 5000000
+}

@@ -1,0 +1,1515 @@
+NON-GIT REVIEW PACKAGE
+Base: task-start filesystem snapshot
+Head: current filesystem after Agent Task 4
+
+FILE STAT
+src\efficiency_platform_agent\agents\operation\execution.py	2889 bytes	SHA256 AF07E203AB37498EA3228877563122D099C449593E17964DBBD72A2ED0C9ADAD
+
+DIFF src\efficiency_platform_agent\agents\operation\execution.py
+--- a/src\efficiency_platform_agent\agents\operation\execution.py
++++ b/src\efficiency_platform_agent\agents\operation\execution.py
+@@ -5,7 +5,14 @@
+ from efficiency_platform_agent.agents.operation.scenarios.contracts import (
+     ScenarioExecutionResult,
+ )
+-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV1
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV1,
++    DeliverableSetV2,
++)
++from efficiency_platform_agent.contracts.research_v2 import (
++    ResearchBriefV2,
++    ResearchOutcomeV2,
++)
+ from efficiency_platform_agent.core.model import ModelExecutionResult
+ from efficiency_platform_agent.core.multi_agent import CompletionStatus
+ from efficiency_platform_agent.core.runtime import UsageSnapshot
+@@ -17,6 +24,16 @@
+ 
+     executions: list[ModelExecutionResult] = field(default_factory=list)
+     capability_usage: list[UsageSnapshot] = field(default_factory=list)
++    research_results: dict[
++        tuple[str, str], tuple[ResearchBriefV2, ResearchOutcomeV2]
++    ] = field(default_factory=dict)
++
++    def record_research(
++        self, brief: ResearchBriefV2, outcome: ResearchOutcomeV2
++    ) -> None:
++        """只保存当前 Run 的受控研究事实，不从模型输出反推。"""
++        key = (brief.trusted_context.tenant_id, brief.trusted_context.task_id)
++        self.research_results[key] = (brief, outcome)
+ 
+     def record(self, execution: ModelExecutionResult) -> None:
+         """在业务输出校验前记账，失败成品也不得免除模型消耗。"""
+@@ -44,7 +61,7 @@
+ class OperationExecution:
+     """图节点消费的结果，保持 S6 契约原样并显式携带用量。"""
+ 
+-    deliverables: DeliverableSetV1 | None
++    deliverables: DeliverableSetV1 | DeliverableSetV2 | None
+     status: CompletionStatus
+     usage: UsageSnapshot
+     error_code: str | None = None
+
+src\efficiency_platform_agent\agents\operation\operation_agent.py	10965 bytes	SHA256 C8D9E11350575CC886F2C72D238598ECD3741101D55DE3B285DFE3E4C377138F
+
+DIFF src\efficiency_platform_agent\agents\operation\operation_agent.py
+--- a/src\efficiency_platform_agent\agents\operation\operation_agent.py
++++ b/src\efficiency_platform_agent\agents\operation\operation_agent.py
+@@ -4,6 +4,9 @@
+ 
+ from collections.abc import Callable
+ 
++from efficiency_platform_agent.agents.operation.contracts.deliverables import (
++    QualityStatus,
++)
+ from efficiency_platform_agent.agents.operation.execution import (
+     OperationExecution,
+     OperationUsage,
+@@ -31,10 +34,19 @@
+ from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
+     DeliverableAssembler,
+ )
++from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
++    assemble_set_v2,
++)
+ from efficiency_platform_agent.capabilities.research.contracts import (
+     ResearchProviderPort,
+ )
+-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV1
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV1,
++    DeliverableSetV2,
++    DeliveryProvenanceV2,
++    DeliverySummaryV2,
++    WarningV2,
++)
+ from efficiency_platform_agent.core.multi_agent import CompletionStatus
+ 
+ 
+@@ -48,16 +60,32 @@
+         ],
+         quality_gate: ScenarioQualityGate | None = None,
+         research_provider: ResearchProviderPort | None = None,
++        deliverable_set_contract_version: str = "deliverable-set/1",
+     ):
++        if deliverable_set_contract_version not in {
++            "deliverable-set/1",
++            "deliverable-set/2",
++        }:
++            raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
++        self._deliverable_set_contract_version = deliverable_set_contract_version
+         self.supervisor_factory = supervisor_factory
+         self.research_provider = research_provider
+         self.scenarios = InMemoryScenarioPackRegistry(build_s6_manifests())
+         self.assembler = DeliverableAssembler()
+-        self.quality_gate = quality_gate or RuntimeScenarioQualityGate()
++        self.quality_gate = quality_gate or RuntimeScenarioQualityGate(
++            "deliverable/2"
++            if deliverable_set_contract_version == "deliverable-set/2"
++            else "deliverable/1"
++        )
++
++    @property
++    def deliverable_set_contract_version(self) -> str:
++        """组合根冻结的版本，不允许执行过程中切换。"""
++        return self._deliverable_set_contract_version
+ 
+     async def handle(
+         self, submission: ScenarioSubmission, *, run_id: str | None = None
+-    ) -> DeliverableSetV1:
++    ) -> DeliverableSetV1 | DeliverableSetV2:
+         """兼容仅消费成品集合的调用方，生命周期仍由外层 Graph 管理。"""
+         result = await self.execute(submission, run_id=run_id)
+         if result.deliverables is None:
+@@ -101,10 +129,15 @@
+                 result,
+                 mapping,
+             )
++        no_matches = (
++            self.deliverable_set_contract_version == "deliverable-set/2"
++            and result.scenario_id == "industry_digest"
++            and result.completion_status is CompletionStatus.COMPLETE
++            and "RESEARCH_NO_MATCHES" in result.warning_codes
++        )
+         if (
+-            result.deliverable_bundle is None
+-            or result.completion_status is CompletionStatus.FAILED
+-        ):
++            result.deliverable_bundle is None and not no_matches
++        ) or result.completion_status is CompletionStatus.FAILED:
+             return OperationExecution(
+                 None,
+                 result.completion_status,
+@@ -113,6 +146,115 @@
+                 result,
+                 mapping,
+             )
++        if self.deliverable_set_contract_version == "deliverable-set/2":
++            facts = usage.research_results.get(
++                (submission.task_spec.tenant_id, submission.task_spec.task_id)
++            )
++            status = result.completion_status
++            warnings = []
++            if result.quality_report and result.quality_report.final_status in {
++                QualityStatus.WARNING,
++                QualityStatus.UNKNOWN,
++            }:
++                warnings.append(
++                    WarningV2(
++                        code="QUALITY_REPORT_WARNING",
++                        message="场景质量检查存在待确认项。",
++                    )
++                )
++            provenance = None
++            revision = 0
++            payloads = (
++                [plain(item.payload) for item in result.deliverable_bundle.deliverables]
++                if result.deliverable_bundle
++                else []
++            )
++            message = f"已生成 {len(payloads)} 份独立交付物。"
++            if result.missing_scope:
++                message += "未完成：" + "、".join(result.missing_scope) + "。"
++                warnings.append(
++                    WarningV2(code="SPECIALIST_PARTIAL_FAILURE", message=message)
++                )
++            if facts is not None:
++                brief, outcome = facts
++                delivery = outcome.delivery
++                if outcome.outcome == "FAILED" or delivery is None:
++                    return OperationExecution(
++                        None,
++                        CompletionStatus.FAILED,
++                        usage.snapshot(),
++                        "RESEARCH_UNAVAILABLE",
++                        result,
++                        mapping,
++                    )
++                revision = brief.intent_revision
++                message = delivery.content
++                urls = {
++                    citation.url
++                    for event in delivery.events
++                    for citation in event.citations
++                }
++                retained = len(delivery.events)
++                # 研究端口仅暴露已交付事件，以下计数只描述该受控集合，不猜测采集前数量。
++                provenance = DeliveryProvenanceV2(
++                    source_count=len(urls),
++                    verified_source_count=0,
++                    candidate_count=retained,
++                    merged_event_count=retained,
++                    retained_count=retained,
++                    eliminated_count=0,
++                    collection_window_start=brief.time_window.start,
++                    collection_window_end=brief.time_window.end,
++                    ranking_basis=brief.ranking_mode,
++                )
++                if outcome.outcome == "PARTIAL":
++                    status = CompletionStatus.PARTIAL
++                    warnings.append(
++                        WarningV2(
++                            code="RESEARCH_TARGET_NOT_REACHED",
++                            message=(
++                                "；".join(gap.detail for gap in outcome.gaps)
++                                or f"要求 {brief.count_policy.target} 条，已接纳 {retained} 条；停止原因：{outcome.stop_reason}"
++                            )[:1000],
++                        )
++                    )
++            elif no_matches:
++                message = "在已声明的检查范围内未发现符合条件的事件。"
++                provenance = DeliveryProvenanceV2(
++                    source_count=0,
++                    verified_source_count=0,
++                    candidate_count=0,
++                    merged_event_count=0,
++                    retained_count=0,
++                    eliminated_count=0,
++                )
++            value = assemble_set_v2(
++                DeliverableSetV2(
++                    run_id=run_id or submission.submission_id,
++                    intent_revision=revision,
++                    summary=DeliverySummaryV2(
++                        message=message,
++                        result_count=(
++                            provenance.retained_count
++                            if facts is not None and provenance
++                            else len(payloads)
++                        ),
++                        complete=status is CompletionStatus.COMPLETE,
++                    ),
++                    deliverables=payloads,
++                    provenance=provenance,
++                    degraded=status is CompletionStatus.PARTIAL,
++                    warnings=warnings,
++                )
++            )
++            return OperationExecution(
++                value,
++                status,
++                usage.snapshot(),
++                scenario_result=result,
++                quality_check_report_ids=mapping,
++            )
++        assert result.deliverable_bundle is not None
+         deliverables = self.assembler.assemble(
+             [plain(item.payload) for item in result.deliverable_bundle.deliverables],
+             missing_scope=result.missing_scope,
+
+src\efficiency_platform_agent\harness\operation_agent_factory.py	7259 bytes	SHA256 28082E4C2E679C757F7B091FB4569F05DC68198240F8072E00D40503EBE56062
+
+DIFF src\efficiency_platform_agent\harness\operation_agent_factory.py
+--- a/src\efficiency_platform_agent\harness\operation_agent_factory.py
++++ b/src\efficiency_platform_agent\harness\operation_agent_factory.py
+@@ -1,7 +1,7 @@
+ """真实模型运营专家的显式组合，不读取配置或创建外部 SDK。"""
+ 
+ from dataclasses import replace
+-from typing import Any
++from typing import Any, Literal
+ 
+ from efficiency_platform_agent.agents.operation.definition import operation_agent_specs
+ from efficiency_platform_agent.agents.operation.execution import OperationUsage
+@@ -27,6 +27,9 @@
+     NoopDiagnosticRecorder,
+ )
+ from efficiency_platform_agent.core.run import ExecutionBudget
++from efficiency_platform_agent.harness.research_v2_adapter import (
++    ResearchV2ProviderAdapter,
++)
+ from efficiency_platform_agent.orchestration.supervisor import ScenarioSupervisorAdapter
+ from efficiency_platform_agent.prompts.contracts import PromptBundleSpec
+ from efficiency_platform_agent.prompts.registry import PromptRegistry
+@@ -120,8 +123,21 @@
+     research_provider: ResearchProviderPort | None = None,
+     diagnostic_recorder: DiagnosticRecorderPort | None = None,
+     research_unavailable_code: str = "RESEARCH_PROVIDER_NOT_CONFIGURED",
++    deliverable_set_contract_version: Literal[
++        "deliverable-set/1", "deliverable-set/2"
++    ] = "deliverable-set/2",
+ ) -> OperationAgent:
+     """显式注册模型专家，再把 Supervisor 窄端口注入业务 Agent。"""
++    if deliverable_set_contract_version not in {
++        "deliverable-set/1",
++        "deliverable-set/2",
++    }:
++        raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
++    specialist_version = (
++        "deliverable/2"
++        if deliverable_set_contract_version == "deliverable-set/2"
++        else "deliverable/1"
++    )
+     prompts = PromptRuntime(build_operation_prompt_registry())
+     resolved_budget = budget or ExecutionBudget(40, 10, 64000, 32000, 180000, 1000000)
+     recorder = diagnostic_recorder or NoopDiagnosticRecorder()
+@@ -134,20 +150,30 @@
+     ) -> ScenarioSupervisorAdapter:
+         """注册表和用量收集器只属于当前运行，防止并发 Run 串账。"""
+         registry = AgentRegistry()
++        run_research = (
++            resolved_research_provider.for_run(run_id, usage.record_research)
++            if isinstance(resolved_research_provider, ResearchV2ProviderAdapter)
++            else resolved_research_provider
++        )
+         for definition in operation_agent_specs():
+             spec = replace(definition, model_policy_id="operation-runtime-model/1")
+ 
+             def builder(spec=spec):
+                 if spec.agent_id == "operation.research.insight":
+                     return ModelBackedResearchSpecialist(
+-                        spec, prompts, model, resolved_research_provider, usage
++                        spec,
++                        prompts,
++                        model,
++                        run_research,
++                        usage,
++                        deliverable_contract_version=specialist_version,
+                     )
+                 return ModelBackedOperationSpecialist(
+                     spec,
+                     prompts,
+                     model,
+                     usage,
+-                    deliverable_contract_version="deliverable/1",
++                    deliverable_contract_version=specialist_version,
+                 )
+ 
+             registry.register(spec, builder)
+@@ -157,11 +183,12 @@
+             cancellation=cancellation,
+             run_id=run_id,
+             diagnostic_recorder=recorder,
+-            research_provider=resolved_research_provider,
++            research_provider=run_research,
+             usage=usage,
+         )
+ 
+     return OperationAgent(
+         supervisor_factory,
+         research_provider=resolved_research_provider,
++        deliverable_set_contract_version=deliverable_set_contract_version,
+     )
+
+src\efficiency_platform_agent\harness\research_v2_adapter.py	7552 bytes	SHA256 E3722C9672C5988183CD1A76B85AE2DEA606D289E94E71B3A76D6C9436D33B58
+
+DIFF src\efficiency_platform_agent\harness\research_v2_adapter.py
+--- a/src\efficiency_platform_agent\harness\research_v2_adapter.py
++++ b/src\efficiency_platform_agent\harness\research_v2_adapter.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ 
+ import asyncio
++from collections.abc import Callable
+ from datetime import UTC, datetime, timedelta
+ from typing import Protocol, runtime_checkable
+ 
+@@ -20,6 +21,7 @@
+ from efficiency_platform_agent.contracts.research_ports_v2 import ResearchServiceV2
+ from efficiency_platform_agent.contracts.research_v2 import (
+     ResearchBriefV2,
++    ResearchOutcomeV2,
+     ResearchRuntimeContextV2,
+ )
+ 
+@@ -48,9 +50,7 @@
+                 raise ValueError("RESEARCH_BRIEF_CONFLICT")
+             self._briefs[key] = brief
+ 
+-    async def get_brief(
+-        self, tenant_id: str, task_id: str
+-    ) -> ResearchBriefV2 | None:
++    async def get_brief(self, tenant_id: str, task_id: str) -> ResearchBriefV2 | None:
+         async with self._lock:
+             return self._briefs.get((tenant_id, task_id))
+ 
+@@ -63,6 +63,9 @@
+         *,
+         now=lambda: datetime.now(UTC),
+         timeout: timedelta = timedelta(minutes=3),
++        result_observer: Callable[[ResearchBriefV2, ResearchOutcomeV2], None]
++        | None = None,
++        run_id: str | None = None,
+     ) -> None:
+         if not isinstance(brief_store, ResearchBriefStoreV2):
+             raise TypeError("brief_store 必须实现 ResearchBriefStoreV2")
+@@ -70,6 +73,23 @@
+         self.brief_store = brief_store
+         self.now = now
+         self.timeout = timeout
++        self.result_observer = result_observer
++        self.run_id = run_id
++
++    def for_run(
++        self,
++        run_id: str | None,
++        observer: Callable[[ResearchBriefV2, ResearchOutcomeV2], None],
++    ) -> ResearchV2ProviderAdapter:
++        """创建独立运行适配器，共享 Service 但不共享结果槽或观察器。"""
++        return ResearchV2ProviderAdapter(
++            self.service,
++            self.brief_store,
++            now=self.now,
++            timeout=self.timeout,
++            result_observer=observer,
++            run_id=run_id,
++        )
+ 
+     async def research(self, request: ResearchRequest) -> ResearchResult:
+         try:
+@@ -81,6 +101,7 @@
+         if (
+             brief.trusted_context.tenant_id != request.tenant_id
+             or brief.trusted_context.task_id != request.task_id
++            or (self.run_id is not None and brief.trusted_context.run_id != self.run_id)
+         ):
+             return _failed(request, "EVIDENCE_INVALID")
+         started = self.now()
+@@ -95,8 +116,28 @@
+             )
+         except Exception:  # noqa: BLE001 -- Provider 失败只能投影为稳定错误码。
+             return _failed(request, "RESEARCH_UNAVAILABLE")
++        if outcome.delivery is not None and (
++            outcome.delivery.brief_digest != brief.canonical_digest()
++            or outcome.delivery.outcome != outcome.outcome
++        ):
++            return _failed(request, "EVIDENCE_INVALID")
++        if self.result_observer is not None:
++            self.result_observer(brief, outcome)
+         if outcome.outcome == "FAILED" or outcome.delivery is None:
+             return _failed(request, "RESEARCH_INSUFFICIENT")
++        if outcome.outcome == "NO_MATCHES":
++            if outcome.delivery.events or outcome.usable_event_ids:
++                return _failed(request, "EVIDENCE_INVALID")
++            return ResearchResult(
++                "research-result/1",
++                request.request_id,
++                request.task_id,
++                request.tenant_id,
++                ResearchStatus.EMPTY,
++                (),
++                ("RESEARCH_NO_MATCHES",),
++                None,
++            )
+         observations: list[ResearchObservation] = []
+         retrieved = int(started.timestamp() * 1000)
+         for event in outcome.delivery.events:
+@@ -134,7 +175,11 @@
+             request.tenant_id,
+             ResearchStatus.SUCCEEDED,
+             tuple(observations),
+-            tuple(outcome.delivery.limitations),
++            (
++                ("RESEARCH_OUTCOME_PARTIAL", *outcome.delivery.gap_codes)
++                if outcome.outcome == "PARTIAL"
++                else ()
++            ),
+             None,
+         )
+ 
+
+src\efficiency_platform_agent\harness\local_real_factory.py	17626 bytes	SHA256 EB4DB1CE4684A7F2449FFE25B359FD1526231CB2CFE44C49E7F001B25919D39E
+
+DIFF src\efficiency_platform_agent\harness\local_real_factory.py
+--- a/src\efficiency_platform_agent\harness\local_real_factory.py
++++ b/src\efficiency_platform_agent\harness\local_real_factory.py
+@@ -9,7 +9,7 @@
+ from contextvars import ContextVar
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Any, cast
++from typing import Any, Literal, cast
+ 
+ import httpx
+ from fastapi import FastAPI
+@@ -195,6 +195,9 @@
+     live_acceptance_service: LiveAcceptanceService | None = None,
+     live_acceptance_authorizations: LiveAcceptanceAuthorizationStore | None = None,
+     live_acceptance_budget_binder: LiveAcceptanceBudgetBinder | None = None,
++    deliverable_set_contract_version: Literal[
++        "deliverable-set/1", "deliverable-set/2"
++    ] = "deliverable-set/2",
+ ) -> LocalAgentApplication:
+     """默认装配真实 DeepSeek；Fake Provider 必须显式开启测试模式。"""
+     if provider is not None and not test_mode:
+@@ -342,6 +345,7 @@
+         research_unavailable_code=(
+             research_reason_code or "RESEARCH_PROVIDER_NOT_CONFIGURED"
+         ),
++        deliverable_set_contract_version=deliverable_set_contract_version,
+     )
+     if resolved_research_v2.v2_enabled:
+         submissions = getattr(intent_v2_delegate, "submissions", None)
+
+src\efficiency_platform_agent\agents\operation\specialists\model_backed_research.py	16675 bytes	SHA256 0354928EDF0D13C50279CD827387D561BB32299A5B857AB65E303D47553859DB
+
+DIFF src\efficiency_platform_agent\agents\operation\specialists\model_backed_research.py
+--- a/src\efficiency_platform_agent\agents\operation\specialists\model_backed_research.py
++++ b/src\efficiency_platform_agent\agents\operation\specialists\model_backed_research.py
+@@ -3,7 +3,15 @@
+ from __future__ import annotations
+ 
+ from dataclasses import replace
++from typing import Any
++from urllib.parse import urlsplit
+ 
++from efficiency_platform_agent.agents.operation.contracts.deliverables import (
++    DeliverableBundle,
++    DeliverableKind,
++    GenerationProcessReference,
++    OperationDeliverable,
++)
+ from efficiency_platform_agent.agents.operation.contracts.evidence import EvidencePack
+ from efficiency_platform_agent.agents.operation.execution import OperationUsage
+ from efficiency_platform_agent.agents.operation.quality.evidence_gate import (
+@@ -26,6 +34,13 @@
+     encode_specialist_result,
+ )
+ from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
++from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
++    DeliverableAssembler,
++)
++from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
++    DeliveryPresentationValidator,
++    project_set_v2_to_v1,
++)
+ from efficiency_platform_agent.capabilities.research.contracts import (
+     ResearchProviderPort,
+     ResearchRequest,
+@@ -36,6 +51,18 @@
+     has_explicit_source_count,
+     requested_source_count,
+ )
++from efficiency_platform_agent.contracts.deliverables import (
++    CitationV2,
++    DeliverableSetV2,
++    DeliverySummaryV2,
++    RankedDigestContentV2,
++    RankedDigestDeliverableV2,
++    RankedItemV2,
++)
++from efficiency_platform_agent.contracts.research_v2 import (
++    ResearchBriefV2,
++    ResearchOutcomeV2,
++)
+ from efficiency_platform_agent.core.agent import AgentSpec
+ from efficiency_platform_agent.core.multi_agent import BudgetUsage
+ from efficiency_platform_agent.core.run import (
+@@ -58,6 +85,7 @@
+         model: ModelRuntime,
+         provider: ResearchProviderPort,
+         usage: OperationUsage | None = None,
++        deliverable_contract_version: str = "deliverable/1",
+     ) -> None:
+         if not isinstance(provider, ResearchProviderPort):
+             raise TypeError("research_provider必须实现ResearchProviderPort")
+@@ -66,8 +94,13 @@
+         self._prompts = prompts
+         self._model = model
+         self._usage = usage
++        self._deliverable_contract_version = deliverable_contract_version
+         self.descriptor = ModelBackedOperationSpecialist(
+-            spec, prompts, model, usage
++            spec,
++            prompts,
++            model,
++            usage,
++            deliverable_contract_version=deliverable_contract_version,
+         ).descriptor
+ 
+     async def run(self, task: SupervisorTask) -> RunResult:
+@@ -105,6 +138,37 @@
+         # 不能把无来源研究误判成预算耗尽。
+         if result.status is ResearchStatus.FAILED:
+             return self._failure(task, "RESEARCH_UNAVAILABLE", result.usage)
++        if self._deliverable_contract_version == "deliverable/2":
++            facts = (
++                self._usage.research_results.get(
++                    (str(raw["tenant_id"]), operation_task_id)
++                )
++                if self._usage
++                else None
++            )
++            if facts is not None:
++                return self._research_v2_result(task, raw, *facts)
++            if result.status is ResearchStatus.EMPTY:
++                return encode_specialist_result(
++                    SpecialistExecutionResult(
++                        "operation-specialist-result/1",
++                        task.task_id,
++                        (task.task_id,),
++                        (),
++                        None,
++                        None,
++                        None,
++                        (),
++                        ("RESEARCH_NO_MATCHES",),
++                        None,
++                        None,
++                        None,
++                        BudgetUsage(),
++                    ),
++                    task.parent_run_id,
++                )
++            # 非空研究缺少治理时间窗和排序事实时，禁止调用模型猜造 V2 provenance。
++            return self._failure(task, "RESEARCH_UNAVAILABLE", result.usage)
+         if result.status is ResearchStatus.EMPTY:
+             raw["citations"] = []
+             raw["goal"] = "\n".join(
+@@ -180,6 +244,7 @@
+             evidence_pack,
+             warnings,
+             capability_usage,
++            deliverable_contract_version=self._deliverable_contract_version,
+         )
+         # Responses API 的 web_search 用量包含服务端搜索工具链上下文，不能
+         # 直接从下游内容生成预算中扣除；真实用量仍已记录到当前 Run。
+@@ -199,6 +264,161 @@
+             replace(task, input_data=frozen, budget=remaining_budget)
+         )
+ 
++    def _research_v2_result(
++        self,
++        task: SupervisorTask,
++        raw: dict[str, Any],
++        brief: ResearchBriefV2,
++        outcome: ResearchOutcomeV2,
++    ) -> RunResult:
++        """仅从已接纳事件和证据生成 V2，保留中央 Supervisor 调度。"""
++        delivery = outcome.delivery
++        if delivery is None or outcome.outcome == "FAILED":
++            return self._failure(task, "RESEARCH_UNAVAILABLE", UsageSnapshot())
++        if outcome.outcome == "NO_MATCHES":
++            return encode_specialist_result(
++                SpecialistExecutionResult(
++                    "operation-specialist-result/1",
++                    task.task_id,
++                    (task.task_id,),
++                    (),
++                    None,
++                    None,
++                    None,
++                    (),
++                    ("RESEARCH_NO_MATCHES",),
++                    None,
++                    None,
++                    None,
++                    BudgetUsage(),
++                ),
++                task.parent_run_id,
++            )
++        citations: dict[str, CitationV2] = {}
++        entries = []
++        for rank, event in enumerate(delivery.events, 1):
++            for source in event.citations:
++                existing = citations.get(source.evidence_id)
++                targets = (
++                    [*existing.supports_item_ids, event.event_id]
++                    if existing
++                    else [event.event_id]
++                )
++                citations[source.evidence_id] = CitationV2(
++                    citation_id=source.evidence_id,
++                    url=source.url,
++                    title=source.title[:500],
++                    source=source.publisher_id,
++                    source_type="public_page",
++                    source_tier="primary"
++                    if source.source_role == "primary"
++                    else "secondary",
++                    verification_status="unverified",
++                    supports_item_ids=list(dict.fromkeys(targets)),
++                    independent_source_group=urlsplit(source.url).hostname,
++                )
++            entries.append(
++                RankedItemV2(
++                    item_id=event.event_id,
++                    rank=rank,
++                    title=event.title[:500],
++                    occurred_at=event.event_time.isoformat()
++                    if event.event_time
++                    else None,
++                    summary="\n".join(event.claim_texts)[:2000],
++                    why_it_matters="符合已冻结研究范围；可据所列证据继续评估内容选题。",
++                    source_refs=[source.evidence_id for source in event.citations],
++                    confidence="low",
++                    verification_status="unverified",
++                )
++            )
++        item = DeliveryPresentationValidator().validate_deliverable(
++            RankedDigestDeliverableV2(
++                deliverable_id=str(raw["deliverable_id"]),
++                platform=str(raw["platform"]),
++                title=brief.topic[:500],
++                lead=delivery.content[:2000],
++                copy_text="待确定性渲染",
++                content=RankedDigestContentV2(
++                    selection_summary=delivery.content[:2000],
++                    ranking_basis=brief.ranking_mode,
++                    items=entries,
++                ),
++                citations=list(citations.values()),
++            )
++        )
++        view = project_set_v2_to_v1(
++            DeliverableSetV2(
++                run_id=task.parent_run_id,
++                intent_revision=brief.intent_revision,
++                summary=DeliverySummaryV2(
++                    message=delivery.content,
++                    result_count=len(entries),
++                    complete=outcome.outcome == "COMPLETE",
++                ),
++                deliverables=[item],
++            )
++        )
++        report = DeliverableAssembler().assess(
++            view.deliverables,
++            task_id=str(raw["task_id"]),
++            report_id=f"quality-{task.task_id}",
++            deliverable_ids=(str(raw["deliverable_id"]),),
++        )
++        payload = freeze(item.model_dump(mode="json"))
++        assert isinstance(payload, JsonObject)
++        artifact = OperationDeliverable(
++            "operation-deliverable/1",
++            str(raw["deliverable_id"]),
++            DeliverableKind.REPORT,
++            "1.0.0",
++            item.title,
++            (),
++            (item.platform,),
++            None,
++            payload,
++            frozenset(),
++            frozenset(),
++            frozenset(),
++            tuple(raw["profile_reference_ids"]),
++            GenerationProcessReference(
++                f"process-{task.task_id}", "operation-process/1", (task.task_id,), ()
++            ),
++            None,
++            None,
++            str(raw["plan_id"]),
++            report.report_id,
++            None,
++        )
++        bundle = DeliverableBundle(
++            "deliverable-bundle/1",
++            f"bundle-{task.task_id}",
++            str(raw["task_id"]),
++            str(raw["plan_id"]),
++            (artifact,),
++            None,
++            (report.report_id,),
++            frozenset(),
++        )
++        return encode_specialist_result(
++            SpecialistExecutionResult(
++                "operation-specialist-result/1",
++                task.task_id,
++                (task.task_id,),
++                (),
++                bundle,
++                None,
++                report,
++                (),
++                ("RESEARCH_OUTCOME_PARTIAL",) if outcome.outcome == "PARTIAL" else (),
++                None,
++                None,
++                None,
++                BudgetUsage(),
++            ),
++            task.parent_run_id,
++        )
++
+     @staticmethod
+     def _failure(task: SupervisorTask, code: str, usage: UsageSnapshot) -> RunResult:
+         result = SpecialistExecutionResult(
+
+src\efficiency_platform_agent\agents\operation\scenarios\runtime_quality.py	5201 bytes	SHA256 40E3637ADDD79A6AA93ECAF4AE1AA9BB09877DE0009B488746CF148BACC60BAB
+
+DIFF src\efficiency_platform_agent\agents\operation\scenarios\runtime_quality.py
+--- a/src\efficiency_platform_agent\agents\operation\scenarios\runtime_quality.py
++++ b/src\efficiency_platform_agent\agents\operation\scenarios\runtime_quality.py
+@@ -12,6 +12,13 @@
+ from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
+     DeliverableAssembler,
+ )
++from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
++    project_set_v2_to_v1,
++)
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV2,
++    DeliverySummaryV2,
++)
+ from efficiency_platform_agent.core.run import JsonObject
+ 
+ 
+@@ -27,6 +34,9 @@
+ class RuntimeScenarioQualityGate:
+     """合并专家报告并实际检查成品结构、来源、范围与平台独立性。"""
+ 
++    def __init__(self, deliverable_contract_version: str = "deliverable/1") -> None:
++        self.deliverable_contract_version = deliverable_contract_version
++
+     def validate(self, manifest, result) -> OperationQualityReport:
+         """原始质量 ID 保存在检查说明，report_id 独立遵守稳定 ID 契约。"""
+         bundle = result.deliverable_bundle
+@@ -54,6 +64,19 @@
+         if inherited and inherited.revision_count > 2:
+             statuses["q.review-round-limit/1"] = QualityStatus.FAILED
+         payloads = [_plain(item.payload) for item in items]
++        if self.deliverable_contract_version == "deliverable/2":
++            view = DeliverableSetV2(
++                run_id="quality-view",
++                intent_revision=0,
++                summary=DeliverySummaryV2(
++                    message="场景质量视图", result_count=len(payloads), complete=True
++                ),
++                deliverables=payloads,
++            )
++            payloads = [
++                item.model_dump(mode="json")
++                for item in project_set_v2_to_v1(view).deliverables
++            ]
+         format_report = DeliverableAssembler().assess(
+             payloads,
+             task_id=bundle.task_id if bundle else "scenario-task",
+
+src\efficiency_platform_agent\agents\operation\scenarios\service.py	5793 bytes	SHA256 ED2BF2BFED087E77497940A9BEB7BA59B050AB7F67DF711A8EDFA8A960E65A9E
+
+DIFF src\efficiency_platform_agent\agents\operation\scenarios\service.py
+--- a/src\efficiency_platform_agent\agents\operation\scenarios\service.py
++++ b/src\efficiency_platform_agent\agents\operation\scenarios\service.py
+@@ -97,6 +97,10 @@
+         if (
+             result.completion_status is CompletionStatus.COMPLETE
+             and result.deliverable_bundle is None
++            and not (
++                result.scenario_id == "industry_digest"
++                and "RESEARCH_NO_MATCHES" in result.warning_codes
++            )
+         ):
+             return ScenarioExecutionResult(
+                 result.scenario_id,
+
+src\efficiency_platform_agent\orchestration\builders\operation_runtime.py	7035 bytes	SHA256 D2FA42779804826926EFD7C71B1EBBAB47DE0EDE93A25C6F3203A51A4613D2A0
+
+DIFF src\efficiency_platform_agent\orchestration\builders\operation_runtime.py
+--- a/src\efficiency_platform_agent\orchestration\builders\operation_runtime.py
++++ b/src\efficiency_platform_agent\orchestration\builders\operation_runtime.py
+@@ -17,6 +17,7 @@
+ from efficiency_platform_agent.agents.operation.specialists.model_backed import (
+     plain,
+ )
++from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
+ from efficiency_platform_agent.contracts.operation_strategy import (
+     OperationStrategyPayloadAdapter,
+     decode_operation_request,
+@@ -109,7 +110,10 @@
+             return {
+                 "next_status": "succeeded",
+                 "output": {
+-                    "content": result.summary,
++                    "delivery_contract_version": result.contract_version,
++                    "content": result.summary.message
++                    if isinstance(result, DeliverableSetV2)
++                    else result.summary,
+                     "deliverable_set": result.model_dump(mode="json"),
+                     "quality_report": asdict(execution.scenario_result.quality_report)
+                     if execution.scenario_result
+
+tests\integration\test_operation_deliverable_v2.py	13448 bytes	SHA256 4DE71B78DC8E507A141562D3A4D6F817569299B0B1B36A91492E0FD0E0A6BB63
+
+DIFF tests\integration\test_operation_deliverable_v2.py
+--- a/tests\integration\test_operation_deliverable_v2.py
++++ b/tests\integration\test_operation_deliverable_v2.py
+@@ -7,10 +7,20 @@
+ from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+ from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
+ from efficiency_platform_agent.core.multi_agent import CompletionStatus
+-from efficiency_platform_agent.core.run import ProviderMessage, ProviderResult, ProviderUsage
+-from efficiency_platform_agent.harness.operation_agent_factory import build_operation_agent
++from efficiency_platform_agent.core.run import (
++    ProviderMessage,
++    ProviderResult,
++    ProviderUsage,
++)
++from efficiency_platform_agent.harness.operation_agent_factory import (
++    build_operation_agent,
++)
+ from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+-from tests.integration.test_operation_agent_runtime import Selector, submission
++from tests.integration.test_operation_agent_runtime import (
++    ContentProvider,
++    Selector,
++    submission,
++)
+ 
+ 
+ class ContentProviderV2:
+@@ -66,7 +76,10 @@
+     assert len(result.deliverables.deliverables) == 3
+     assert result.deliverables.summary.result_count == 3
+     assert result.deliverables.summary.complete
+-    assert all(item.contract_version == "deliverable/2" for item in result.deliverables.deliverables)
++    assert all(
++        item.contract_version == "deliverable/2"
++        for item in result.deliverables.deliverables
++    )
+ 
+ 
+ @pytest.mark.asyncio
+@@ -84,15 +97,258 @@
+ 
+ 
+ @pytest.mark.asyncio
+-async def test_operation_agent_projects_completed_v2_to_v1_only_when_configured():
++async def test_operation_agent_keeps_native_v1_only_when_configured():
+     result = await build_test_agent(
++        ContentProvider(),
+         deliverable_set_contract_version="deliverable-set/1",
+     ).execute(submission(), run_id="run-v1-projection")
+     assert result.deliverables is not None
+     assert result.deliverables.contract_version == "deliverable-set/1"
+-    assert result.deliverables.deliverables[0].body.endswith("#新品")
++    assert "专属内容" in result.deliverables.deliverables[0].body
+ 
+ 
+ def test_unknown_collection_version_is_rejected_at_composition():
+     with pytest.raises(ValueError, match="DELIVERABLE_SET_VERSION_UNSUPPORTED"):
+         build_test_agent(deliverable_set_contract_version="deliverable-set/3")
++
++
++def research_case(outcome_name, run_id="run-research-v2"):
++    from efficiency_platform_agent.capabilities.research.v2.delivery import (
++        DeliveryPackBuilder,
++    )
++    from efficiency_platform_agent.harness.research_v2_adapter import (
++        ResearchV2ProviderAdapter,
++    )
++    from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
++    from tests.unit.capabilities.research_v2._delivery_support import (
++        delivery_facts,
++        research_outcome,
++    )
++    from tests.unit.harness.test_research_v2_provider_adapter import _Service, _Store
++
++    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
++    brief, snapshot, *_ = delivery_facts(target=2 if outcome_name == "PARTIAL" else 1)
++    brief = brief.model_copy(
++        update={
++            "trusted_context": brief.trusted_context.model_copy(
++                update={
++                    "run_id": run_id,
++                    "tenant_id": source.task_spec.tenant_id,
++                    "task_id": source.task_spec.task_id,
++                }
++            )
++        }
++    )
++    snapshot = snapshot.model_copy(update={"brief_digest": brief.canonical_digest()})
++    outcome = research_outcome(brief, partial=outcome_name == "PARTIAL")
++    if outcome_name in {"NO_MATCHES", "FAILED"}:
++        outcome = outcome.model_copy(
++            update={"outcome": outcome_name, "usable_event_ids": (), "evidence_ids": ()}
++        )
++    if outcome_name != "FAILED":
++        outcome = outcome.model_copy(
++            update={"delivery": DeliveryPackBuilder().build(brief, outcome, snapshot)}
++        )
++    service = _Service(outcome)
++    adapter = ResearchV2ProviderAdapter(service, _Store(brief))
++    return source, adapter, service, brief
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize(
++    "outcome_name", ["COMPLETE", "PARTIAL", "NO_MATCHES", "FAILED"]
++)
++async def test_research_v2_terminal_state_is_deterministic(outcome_name):
++    source, research, service, brief = research_case(outcome_name)
++    provider = ContentProviderV2()
++    agent = build_test_agent(provider, research_provider=research)
++    execution = await agent.execute(source, run_id="run-research-v2")
++    assert len(service.windows) == 1
++    assert provider.calls == []
++    if outcome_name == "FAILED":
++        assert execution.status is CompletionStatus.FAILED
++        assert execution.deliverables is None
++        return
++    value = execution.deliverables
++    assert isinstance(value, DeliverableSetV2)
++    assert value.intent_revision == brief.intent_revision
++    assert value.provenance.collection_window_start == brief.time_window.start
++    assert value.provenance.collection_window_end == brief.time_window.end
++    assert value.provenance.ranking_basis == brief.ranking_mode
++    if outcome_name == "NO_MATCHES":
++        assert execution.status is CompletionStatus.COMPLETE
++        assert value.deliverables == []
++        assert value.provenance.source_count == 0
++        assert "未发现" in value.summary.message
++    else:
++        assert len(value.deliverables[0].content.items) == 1
++        assert value.deliverables[0].content.items[0].item_id == "event-1"
++        assert "9 percent" in value.deliverables[0].content.items[0].summary
++        assert value.provenance.source_count == 1
++    if outcome_name == "PARTIAL":
++        assert execution.status is CompletionStatus.PARTIAL
++        assert value.degraded
++        assert [warning.code for warning in value.warnings] == [
++            "RESEARCH_TARGET_NOT_REACHED"
++        ]
++        assert "still missing one" in value.warnings[0].message
++
++
++@pytest.mark.asyncio
++async def test_concurrent_runs_do_not_share_research_outcome_or_provenance():
++    import asyncio
++    from dataclasses import replace
++    from datetime import timedelta
++
++    from efficiency_platform_agent.capabilities.research.v2.delivery import (
++        DeliveryPackBuilder,
++    )
++    from efficiency_platform_agent.harness.research_v2_adapter import (
++        ResearchV2ProviderAdapter,
++    )
++    from tests.unit.capabilities.research_v2._delivery_support import (
++        delivery_facts,
++        research_outcome,
++    )
++
++    source_a, _, _, brief_a = research_case("PARTIAL", "run-a")
++    source_b = replace(
++        source_a, task_spec=replace(source_a.task_spec, task_id="operation-task.other")
++    )
++    brief_b = brief_a.model_copy(
++        update={
++            "trusted_context": brief_a.trusted_context.model_copy(
++                update={"run_id": "run-b", "task_id": "operation-task.other"}
++            ),
++            "time_window": brief_a.time_window.model_copy(
++                update={
++                    "start": brief_a.time_window.start - timedelta(days=1),
++                    "end": brief_a.time_window.end - timedelta(days=1),
++                }
++            ),
++        }
++    )
++    briefs = {
++        brief_a.trusted_context.task_id: brief_a,
++        brief_b.trusted_context.task_id: brief_b,
++    }
++    arrived = asyncio.Event()
++    calls = []
++
++    class Store:
++        async def get_brief(self, tenant_id, task_id):
++            return briefs.get(task_id)
++
++    class Service:
++        async def research(self, brief, runtime_context):
++            calls.append(brief.trusted_context.run_id)
++            if len(calls) == 2:
++                arrived.set()
++            await arrived.wait()
++            _, snapshot, *_ = delivery_facts()
++            snapshot = snapshot.model_copy(
++                update={"brief_digest": brief.canonical_digest()}
++            )
++            outcome = research_outcome(
++                brief, partial=brief.trusted_context.run_id == "run-a"
++            )
++            if brief.trusted_context.run_id == "run-b":
++                outcome = outcome.model_copy(
++                    update={"outcome": "NO_MATCHES", "usable_event_ids": ()}
++                )
++            return outcome.model_copy(
++                update={
++                    "delivery": DeliveryPackBuilder().build(brief, outcome, snapshot)
++                }
++            )
++
++    shared_adapter = ResearchV2ProviderAdapter(Service(), Store())
++    agent = build_test_agent(research_provider=shared_adapter)
++    first, second = await asyncio.wait_for(
++        asyncio.gather(
++            agent.execute(source_a, run_id="run-a"),
++            agent.execute(source_b, run_id="run-b"),
++        ),
++        5,
++    )
++    assert sorted(calls) == ["run-a", "run-b"]
++    assert first.status is CompletionStatus.PARTIAL
++    assert second.status is CompletionStatus.COMPLETE
++    assert first.deliverables.provenance.source_count == 1
++    assert second.deliverables.provenance.source_count == 0
++    assert (
++        first.deliverables.provenance.collection_window_start
++        == brief_a.time_window.start
++    )
++    assert (
++        second.deliverables.provenance.collection_window_start
++        == brief_b.time_window.start
++    )
++    assert shared_adapter.result_observer is None
++
++
++@pytest.mark.asyncio
++async def test_v2_runtime_quality_warning_degrades_collection():
++    from dataclasses import replace
++
++    from efficiency_platform_agent.agents.operation.contracts.deliverables import (
++        QualityStatus,
++    )
++
++    agent = build_test_agent()
++    original = agent.quality_gate
++
++    class WarningGate:
++        def validate(self, manifest, result):
++            return replace(
++                original.validate(manifest, result), final_status=QualityStatus.WARNING
++            )
++
++    agent.quality_gate = WarningGate()
++    result = await agent.execute(submission())
++    assert result.deliverables.degraded
++    assert "QUALITY_REPORT_WARNING" in [
++        warning.code for warning in result.deliverables.warnings
++    ]
++
++
++def test_collection_version_cannot_change_after_composition():
++    agent = build_test_agent()
++    with pytest.raises(AttributeError):
++        agent.deliverable_set_contract_version = "deliverable-set/1"
++
++
++@pytest.mark.asyncio
++async def test_v2_research_without_governed_provenance_fails_before_model():
++    from tests.integration.test_operation_agent_runtime import ResearchProvider
++    from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
++
++    provider = ContentProviderV2()
++    execution = await build_test_agent(
++        provider, research_provider=ResearchProvider()
++    ).execute(submission_from_sample(sample_by_id("industry_digest.complete/1")))
++    assert execution.deliverables is None
++    assert execution.error_code == "RESEARCH_UNAVAILABLE"
++    assert provider.calls == []
++
++
++@pytest.mark.asyncio
++async def test_local_factory_forwards_explicit_collection_version(monkeypatch):
++    from efficiency_platform_agent.harness import local_real_factory
++    from tests.unit.harness.test_local_real_factory import synthetic_settings
++
++    captured = []
++    original = local_real_factory.build_operation_agent
++
++    def build(*args, **kwargs):
++        captured.append(kwargs.get("deliverable_set_contract_version"))
++        return original(*args, **kwargs)
++
++    monkeypatch.setattr(local_real_factory, "build_operation_agent", build)
++    application = local_real_factory.build_local_agent_application(
++        synthetic_settings(),
++        test_mode=True,
++        deliverable_set_contract_version="deliverable-set/1",
++    )
++    await application.close()
++    assert captured == ["deliverable-set/1"]
+
+tests\integration\test_operation_agent_runtime.py	35378 bytes	SHA256 8D8E9765C04B1B3A5B1090E953CB21A598E7ABAE4BBC8E0374145D59DF91E7BD
+
+DIFF tests\integration\test_operation_agent_runtime.py
+--- a/tests\integration\test_operation_agent_runtime.py
++++ b/tests\integration\test_operation_agent_runtime.py
+@@ -132,7 +132,10 @@
+ 
+     registry = ModelProviderRegistry()
+     registry.register("offline", provider)
+-    return build_operation_agent(ModelRuntime(Selector(), registry))
++    return build_operation_agent(
++        ModelRuntime(Selector(), registry),
++        deliverable_set_contract_version="deliverable-set/1",
++    )
+ 
+ 
+ def build_research_agent(provider):
+@@ -144,7 +147,9 @@
+     registry.register("offline", provider)
+     research = ResearchProvider()
+     agent = build_operation_agent(
+-        ModelRuntime(Selector(), registry), research_provider=research
++        ModelRuntime(Selector(), registry),
++        research_provider=research,
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+     agent._test_research_provider = research
+     return agent
+@@ -179,6 +184,7 @@
+     agent = build_operation_agent(
+         ModelRuntime(Selector(), registry),
+         research_provider=LargeUsageResearch(),
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+     source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+ 
+@@ -219,7 +225,9 @@
+     registry = ModelProviderRegistry()
+     registry.register("offline", provider)
+     agent = build_operation_agent(
+-        ModelRuntime(Selector(), registry), research_provider=UnverifiedResearch()
++        ModelRuntime(Selector(), registry),
++        research_provider=UnverifiedResearch(),
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+     result = await agent.handle(source)
+     assert result.deliverables[0].citations[0].url == "https://example.com/source"
+@@ -256,6 +264,7 @@
+     result = await build_operation_agent(
+         ModelRuntime(Selector(), registry),
+         research_provider=EmptySuccessfulResearch(),
++        deliverable_set_contract_version="deliverable-set/1",
+     ).handle(source)
+ 
+     assert result.degraded
+@@ -505,10 +514,7 @@
+     )
+     result = await build_research_agent(ContentProvider()).handle(source)
+     assert result.deliverables[0].citations
+-    assert (
+-        result.deliverables[0].citations[0].url
+-        == "https://example.com/source"
+-    )
++    assert result.deliverables[0].citations[0].url == "https://example.com/source"
+ 
+ 
+ async def test_research_injects_verified_citation_when_model_omits_citations():
+@@ -638,6 +644,7 @@
+     execution = await build_operation_agent(
+         ModelRuntime(Selector(), ModelProviderRegistry()),
+         research_provider=InsufficientResearch(),
++        deliverable_set_contract_version="deliverable-set/1",
+     ).execute(source)
+ 
+     assert execution.error_code == "RESEARCH_UNAVAILABLE"
+@@ -899,7 +906,9 @@
+     provider_registry.register("offline", WaitingProvider())
+     cancellation = InMemoryCancellationSignal()
+     agent = build_operation_agent(
+-        ModelRuntime(Selector(), provider_registry), cancellation=cancellation
++        ModelRuntime(Selector(), provider_registry),
++        cancellation=cancellation,
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+     manifest = MULTI_PLATFORM_CONTENT_PACK_V1
+     steps = manifest.plan_template.steps
+
+tests\acceptance\test_research_backed_multi_platform.py	5144 bytes	SHA256 B0E5CF55EA3C8AAF8BC360FA876E45B4D5AC919108C46CCE442F2AA487AD8648
+
+DIFF tests\acceptance\test_research_backed_multi_platform.py
+--- a/tests\acceptance\test_research_backed_multi_platform.py
++++ b/tests\acceptance\test_research_backed_multi_platform.py
+@@ -26,7 +26,9 @@
+     registry = ModelProviderRegistry()
+     registry.register("offline", content)
+     return build_operation_agent(
+-        ModelRuntime(Selector(), registry), research_provider=research
++        ModelRuntime(Selector(), registry),
++        research_provider=research,
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+ 
+ 
+
+tests\acceptance\test_research_v2_closed_loop.py	23597 bytes	SHA256 B1655F7D07C5910EE3D23C00C969C38D488937B22D7AFECDAA47A43423E4F67B
+
+DIFF tests\acceptance\test_research_v2_closed_loop.py
+--- a/tests\acceptance\test_research_v2_closed_loop.py
++++ b/tests\acceptance\test_research_v2_closed_loop.py
+@@ -188,9 +188,7 @@
+                     operation="set",
+                     field_name="source_constraints",
+                     value=FieldValue(
+-                        value=SourceConstraintsV2(
+-                            allowed_source_ids=("source-free",)
+-                        ),
++                        value=SourceConstraintsV2(allowed_source_ids=("source-free",)),
+                         origin="explicit",
+                         source_span=span,
+                     ),
+@@ -284,9 +282,7 @@
+     async def run_stage(self, stage, state):
+         if stage == "plan":
+             self.round += 1
+-            return ResearchStageUpdateV2(
+-                planned_action_ids=(f"action-{self.round}",)
+-            )
++            return ResearchStageUpdateV2(planned_action_ids=(f"action-{self.round}",))
+         if stage == "acquire":
+             action = DiscoveryActionV2(
+                 f"action-{self.round}",
+@@ -316,15 +312,25 @@
+                 ),
+             )
+             assert result.batch is not None
+-            self.candidate_ids.extend(item.candidate_id for item in result.batch.candidates)
+-            document_ids = tuple(item.replace("candidate", "doc") for item in self.candidate_ids)
++            self.candidate_ids.extend(
++                item.candidate_id for item in result.batch.candidates
++            )
++            document_ids = tuple(
++                item.replace("candidate", "doc") for item in self.candidate_ids
++            )
+             return ResearchStageUpdateV2(
+                 candidate_ids=tuple(self.candidate_ids),
+                 acquired_document_ids=document_ids,
+             )
+-        document_ids = tuple(item.replace("candidate", "doc") for item in self.candidate_ids)
+-        event_ids = tuple(item.replace("candidate", "event") for item in self.candidate_ids)
+-        claim_ids = tuple(item.replace("candidate", "claim") for item in self.candidate_ids)
++        document_ids = tuple(
++            item.replace("candidate", "doc") for item in self.candidate_ids
++        )
++        event_ids = tuple(
++            item.replace("candidate", "event") for item in self.candidate_ids
++        )
++        claim_ids = tuple(
++            item.replace("candidate", "claim") for item in self.candidate_ids
++        )
+         evidence_ids = tuple(
+             build_evidence_ref(item, 0, len(item.text)).evidence_id
+             for item in _documents()[: len(self.candidate_ids)]
+@@ -414,9 +420,7 @@
+ @pytest.mark.asyncio
+ async def test_exact_five_delivers_four_without_date_expansion() -> None:
+     source_provider = _FreeSourceProvider()
+-    source_registry = ExplicitSourceProviderRegistry(
+-        {"source-free": source_provider}
+-    )
++    source_registry = ExplicitSourceProviderRegistry({"source-free": source_provider})
+     tool_registry = ToolRegistry()
+     tool_runtime = ToolRuntime(tool_registry)
+     for spec, tool in research_tool_entries(
+@@ -521,6 +525,19 @@
+     assert all(event.citations for event in service.outcome.delivery.events)
+     assert run.output is not None
+     assert "4 条" in str(run.output)
++    assert isinstance(run.output, dict)
++    output = run.output
++    assert output["delivery_contract_version"] == "deliverable-set/2"
++    value = output["deliverable_set"]
++    assert value["degraded"] is True
++    assert value["summary"]["complete"] is False
++    assert len(value["deliverables"][0]["content"]["items"]) == 4
++    assert value["warnings"][0]["code"] == "RESEARCH_TARGET_NOT_REACHED"
++    assert "精确 5 条仅获得 4 条" in value["warnings"][0]["message"]
++    assert value["provenance"]["source_count"] == 4
++    assert value["provenance"][
++        "collection_window_start"
++    ] == WINDOW.start.isoformat().replace("+00:00", "Z")
+     assert tuple(event.event_type for event in events) == (
+         "run_created",
+         "run_queued",
+
+tests\unit\harness\test_research_v2_provider_adapter.py	5599 bytes	SHA256 79D5CBAB3558C03786FCE849F3CDEF147F6860775CBC3449543E07696E795698
+
+DIFF tests\unit\harness\test_research_v2_provider_adapter.py
+--- a/tests\unit\harness\test_research_v2_provider_adapter.py
++++ b/tests\unit\harness\test_research_v2_provider_adapter.py
+@@ -142,3 +142,41 @@
+     assert await store.get_brief("other-tenant", brief.trusted_context.task_id) is None
+     with pytest.raises(ValueError, match="RESEARCH_BRIEF_CONFLICT"):
+         await store.put_brief(brief.model_copy(update={"topic": "different"}))
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("status", ["PARTIAL", "NO_MATCHES"])
++async def test_adapter_preserves_terminal_outcome_in_stable_warnings(status):
++    from efficiency_platform_agent.capabilities.research.v2.delivery import (
++        DeliveryPackBuilder,
++    )
++
++    brief, snapshot, *_ = delivery_facts(target=2)
++    base = research_outcome(brief, partial=status == "PARTIAL")
++    if status == "NO_MATCHES":
++        base = base.model_copy(
++            update={"outcome": status, "usable_event_ids": (), "evidence_ids": ()}
++        )
++    outcome = base.model_copy(
++        update={"delivery": DeliveryPackBuilder().build(brief, base, snapshot)}
++    )
++    result = await ResearchV2ProviderAdapter(_Service(outcome), _Store(brief)).research(
++        ResearchRequest(
++            "research-request/1",
++            "request-1",
++            brief.trusted_context.task_id,
++            brief.trusted_context.tenant_id,
++            "goal",
++            None,
++            2,
++            ("goal-1",),
++            "research-result/1",
++        )
++    )
++    if status == "NO_MATCHES":
++        assert result.status.value == "empty"
++        assert "RESEARCH_NO_MATCHES" in result.warnings
++    else:
++        assert result.status.value == "succeeded"
++        assert "RESEARCH_OUTCOME_PARTIAL" in result.warnings
++        assert "COUNT_EXACT_UNMET" in result.warnings
+
+tests\unit\harness\test_local_real_factory.py	25652 bytes	SHA256 1BD364C2527DC232A2D251B806318E2FAB31F1D9EF3E501CC1F29F740AAE6B78
+
+DIFF tests\unit\harness\test_local_real_factory.py
+--- a/tests\unit\harness\test_local_real_factory.py
++++ b/tests\unit\harness\test_local_real_factory.py
+@@ -302,7 +302,7 @@
+         assert len(instances) == 1
+         assert instances[0].capabilities == [
+             ("capability_ready", "deepseek_chat", True, None),
+-            (event_name, "free_public_research", research_enabled, reason_code)
++            (event_name, "free_public_research", research_enabled, reason_code),
+         ]
+         assert "synthetic-key" not in repr(instances[0].capabilities)
+         assert "synthetic.invalid" not in repr(instances[0].capabilities)
+@@ -392,7 +392,10 @@
+         assert len(logger_instances) == 1
+         assert len(research_provider_instances) == 1
+         recorder = logger_instances[0]
+-        assert bundle.conversation.interpreter.model_runtime.diagnostic_recorder is recorder
++        assert (
++            bundle.conversation.interpreter.model_runtime.diagnostic_recorder
++            is recorder
++        )
+         assert bundle.runtime.graph_runtime.diagnostic_recorder is recorder
+         assert bundle.runtime.diagnostic_recorder is recorder
+         assert research_provider_instances[0].recorder is recorder
+@@ -400,7 +403,9 @@
+         asyncio.run(bundle.close())
+ 
+ 
+-def test_factory_test_mode_uses_one_noop_recorder_without_terminal_logger(monkeypatch) -> None:
++def test_factory_test_mode_uses_one_noop_recorder_without_terminal_logger(
++    monkeypatch,
++) -> None:
+     """测试模式复用 Noop Recorder，且不得构造本地终端日志器。"""
+ 
+     def reject_logger_creation():
+@@ -488,8 +493,6 @@
+     assert {provider.timeout_ms for provider in providers.values()} == {120_000}
+ 
+ 
+-
+-
+ @pytest.mark.asyncio
+ async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None:
+     intent = {
+@@ -599,6 +602,7 @@
+         provider=model,
+         test_mode=True,
+         research_provider=ResearchFake(),
++        deliverable_set_contract_version="deliverable-set/1",
+     )
+     async with httpx.AsyncClient(
+         transport=httpx.ASGITransport(app=bundle.app), base_url="http://test"
+
+docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md	19989 bytes	SHA256 1F42D8998252838FB971CFC035800D0AEC8D29D21F8D045D52BF6E99B988918F
+
+DIFF docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+--- a/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
++++ b/docs\superpowers\progress\2026-09-17-运营Agent专业化交付与质量闭环-进度.md
+@@ -252,3 +252,25 @@
+ - Task 3：complete（首轮复核发现 1 个 Important 来源身份合并问题，TDD 修复后复审通过）。
+ - 最终规格复核通过，代码质量 Approved；无剩余 Critical/Important/Minor 问题。
+ - 复审批注：修复后聚焦、架构、文档和静态门禁通过；修复后的全量回归留待 Task 4 完整聚合变更后统一执行。
++
++## Task 4：首批 RED 与接口边界核对
++
++状态：NEEDS_CONTEXT。新增 V2 聚合集成测试并运行 `.venv\Scripts\python.exe -m pytest tests/integration/test_operation_deliverable_v2.py -q`，退出码 1，`4 failed in 3.20s`，分别验证默认 V2、部分结果、V1 投影和版本白名单尚未实现。未修改生产代码，新 Run 默认仍为 V1。
++
++已向协调方报告：brief 的 V1 Specialist 版本与仅从完成 V2 投影要求冲突；Research V2 旧适配器丢失终态及 provenance；研究委托默认 V1；旧质量门只认 V1；空 bundle 被改为 FAILED；旧 V1 集成测试迁移不在白名单。待裁定必要窄改范围及版本语义后继续 GREEN。证据和边界详见 [Task 4 实施报告](sdd/agent-task-4-report.md)。永久 non-Git，无提交；未声称实现或全量验证完成。
++
++### Task 4 裁定落地与最终验证
++
++协调方已同步 Task 4 brief 并批准必要研究 adapter/Specialist、场景质量门、空结果规则、local_real_factory 版本薄透传与旧 V1 测试显式配置。最终实现固定新 Run 默认 `deliverable-set/2`；显式 V1 保持 native `deliverable/1` 与 V1 assembler，同一 Run 不混生成版本。V2 质量视图使用已完成 V2 向 V1 的确定性投影。
++
++研究 V2 通过既有中央 Supervisor 调度一次服务，每 Run 独立 adapter 实例及独立结果观察器保留 brief/outcome；两个并发 Run 的 PARTIAL/NO_MATCHES、来源数与各自窗口隔离测试通过。COMPLETE/PARTIAL 保留已接纳事件，PARTIAL 给具体缺口 warning；NO_MATCHES 返回成功空集合；FAILED 不生成伪交付。V2 Run 输出携带 `delivery_contract_version`，保持原 SSE 事件序列。
++
++版本兼容矩阵：默认 V2 + Research V2 adapter 支持完整交付；显式 V1 + 旧 ResearchProvider 保持既有行为；V2 + 仅有非空 V1 ResearchResult 的旧 Provider 在内容模型调用前返回 `RESEARCH_UNAVAILABLE`，不能猜造治理时间窗和排序。`build_local_agent_application(settings, deliverable_set_contract_version="deliverable-set/1")` 是明确回退开关。EMPTY 仍受控返回空结果，来源计数为 0。
++
++provenance 的来源数、时间窗和排序来自可信交付及冻结 brief；原 ResearchOutcome 未暴露上游全量候选/淘汰计数，现有 candidate/merged/retained 仅按已接纳交付集合计算，eliminated=0 仅表示交付集合未再淘汰，不冒充采集漏斗全量。引用 conservatively unverified，verified_source_count=0。
++
++RED→GREEN：扩展研究终态测试 `9 failed, 5 passed` → `14 passed`；质量 WARNING、local_real_factory 透传和旧研究端口提前失败分别有独立 RED。指定主链/补采回归 `59 passed`；V2/adapter/AST 组合 `30 passed, 47 subtests passed`；最后三个聚焦文件 `46 passed`。完整命令、先后顺序和 15 文件 SHA256 均保存在 [Task 4 实施报告](sdd/agent-task-4-report.md)。
++
++最终 `.venv\Scripts\python.exe -m pytest -q`：退出码 0，`1650 passed, 9 skipped, 2 warnings, 280 subtests passed in 54.68s`。9 个修改生产文件 mypy 通过，15 文件 Ruff check/format 通过，源码编译通过。扩大到旧测试依赖链的 mypy 尚未通过，不声称该范围类型检查完成；未为此改动无关测试或配置。
++
++Task 4 状态：DONE_WITH_CONCERNS，无提交。担忧为上述已裁定兼容边界、计数口径及旧测试类型检查范围；真实 Provider/网络/数据库/生产验收未执行。生产修改共 9 文件、测试共 6 文件，均在最终批准白名单内。
+

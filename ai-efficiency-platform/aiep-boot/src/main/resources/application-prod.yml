@@ -1,0 +1,17 @@
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: "${AIEP_PROD_DATASOURCE_URL:${AIEP_DATASOURCE_URL:}}"
+    username: "${AIEP_PROD_DATASOURCE_USERNAME:${AIEP_DATASOURCE_USERNAME:}}"
+    password: "${AIEP_PROD_DATASOURCE_PASSWORD:${AIEP_DATASOURCE_PASSWORD:}}"
+  data:
+    redis:
+      host: "${AIEP_PROD_REDIS_HOST:${AIEP_REDIS_HOST:}}"
+      port: ${AIEP_PROD_REDIS_PORT:${AIEP_REDIS_PORT:6379}}
+      password: "${AIEP_PROD_REDIS_PASSWORD:${AIEP_REDIS_PASSWORD:}}"
+
+logging:
+  level:
+    com.aiep: INFO

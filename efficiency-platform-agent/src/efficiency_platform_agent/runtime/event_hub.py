@@ -20,6 +20,8 @@ _SENSITIVE_KEYS = frozenset(
         "connection_string",
         "dsn",
         "exception",
+        "hidden_reasoning",
+        "model_candidates",
         "password",
         "prompt",
         "rendered_prompt",
@@ -27,7 +29,9 @@ _SENSITIVE_KEYS = frozenset(
         "stack",
         "stacktrace",
         "token",
+        "tool_args",
         "traceback",
+        "raw_page",
     }
 )
 _SENSITIVE_TEXT = re.compile(
@@ -35,6 +39,8 @@ _SENSITIVE_TEXT = re.compile(
     r"(?:postgres(?:ql)?|redis|mysql|mongodb(?:\+srv)?)://)",
     re.IGNORECASE,
 )
+_CAMEL_CASE_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_PASCAL_CASE_BOUNDARY = re.compile(r"(?<=[A-Z])(?=[A-Z][a-z])")
 
 
 def _validate_run_id(run_id: str) -> None:
@@ -43,11 +49,19 @@ def _validate_run_id(run_id: str) -> None:
         raise ValueError("run_id 不能为空")
 
 
+def _canonicalize_payload_key(key: object) -> str:
+    """将常见键名形式统一为 snake_case，供结构化敏感键匹配。"""
+    normalized = str(key).strip().replace("-", "_")
+    normalized = _PASCAL_CASE_BOUNDARY.sub("_", normalized)
+    normalized = _CAMEL_CASE_BOUNDARY.sub("_", normalized)
+    return normalized.lower()
+
+
 def _contains_sensitive_payload(value: Any) -> bool:
     """只按键名和稳定格式识别敏感信息，不读取环境变量。"""
     if isinstance(value, Mapping):
         for key, child in value.items():
-            normalized = str(key).strip().lower().replace("-", "_")
+            normalized = _canonicalize_payload_key(key)
             if normalized in _SENSITIVE_KEYS or _contains_sensitive_payload(child):
                 return True
         return False

@@ -1,0 +1,72 @@
+{
+  "schema_version": "research-v2-preflight/1",
+  "status": "PLAN_ONLY",
+  "external_io": false,
+  "config_version": "research-sources/3-official-materials",
+  "source_count": 5,
+  "eligible_source_count": 0,
+  "probed_source_count": 0,
+  "sources": [
+    {
+      "source_id": "fixture_official_feed",
+      "adapter_id": "rss_atom",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_arxiv",
+      "adapter_id": "arxiv",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_gdelt",
+      "adapter_id": "gdelt",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_github_releases",
+      "adapter_id": "github_releases",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    },
+    {
+      "source_id": "fixture_hacker_news",
+      "adapter_id": "hacker_news",
+      "eligible": false,
+      "reason_codes": [
+        "SOURCE_DISABLED",
+        "SOURCE_CONFIG_UNVERIFIED",
+        "SOURCE_RECORD_UNVERIFIED",
+        "SOURCE_RECORD_FIELD_MISSING:checked_at",
+        "SOURCE_RECORD_TIME_INVALID"
+      ]
+    }
+  ],
+  "reason_codes": []
+}

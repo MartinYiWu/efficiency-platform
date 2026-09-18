@@ -23,6 +23,9 @@ from efficiency_platform_agent.capabilities.research.contracts import (
     ResearchRequest,
     ResearchStatus,
 )
+from efficiency_platform_agent.capabilities.research.request_policy import (
+    requested_source_count,
+)
 from efficiency_platform_agent.core.enums import StrategyMode
 from efficiency_platform_agent.core.multi_agent import BudgetUsage
 from efficiency_platform_agent.core.run import JsonObject, RunResult, SupervisorTask
@@ -73,22 +76,28 @@ class ResearchInsightAgent(OperationSpecialistBase):
         try:
             execution_input = decode_specialist_task(task)
             operation_task = execution_input.operation_task
+            operation_task_id = operation_task.task_id
             goals = tuple(
                 getattr(goal, "goal_id", "goal") for goal in operation_task.goals
             )
             expected = goals or ("goal",)
-            request = ResearchRequest(
-                "research-request/1",
-                f"research-{task.task_id}",
-                task.task_id,
-                execution_input.tenant_id,
+            goal = (
                 "；".join(
                     getattr(goal, "description", "运营研究")
                     for goal in operation_task.goals
                 )
-                or "运营研究",
+                or "运营研究"
+            )
+            request = ResearchRequest(
+                "research-request/1",
+                f"research-{operation_task_id}",
+                operation_task_id,
+                execution_input.tenant_id,
+                goal,
                 None,
-                self._policy.minimum_valid_source_count,
+                requested_source_count(
+                    goal, default=self._policy.minimum_valid_source_count
+                ),
                 expected,
                 "research-result/1",
             )
@@ -102,7 +111,7 @@ class ResearchInsightAgent(OperationSpecialistBase):
                 )
             if (
                 result.request_id != request.request_id
-                or result.task_id != task.task_id
+                or result.task_id != operation_task_id
                 or result.tenant_id != execution_input.tenant_id
             ):
                 return encode_specialist_result(

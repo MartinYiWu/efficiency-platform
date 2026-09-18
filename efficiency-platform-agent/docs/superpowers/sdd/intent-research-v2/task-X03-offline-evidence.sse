@@ -1,0 +1,18 @@
+event: run_created
+data: {"run_id":"<redacted>","status":"queued"}
+
+event: run_queued
+data: {"run_id":"<redacted>","status":"queued"}
+
+event: strategy_selected
+data: {"strategy":"multi_agent","rule_version":"s2.strategy/1","reason_code":"registered_requested_strategy"}
+
+event: run_started
+data: {"run_id":"<redacted>","status":"running"}
+
+event: checkpoint_saved
+data: {"checkpoint_id":"<redacted>"}
+
+event: run_succeeded
+data: {"run_id":"<redacted>","status":"succeeded"}
+

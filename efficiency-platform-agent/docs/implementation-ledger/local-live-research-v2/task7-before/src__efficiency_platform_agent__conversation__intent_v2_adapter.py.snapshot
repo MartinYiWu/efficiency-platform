@@ -1,0 +1,318 @@
+"""会话入口的 V2 版本冻结与失败关闭适配器。"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from typing import Literal, Protocol, runtime_checkable
+
+from efficiency_platform_agent.contracts.conversation import ConversationMessageV1
+from efficiency_platform_agent.contracts.events import EventType
+from efficiency_platform_agent.contracts.research_v2 import ResearchOutcomeV2
+from efficiency_platform_agent.core.enums import RunStatus
+from efficiency_platform_agent.harness.service import (
+    RunPipelineContext,
+    RunPipelinePreparation,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineVersionSnapshotV2:
+    intent_pipeline_version: str
+    research_pipeline_version: str
+    research_replan_enabled: bool
+    research_source_allowlist: tuple[str, ...]
+    research_policy_version: str
+    state_backend: Literal["memory", "postgres"]
+    runtime_mode: Literal["local_live", "production"] = "production"
+    rollout_mode: Literal["all", "tenant_allowlist"] = "all"
+    rollout_tenant_allowlist: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.runtime_mode not in {"local_live", "production"}:
+            raise ValueError("RESEARCH_RUNTIME_MODE_INVALID")
+        if self.state_backend not in {"memory", "postgres"}:
+            raise ValueError("RESEARCH_STATE_BACKEND_INVALID")
+        if (
+            any(not item.strip() for item in self.research_source_allowlist)
+            or len(set(self.research_source_allowlist))
+            != len(self.research_source_allowlist)
+        ):
+            raise ValueError("RESEARCH_PIPELINE_ALLOWLIST_INVALID")
+        if (
+            any(not item.strip() for item in self.rollout_tenant_allowlist)
+            or len(set(self.rollout_tenant_allowlist))
+            != len(self.rollout_tenant_allowlist)
+            or (
+                self.v2_enabled
+                and self.rollout_mode == "tenant_allowlist"
+                and not self.rollout_tenant_allowlist
+            )
+        ):
+            raise ValueError("RESEARCH_ROLLOUT_TENANT_ALLOWLIST_INVALID")
+        if self.runtime_mode == "local_live":
+            if self.state_backend != "memory":
+                raise ValueError("RESEARCH_LOCAL_LIVE_MEMORY_REQUIRED")
+            if self.v2_enabled and not self.research_source_allowlist:
+                raise ValueError("RESEARCH_LOCAL_LIVE_SOURCE_ALLOWLIST_REQUIRED")
+            if self.v2_enabled and (
+                self.rollout_mode != "tenant_allowlist"
+                or not self.rollout_tenant_allowlist
+            ):
+                raise ValueError("RESEARCH_LOCAL_LIVE_TENANT_ALLOWLIST_REQUIRED")
+
+    @property
+    def v2_enabled(self) -> bool:
+        return (
+            self.intent_pipeline_version == "intent-v2"
+            and self.research_pipeline_version == "research-v2"
+        )
+
+    @property
+    def production_ready(self) -> bool:
+        return (
+            self.runtime_mode == "production"
+            and self.v2_enabled
+            and self.state_backend == "postgres"
+            and self.rollout_mode == "tenant_allowlist"
+            and bool(self.rollout_tenant_allowlist)
+        )
+
+    @property
+    def local_live_ready(self) -> bool:
+        """仅说明冻结配置充分，不代表来源或网络调用成功。"""
+
+        return (
+            self.runtime_mode == "local_live"
+            and self.v2_enabled
+            and self.state_backend == "memory"
+            and bool(self.research_source_allowlist)
+            and self.rollout_mode == "tenant_allowlist"
+            and bool(self.rollout_tenant_allowlist)
+        )
+
+    def allows_tenant(self, tenant_id: str) -> bool:
+        return self.rollout_mode == "all" or tenant_id in self.rollout_tenant_allowlist
+
+
+@dataclass(frozen=True, slots=True)
+class ResearchV1Projection:
+    run_status: RunStatus
+    display_status: Literal["succeeded", "degraded_succeeded", "failed"]
+    events: tuple[tuple[EventType, dict[str, object]], ...]
+    delivered_event_count: int
+    evidence_ids: tuple[str, ...]
+
+
+def project_research_outcome_v1(outcome: ResearchOutcomeV2) -> ResearchV1Projection:
+    """不新增 V1 事件枚举，也不把取消/硬截止或无交付误报成功。"""
+
+    if outcome.stop_reason in {"USER_CANCELLED", "HARD_DEADLINE"}:
+        raise ValueError("RESEARCH_TERMINAL_MUST_USE_EXISTING_RUN_PATH")
+    delivered = len(outcome.usable_event_ids)
+    if outcome.outcome == "FAILED":
+        status = RunStatus.FAILED
+        display: Literal["succeeded", "degraded_succeeded", "failed"] = "failed"
+    elif outcome.outcome == "PARTIAL":
+        if outcome.delivery is None:
+            raise ValueError("RESEARCH_PARTIAL_DELIVERY_REQUIRED")
+        status = RunStatus.SUCCEEDED
+        display = "degraded_succeeded"
+    else:
+        if outcome.outcome == "COMPLETE" and outcome.delivery is None:
+            raise ValueError("RESEARCH_COMPLETE_DELIVERY_REQUIRED")
+        status = RunStatus.SUCCEEDED
+        display = "succeeded"
+    event: tuple[EventType, dict[str, object]] = (
+        "strategy_event",
+        {
+            "strategy_event_type": "research_v2_outcome",
+            "reason_code": outcome.stop_reason,
+            "counts": {
+                "outcome": outcome.outcome,
+                "display_status": display,
+                "delivered_event_count": delivered,
+                "evidence_count": len(outcome.evidence_ids),
+            },
+        },
+    )
+    return ResearchV1Projection(
+        run_status=status,
+        display_status=display,
+        events=(event,),
+        delivered_event_count=delivered,
+        evidence_ids=outcome.evidence_ids,
+    )
+
+
+@runtime_checkable
+class IntentV2PreparationDelegate(Protocol):
+    source_registry: object
+    tool_runtime: object
+    research_service: object
+    intent_state_store: object
+    research_state_store: object
+
+    async def prepare_v2(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+        versions: PipelineVersionSnapshotV2,
+    ) -> RunPipelinePreparation | None: ...
+
+
+class IntentV2ConversationAdapter:
+    """新任务首次进入时冻结配置；后续全局配置变化不重解释该任务。"""
+
+    def __init__(
+        self,
+        settings: PipelineVersionSnapshotV2,
+        delegate: IntentV2PreparationDelegate | None,
+    ) -> None:
+        self._settings = settings
+        self.delegate = delegate
+        self._versions: dict[tuple[str, str], PipelineVersionSnapshotV2] = {}
+        self._lock = asyncio.Lock()
+
+    @property
+    def settings(self) -> PipelineVersionSnapshotV2:
+        """仅暴露当前新会话默认值；既有会话始终使用冻结快照。"""
+
+        return self._settings
+
+    async def update_rollout_settings(
+        self, settings: PipelineVersionSnapshotV2
+    ) -> None:
+        """原子更新新会话默认值，不改写已登记会话的版本。"""
+
+        if not isinstance(settings, PipelineVersionSnapshotV2):
+            raise TypeError("ROLLOUT_SETTINGS_INVALID")
+        async with self._lock:
+            self._settings = settings
+
+    async def prepare(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+    ) -> RunPipelinePreparation | None:
+        key = (tenant_id, conversation_id)
+        async with self._lock:
+            versions = self._versions.get(key)
+            if versions is None:
+                versions = self._snapshot_for_tenant(self._settings, tenant_id)
+                self._versions[key] = versions
+        if not versions.v2_enabled:
+            return None
+        if self.delegate is None:
+            raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+        return await self.delegate.prepare_v2(
+            pipeline,
+            tenant_id,
+            conversation_id,
+            message,
+            versions,
+        )
+
+    def version_for(
+        self, tenant_id: str, conversation_id: str
+    ) -> PipelineVersionSnapshotV2 | None:
+        return self._versions.get((tenant_id, conversation_id))
+
+    def assert_runtime_ready(
+        self,
+        *,
+        runtime_mode: str | None = None,
+        production: bool | None = None,
+    ) -> None:
+        """校验正式模式；旧布尔参数只保留到组合根迁移完成。"""
+
+        if runtime_mode is not None and production is not None:
+            raise TypeError("RESEARCH_RUNTIME_MODE_ARGUMENT_CONFLICT")
+        if runtime_mode is None and production is None:
+            raise TypeError("RESEARCH_RUNTIME_MODE_REQUIRED")
+        if production is not None:
+            if not production:
+                if self.settings.runtime_mode == "local_live":
+                    raise RuntimeError(
+                        "RESEARCH_LOCAL_LIVE_LEGACY_BYPASS_FORBIDDEN"
+                    )
+                if not self.settings.v2_enabled:
+                    return
+                if not self._composition_complete():
+                    raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+                return
+            runtime_mode = "production"
+        if runtime_mode not in {"local_live", "production"}:
+            raise ValueError("RESEARCH_RUNTIME_MODE_INVALID")
+        if not self.settings.v2_enabled:
+            return
+        if runtime_mode != self.settings.runtime_mode:
+            raise RuntimeError("RESEARCH_RUNTIME_MODE_MISMATCH")
+        if self.delegate is None:
+            raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+        if runtime_mode == "local_live":
+            if not self.settings.local_live_ready:
+                raise RuntimeError("RESEARCH_V2_LOCAL_LIVE_NOT_READY")
+        elif not self.settings.production_ready:
+            raise RuntimeError("RESEARCH_V2_PERSISTENCE_NOT_READY")
+        if not self._composition_complete():
+            raise RuntimeError("RESEARCH_V2_COMPOSITION_INCOMPLETE")
+
+    def _composition_complete(self) -> bool:
+        if self.delegate is None:
+            return False
+        return all(
+            getattr(self.delegate, name, None) is not None
+            for name in (
+                "source_registry",
+                "tool_runtime",
+                "research_service",
+                "intent_state_store",
+                "research_state_store",
+            )
+        )
+
+    @staticmethod
+    def _snapshot(settings: PipelineVersionSnapshotV2) -> PipelineVersionSnapshotV2:
+        return PipelineVersionSnapshotV2(
+            intent_pipeline_version=settings.intent_pipeline_version,
+            research_pipeline_version=settings.research_pipeline_version,
+            research_replan_enabled=settings.research_replan_enabled,
+            research_source_allowlist=settings.research_source_allowlist,
+            research_policy_version=settings.research_policy_version,
+            state_backend=settings.state_backend,
+            runtime_mode=settings.runtime_mode,
+            rollout_mode=settings.rollout_mode,
+            rollout_tenant_allowlist=settings.rollout_tenant_allowlist,
+        )
+
+    @classmethod
+    def _snapshot_for_tenant(
+        cls, settings: PipelineVersionSnapshotV2, tenant_id: str
+    ) -> PipelineVersionSnapshotV2:
+        if not settings.v2_enabled or settings.allows_tenant(tenant_id):
+            return cls._snapshot(settings)
+        return PipelineVersionSnapshotV2(
+            intent_pipeline_version="intent-v1",
+            research_pipeline_version="research-v1",
+            research_replan_enabled=False,
+            research_source_allowlist=(),
+            research_policy_version="research-policy/rollout-not-allowed",
+            state_backend=settings.state_backend,
+            runtime_mode=settings.runtime_mode,
+            rollout_mode=settings.rollout_mode,
+            rollout_tenant_allowlist=settings.rollout_tenant_allowlist,
+        )
+
+
+__all__ = [
+    "IntentV2ConversationAdapter",
+    "IntentV2PreparationDelegate",
+    "PipelineVersionSnapshotV2",
+    "ResearchV1Projection",
+    "project_research_outcome_v1",
+]

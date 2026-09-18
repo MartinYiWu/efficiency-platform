@@ -5,13 +5,22 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
+from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
 from scripts.operation_chat_acceptance import AcceptanceOptions, main, run_acceptance
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROGRESS_LEDGER = (
+    _PROJECT_ROOT
+    / "docs/superpowers/progress/2026-09-17-运营Agent专业化交付与质量闭环-进度.md"
+)
 
 
 def options(**changes: Any) -> AcceptanceOptions:
@@ -69,6 +78,33 @@ def deliverables() -> dict[str, Any]:
             )
         ],
     }
+
+
+def test_progress_ledger_frozen_v2_sample_matches_delivery_contract() -> None:
+    """前端消费的冻结样例必须持续通过正式 V2 契约。"""
+
+    content = _PROGRESS_LEDGER.read_text(encoding="utf-8")
+    match = re.search(
+        r"<!-- frozen-deliverable-set-v2-sample -->\s*```json\s*(\{.*?\})\s*```",
+        content,
+        re.DOTALL,
+    )
+
+    assert match is not None, "正式进度账本缺少冻结 DeliverableSetV2 样例"
+    value = DeliverableSetV2.model_validate(json.loads(match.group(1)))
+
+    assert len(value.deliverables) == 1
+    assert value.deliverables[0].content.kind == "ranked_digest"
+    assert len(value.deliverables[0].content.items) == 9
+    assert len(value.deliverables[0].citations) == 2
+    assert {
+        citation.url.split("/")[2] for citation in value.deliverables[0].citations
+    } == {"example.test"}
+    assert [action.action_type for action in value.next_actions] == [
+        "rewrite_for_platform"
+    ]
+    assert value.provenance is not None
+    assert value.warnings == []
 
 
 def run_view(status: str, *, degraded: bool = False) -> dict[str, Any]:

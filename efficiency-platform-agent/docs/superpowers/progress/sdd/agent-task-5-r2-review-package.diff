@@ -1,0 +1,1002 @@
+
+--- before/src\efficiency_platform_agent\harness\service.py
++++ after/src\efficiency_platform_agent\harness\service.py
+@@ -6,9 +6,12 @@
+ import copy
+ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+ from dataclasses import dataclass, field, replace
+-from time import perf_counter
+ from typing import Any, cast
+ 
++from efficiency_platform_agent.contracts.deliverables import (
++    DeliverableSetV1,
++    DeliverableSetV2,
++)
+ from efficiency_platform_agent.contracts.events import EventType, RunEventV1
+ from efficiency_platform_agent.contracts.requests import (
+     CancelRunRequestV1,
+@@ -21,7 +24,10 @@
+     RunViewV1,
+     UsageV1,
+ )
+-from efficiency_platform_agent.contracts.stream_events import StreamEventName
++from efficiency_platform_agent.contracts.stream_events import (
++    OperationVisiblePhase,
++    StreamEventName,
++)
+ from efficiency_platform_agent.core.budget import (
+     BudgetCharge,
+     BudgetExhaustedError,
+@@ -66,6 +72,9 @@
+     StrategyRouter,
+ )
+ from efficiency_platform_agent.runtime.event_hub import EventHub
++from efficiency_platform_agent.runtime.operation_progress import (
++    bind_operation_progress,
++)
+ 
+ from .errors import HarnessError, normalize_error
+ 
+@@ -151,51 +160,6 @@
+     }
+ 
+ 
+-_RESEARCH_MARKERS = frozenset(
+-    {
+-        "搜索",
+-        "收集",
+-        "检索",
+-        "联网",
+-        "热点",
+-        "新闻",
+-        "动态",
+-        "最新",
+-        "近期",
+-        "最近",
+-        "来源",
+-    }
+-)
+-_NEGATED_RESEARCH_MARKERS = frozenset(
+-    {"不需要联网", "无需联网", "不用联网", "不联网", "无需搜索", "不要联网"}
+-)
+-
+-
+-def _operation_requires_research(text: str) -> bool:
+-    """仅依据用户可见文本识别明确研究请求，不把模型内部状态带入事件。"""
+-
+-    normalized = text.strip().lower()
+-    if any(marker in normalized for marker in _NEGATED_RESEARCH_MARKERS):
+-        return False
+-    return bool(normalized) and any(marker in normalized for marker in _RESEARCH_MARKERS)
+-
+-
+-def _phase_count(result: GraphExecutionResult, *, default: int = 1) -> int:
+-    """从已治理图结果提取数量摘要，提取失败时使用稳定的最小值。"""
+-
+-    if result.output is None:
+-        return 0
+-    output = _plain(result.output)
+-    if not isinstance(output, Mapping):
+-        return default
+-    deliverable_set = output.get("deliverable_set")
+-    if isinstance(deliverable_set, Mapping):
+-        deliverables = deliverable_set.get("deliverables")
+-        if isinstance(deliverables, (list, tuple)):
+-            return len(deliverables)
+-    return default
+-
+-
+ class AgentRuntimeService:
+     """S2 Harness 的唯一公开运行服务。"""
+ 
+@@ -235,6 +199,7 @@
+         self._realtime_output_run_tenants: dict[str, str] = {}
+         self._realtime_output_runs: set[str] = set()
+         self._assistant_started_runs: set[str] = set()
++        self._published_operation_phases: dict[str, set[OperationVisiblePhase]] = {}
+         self._run_event_listeners: list[
+             Callable[[RunEventRecord], Awaitable[None]]
+         ] = []
+@@ -328,7 +293,9 @@
+             run_id=record.run_id, request_id=original.request_id
+         ):
+             try:
+-                return await self._prepare_and_execute_pipeline(record, original, prepare)
++                return await self._prepare_and_execute_pipeline(
++                    record, original, prepare
++                )
+             except Exception as error:  # noqa: BLE001 - 准备阶段不得泄露模型异常
+                 self._record_exception(
+                     "pipeline_preparation_failed", "PIPELINE_PREPARATION_FAILED", error
+@@ -632,7 +599,9 @@
+     ) -> RunViewV1 | None:
+         """执行已排队 Run，并将后台边界异常归一化为失败状态。"""
+ 
+-        with bind_diagnostic_context(run_id=record.run_id, request_id=request.request_id):
++        with bind_diagnostic_context(
++            run_id=record.run_id, request_id=request.request_id
++        ):
+             try:
+                 return await self._execute_queued(record, request)
+             except Exception as error:  # noqa: BLE001 - 后台任务不得泄露未观察异常
+@@ -642,7 +611,9 @@
+                     getattr(error, "code", "BACKGROUND_EXECUTION_FAILED"),
+                     error,
+                     stage="background.execute",
+-                    strategy=(current.strategy if current is not None else record.strategy),
++                    strategy=(
++                        current.strategy if current is not None else record.strategy
++                    ),
+                 )
+                 return await self._settle_background_failure(record, request, error)
+ 
+@@ -656,28 +627,23 @@
+         ):
+             return await self._execute_queued_with_context(record, request)
+ 
+-    async def _publish_operation_phase(
++    async def _publish_bound_operation_progress(
+         self,
+         run_id: str,
+         event: StreamEventName,
+-        *,
+-        phase: str,
+-        count: int = 0,
+-        duration_ms: int = 0,
+-        degraded: bool = False,
+-        error_code: str | None = None,
++        phase: OperationVisiblePhase,
++        payload: Mapping[str, Any],
+     ) -> None:
+-        """发布不含内部实现细节的运营阶段摘要。"""
++        """只发布当前 Run 真实节点报告的安全阶段，并对开始事件去重。"""
+ 
+-        payload: dict[str, Any] = {
+-            "phase": phase,
+-            "count": max(0, count),
+-            "duration_ms": max(0, duration_ms),
+-            "degraded": degraded,
+-        }
+-        if error_code is not None:
+-            payload["error_code"] = error_code
+-        await self.event_hub.publish_next(run_id, event, payload)
++        if event == "phase_started":
++            published = self._published_operation_phases.setdefault(run_id, set())
++            if phase in published:
++                return
++            published.add(phase)
++        await self.event_hub.publish_next(
++            run_id, event, {**dict(payload), "phase": phase}
++        )
+ 
+     async def _execute_queued_with_context(
+         self, record: RunRecord, request: CreateRunRequestV1
+@@ -744,26 +710,6 @@
+             )
+             self._realtime_output_run_tenants[record.run_id] = request.tenant_id
+             await self._event(record, "run_started")
+-            await self.event_hub.publish_next(
+-                record.run_id, "phase_started", {"phase": "scenario_execution"}
+-            )
+-            operation_request = selection.mode is StrategyMode.MULTI_AGENT
+-            research_request = operation_request and _operation_requires_research(
+-                request.input_text
+-            )
+-            phase_started_at = perf_counter()
+-            if research_request:
+-                await self._publish_operation_phase(
+-                    record.run_id,
+-                    "research_started",
+-                    phase="research",
+-                )
+-            elif operation_request:
+-                await self._publish_operation_phase(
+-                    record.run_id,
+-                    "content_generation_started",
+-                    phase="content_generation",
+-                )
+             state: dict[str, object] = {
+                 "run_id": record.run_id,
+                 "tenant_id": request.tenant_id,
+@@ -789,7 +735,18 @@
+                 "next_status": None,
+             }
+             with bind_diagnostic_context(strategy=selection.mode.value):
+-                result = await self.graph_runtime.execute(selection, state)
++
++                async def publish_progress(
++                    event: StreamEventName,
++                    phase: OperationVisiblePhase,
++                    payload: Mapping[str, Any],
++                ) -> None:
++                    await self._publish_bound_operation_progress(
++                        record.run_id, event, phase, payload
++                    )
++
++                with bind_operation_progress(publish_progress):
++                    result = await self.graph_runtime.execute(selection, state)
+                 # 取消请求一旦被受理，晚到的图结果不得覆盖取消终态。
+                 if await self._is_cancelled(record.run_id) and isinstance(
+                     result, GraphExecutionResult
+@@ -807,39 +764,6 @@
+                     != record.budget_state.deadline_epoch_ms
+                 ):
+                     result = replace(result, budget_state=record.budget_state)
+-                if operation_request and result.next_status is RunStatus.SUCCEEDED:
+-                    elapsed_ms = int((perf_counter() - phase_started_at) * 1000)
+-                    if research_request:
+-                        await self._publish_operation_phase(
+-                            record.run_id,
+-                            "research_completed",
+-                            phase="research",
+-                            count=1,
+-                            duration_ms=elapsed_ms,
+-                            degraded=result.degraded,
+-                        )
+-                        await self._publish_operation_phase(
+-                            record.run_id,
+-                            "content_generation_started",
+-                            phase="content_generation",
+-                        )
+-                    deliverable_count = _phase_count(result, default=1)
+-                    await self._publish_operation_phase(
+-                        record.run_id,
+-                        "content_generation_completed",
+-                        phase="content_generation",
+-                        count=deliverable_count,
+-                        duration_ms=elapsed_ms,
+-                        degraded=result.degraded,
+-                    )
+-                    await self._publish_operation_phase(
+-                        record.run_id,
+-                        "quality_checked",
+-                        phase="quality_check",
+-                        count=deliverable_count,
+-                        duration_ms=elapsed_ms,
+-                        degraded=result.degraded,
+-                    )
+                 return await self._apply_graph_result(record, result)
+         except HarnessError:
+             raise
+@@ -1027,6 +951,7 @@
+         self._assistant_started_runs.discard(record.run_id)
+         if target is not RunStatus.WAITING_INPUT:
+             self._pipeline_usage.pop(record.run_id, None)
++            self._published_operation_phases.pop(record.run_id, None)
+         return view
+ 
+     async def get_run(self, run_id: str, tenant_id: str) -> RunViewV1:
+@@ -1349,10 +1274,38 @@
+                     )
+         deliverable_set = output.get("deliverable_set")
+         if isinstance(deliverable_set, Mapping):
++            delivery_version = output.get("delivery_contract_version")
++            if delivery_version is None:
++                delivery_version = deliverable_set.get(
++                    "contract_version", "deliverable-set/1"
++                )
++            try:
++                if delivery_version == "deliverable-set/2":
++                    validated = DeliverableSetV2.model_validate(
++                        dict(deliverable_set)
++                    ).model_dump(mode="json")
++                elif delivery_version == "deliverable-set/1":
++                    validated = DeliverableSetV1.model_validate(
++                        dict(deliverable_set)
++                    ).model_dump(mode="json")
++                else:
++                    raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
++            except (TypeError, ValueError):
++                await self.event_hub.publish_next(
++                    record.run_id,
++                    "stream_error",
++                    {
++                        "code": "DELIVERABLE_SET_INVALID",
++                        "category": "presentation",
++                        "retryable": False,
++                        "safe_message": "交付结果校验失败",
++                    },
++                )
++                return True
+             await self.event_hub.publish_next(
+                 record.run_id,
+                 "deliverable",
+-                {"deliverable_set": dict(deliverable_set)},
++                {"deliverable_set": validated},
+             )
+         return presentation_degraded
+ 
+--- before/src\efficiency_platform_agent\contracts\stream_events.py
++++ after/src\efficiency_platform_agent\contracts\stream_events.py
+@@ -4,9 +4,11 @@
+ 
+ from copy import deepcopy
+ from math import isfinite
+-from typing import Annotated, Any, Literal
++from typing import Annotated, Any, Literal, get_args
+ 
+-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
++from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
++
++from efficiency_platform_agent.core.operation_progress import OperationVisiblePhase
+ 
+ 
+ def _validated_json(value: Any) -> Any:
+@@ -45,6 +47,7 @@
+     "stream_error",
+     "stream_done",
+ ]
++_OPERATION_VISIBLE_PHASES = frozenset(get_args(OperationVisiblePhase))
+ 
+ 
+ class RunStreamEventV1(BaseModel):
+@@ -62,5 +65,37 @@
+         default_factory=dict, description="脱敏后的严格 JSON 事件数据。"
+     )
+ 
+-
+-__all__ = ["JsonValue", "RunStreamEventV1", "StreamEventName"]
++    @model_validator(mode="after")
++    def validate_visible_phase(self) -> RunStreamEventV1:
++        """禁止事件载荷透传内部阶段，并约束可选进度计数。"""
++
++        progress: dict[str, int] = {}
++        for key in ("completed", "target"):
++            value = self.payload.get(key)
++            if value is None:
++                continue
++            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
++                raise ValueError(f"{key} 必须是非负整数")
++            progress[key] = value
++        if (
++            "completed" in progress
++            and "target" in progress
++            and progress["completed"] > progress["target"]
++        ):
++            raise ValueError("completed 不得大于 target")
++        phase = self.payload.get("phase")
++        if phase is None:
++            if self.event == "phase_started":
++                raise ValueError("phase_started 必须包含 phase")
++            return self
++        if not isinstance(phase, str) or phase not in _OPERATION_VISIBLE_PHASES:
++            raise ValueError("运营阶段必须是用户可见阶段")
++        return self
++
++
++__all__ = [
++    "JsonValue",
++    "OperationVisiblePhase",
++    "RunStreamEventV1",
++    "StreamEventName",
++]
+--- before/tests\contracts\test_stream_event_contracts.py
++++ after/tests\contracts\test_stream_event_contracts.py
+@@ -3,10 +3,12 @@
+ from __future__ import annotations
+ 
+ from datetime import UTC, datetime
++from typing import get_args
+ 
+ import pytest
+ from pydantic import ValidationError
+ 
++from efficiency_platform_agent.contracts import stream_events
+ from efficiency_platform_agent.contracts.deliverables import DeliverableV1
+ from efficiency_platform_agent.contracts.stream_events import RunStreamEventV1
+ 
+@@ -27,7 +29,6 @@
+         "run_started",
+         "intent_detected",
+         "clarification_required",
+-        "phase_started",
+         "assistant_started",
+         "assistant_delta",
+         "deliverable",
+@@ -80,6 +81,88 @@
+     assert RunStreamEventV1.model_validate_json(event.model_dump_json()) == event
+ 
+ 
++@pytest.mark.parametrize(
++    "phase",
++    [
++        "understanding_request",
++        "collecting_sources",
++        "checking_evidence",
++        "creating_content",
++        "checking_delivery",
++    ],
++)
++def test_phase_started_accepts_only_user_visible_phase_values(
++    phase: str,
++) -> None:
++    assert phase in get_args(stream_events.OperationVisiblePhase)
++    event = RunStreamEventV1(
++        event="phase_started",
++        run_id="run-1",
++        sequence=1,
++        payload={"phase": phase, "completed": 0, "target": 1},
++    )
++
++    assert event.payload["phase"] == phase
++
++
++@pytest.mark.parametrize(
++    "payload",
++    [
++        {"phase": "scenario_execution"},
++        {"phase": "research"},
++        {"phase": "creating_content", "completed": True, "target": 1},
++        {"phase": "creating_content", "completed": -1, "target": 1},
++        {"phase": "creating_content", "completed": 0, "target": False},
++        {"phase": "creating_content", "completed": 2, "target": 1},
++    ],
++)
++def test_phase_started_rejects_internal_phase_and_unsafe_progress(
++    payload: dict[str, object],
++) -> None:
++    with pytest.raises(ValidationError):
++        RunStreamEventV1(
++            event="phase_started", run_id="run-1", sequence=1, payload=payload
++        )
++
++
++@pytest.mark.parametrize(
++    "payload,error",
++    [
++        ({}, "phase_started 必须包含 phase"),
++        ({"completed": True, "target": 1}, "completed 必须是非负整数"),
++        ({"completed": -1, "target": 1}, "completed 必须是非负整数"),
++        ({"completed": 0, "target": False}, "target 必须是非负整数"),
++        ({"completed": 2, "target": 1}, "completed 不得大于 target"),
++    ],
++)
++def test_phase_started_rejects_missing_phase_and_independently_invalid_progress(
++    payload: dict[str, object], error: str
++) -> None:
++    with pytest.raises(ValidationError, match=error):
++        RunStreamEventV1(
++            event="phase_started", run_id="run-1", sequence=1, payload=payload
++        )
++
++
++@pytest.mark.parametrize(
++    "payload",
++    [
++        {"completed": True},
++        {"completed": -1},
++        {"target": False},
++        {"target": -1},
++        {"completed": 2, "target": 1},
++    ],
++)
++def test_progress_is_validated_even_when_non_phase_event_omits_phase(
++    payload: dict[str, object],
++) -> None:
++    with pytest.raises(ValidationError):
++        RunStreamEventV1(
++            event="quality_checked", run_id="run-1", sequence=1, payload=payload
++        )
++
++
+ def test_deliverable_requires_platform() -> None:
+     with pytest.raises(ValidationError):
+         DeliverableV1(title="标题", body="正文")
+--- before/src\efficiency_platform_agent\runtime\event_hub.py
++++ after/src\efficiency_platform_agent\runtime\event_hub.py
+@@ -20,6 +20,8 @@
+         "connection_string",
+         "dsn",
+         "exception",
++        "hidden_reasoning",
++        "model_candidates",
+         "password",
+         "prompt",
+         "rendered_prompt",
+@@ -27,7 +29,9 @@
+         "stack",
+         "stacktrace",
+         "token",
++        "tool_args",
+         "traceback",
++        "raw_page",
+     }
+ )
+ _SENSITIVE_TEXT = re.compile(
+--- before/src\efficiency_platform_agent\orchestration\builders\operation_runtime.py
++++ after/src\efficiency_platform_agent\orchestration\builders\operation_runtime.py
+@@ -23,6 +23,9 @@
+     decode_operation_request,
+ )
+ from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
++from efficiency_platform_agent.core.operation_progress import (
++    report_operation_progress,
++)
+ from efficiency_platform_agent.core.run import JsonObject
+ from efficiency_platform_agent.orchestration.builders.operation_supervisor import (
+     _CompiledOperationGraph,
+@@ -65,6 +68,7 @@
+                 or submission.request.request.user_id != request.request.user_id
+             ):
+                 raise ValueError("SCENARIO_IDENTITY_MISMATCH")
++            await report_operation_progress("understanding_request")
+             try:
+                 execution = await self.agent.execute(submission, run_id=state["run_id"])
+             except ValueError as error:
+--- before/src\efficiency_platform_agent\orchestration\supervisor.py
++++ after/src\efficiency_platform_agent\orchestration\supervisor.py
+@@ -63,6 +63,9 @@
+     SupervisorLimits,
+     TaskExecutionStatus,
+ )
++from efficiency_platform_agent.core.operation_progress import (
++    report_operation_progress,
++)
+ from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunResult
+ from efficiency_platform_agent.strategies.multi_agent.scheduler import BoundedScheduler
+ from efficiency_platform_agent.strategies.multi_agent.state import (
+@@ -150,6 +153,26 @@
+     )
+ 
+ 
++def _wave_progress_counts(
++    ready_nodes: tuple[Any, ...],
++    outcomes: tuple[Any, ...],
++    *,
++    research: bool,
++) -> tuple[int, int]:
++    """按任务类型隔离统计成功结果，返回 completed/target。"""
++
++    task_ids = {
++        node.task_id
++        for node in ready_nodes
++        if (node.task_type == "operation.research") is research
++    }
++    completed = sum(
++        outcome.task_id in task_ids and outcome.status is TaskExecutionStatus.SUCCEEDED
++        for outcome in outcomes
++    )
++    return completed, len(task_ids)
++
++
+ class ScenarioSupervisorAdapter:
+     """受控执行单个场景；该对象是图节点依赖，不拥有 Run 生命周期。"""
+ 
+@@ -200,6 +223,12 @@
+             "research-result/1",
+             self._RESEARCH_BUDGET.max_output_tokens,
+         )
++        await report_operation_progress("collecting_sources")
++        await report_operation_progress(
++            "collecting_sources",
++            event="research_started",
++            payload={"completed": 0, "target": 1},
++        )
+         try:
+             result = await asyncio.wait_for(
+                 provider.research(research_request),
+@@ -234,8 +263,16 @@
+         )
+         if not decision.accepted:
+             raise ValueError(
+-                decision.reason_codes[0] if decision.reason_codes else "EVIDENCE_INVALID"
++                decision.reason_codes[0]
++                if decision.reason_codes
++                else "EVIDENCE_INVALID"
+             )
++        await report_operation_progress("checking_evidence")
++        await report_operation_progress(
++            "checking_evidence",
++            event="research_completed",
++            payload={"completed": 1, "target": 1},
++        )
+         return replace(request, evidence_pack=pack)
+ 
+     async def execute_scenario(
+@@ -316,7 +353,59 @@
+         outcomes: dict[str, Any] = {}
+         cancelled = False
+         for _ in range(len(graph.tasks)):
++            ready_nodes = tuple(
++                node
++                for node in graph.tasks
++                if state["task_statuses"][node.task_id] == "ready"
++            )
++            research_wave = any(
++                node.task_type == "operation.research" for node in ready_nodes
++            )
++            content_wave = any(
++                node.task_type != "operation.research" for node in ready_nodes
++            )
++            _, research_target = _wave_progress_counts(ready_nodes, (), research=True)
++            _, content_target = _wave_progress_counts(ready_nodes, (), research=False)
++            if research_wave:
++                await report_operation_progress("collecting_sources")
++                await report_operation_progress(
++                    "collecting_sources",
++                    event="research_started",
++                    payload={"completed": 0, "target": research_target},
++                )
++            if content_wave:
++                await report_operation_progress("creating_content")
++                await report_operation_progress(
++                    "creating_content",
++                    event="content_generation_started",
++                    payload={"completed": 0, "target": content_target},
++                )
+             wave = await scheduler.run_wave(state)
++            research_completed, _ = _wave_progress_counts(
++                ready_nodes, wave.outcomes, research=True
++            )
++            content_completed, _ = _wave_progress_counts(
++                ready_nodes, wave.outcomes, research=False
++            )
++            if research_completed:
++                await report_operation_progress("checking_evidence")
++                await report_operation_progress(
++                    "checking_evidence",
++                    event="research_completed",
++                    payload={
++                        "completed": research_completed,
++                        "target": research_target,
++                    },
++                )
++            if content_wave:
++                await report_operation_progress(
++                    "creating_content",
++                    event="content_generation_completed",
++                    payload={
++                        "completed": content_completed,
++                        "target": content_target,
++                    },
++                )
+             if wave.cancelled:
+                 cancelled = True
+                 break
+--- before/src\efficiency_platform_agent\agents\operation\scenarios\service.py
++++ after/src\efficiency_platform_agent\agents\operation\scenarios\service.py
+@@ -16,6 +16,9 @@
+     compile_scenario_plan,
+ )
+ from efficiency_platform_agent.core.multi_agent import CompletionStatus
++from efficiency_platform_agent.core.operation_progress import (
++    report_operation_progress,
++)
+ 
+ from .contracts import (
+     ScenarioExecutionResult,
+@@ -121,9 +124,18 @@
+                 error_code=result.error_code or "SCENARIO_PARTIAL_INCOMPLETE",
+             )
+         if self.quality_gate is not None and result.deliverable_bundle is not None:
++            await report_operation_progress("checking_delivery")
+             report = self.quality_gate.validate(manifest, result)
+             if not isinstance(report, OperationQualityReport):
+                 raise ValueError("SCENARIO_QUALITY_REPORT_INVALID")
++            await report_operation_progress(
++                "checking_delivery",
++                event="quality_checked",
++                payload={
++                    "completed": len(result.deliverable_bundle.deliverables),
++                    "target": len(result.deliverable_bundle.deliverables),
++                },
++            )
+             bundle = replace(
+                 result.deliverable_bundle,
+                 quality_report_ids=tuple(
+--- before/tests\runtime\test_event_hub.py
++++ after/tests\runtime\test_event_hub.py
+@@ -118,6 +118,16 @@
+         ({"message": "postgresql://user:password@db/runtime"}, "password"),
+         ({"detail": "Traceback (most recent call last): internal"}, "internal"),
+         ({"nested": {"exception": "provider-private-error"}}, "provider-private-error"),
++        (
++            {"nested": [{"model_candidates": ["private-model"]}]},
++            "private-model",
++        ),
++        ({"nested": {"tool_args": {"query": "private-query"}}}, "private-query"),
++        ({"nested": [{"raw-page": "private-page"}]}, "private-page"),
++        (
++            {"nested": {"items": [{"hidden_reasoning": "private-reason"}]}},
++            "private-reason",
++        ),
+     ],
+ )
+ @pytest.mark.asyncio
+@@ -130,3 +140,16 @@
+         await hub.publish(event(1, payload=payload))
+ 
+     assert sensitive_value not in str(captured.value)
++
++
++@pytest.mark.asyncio
++async def test_publish_allows_normal_business_text_containing_token_word() -> None:
++    """结构化 token 键受禁，但普通业务正文中的同名单词不应误伤。"""
++
++    hub = EventHub()
++
++    await hub.publish(
++        event(1, payload={"delta": "本周讨论 token economy 与用户激励机制。"})
++    )
++
++    assert (await hub.replay("run-1", 0))[0].payload["delta"].startswith("本周讨论")
+--- before/tests\integration\test_operation_agent_runtime.py
++++ after/tests\integration\test_operation_agent_runtime.py
+@@ -1,7 +1,11 @@
+ """运营主链真实组件的离线集成，模型边界使用明确的固定替身。"""
+ 
+ import json
++from contextlib import nullcontext
+ from dataclasses import replace
++from importlib import import_module
++from importlib.util import find_spec
++from types import SimpleNamespace
+ 
+ import pytest
+ 
+@@ -155,6 +159,20 @@
+     return agent
+ 
+ 
++def operation_progress_binding(events):
++    """按期望的窄端口绑定测试记录器；模块尚未实现时先产生明确 RED。"""
++
++    assert find_spec("efficiency_platform_agent.runtime.operation_progress") is not None
++    progress = import_module("efficiency_platform_agent.runtime.operation_progress")
++
++    async def record(event, phase, payload):
++        events.append((event, phase, dict(payload)))
++
++    binder = getattr(progress, "bind_operation_progress", None)
++    assert binder is not None
++    return binder(record) if callable(binder) else nullcontext()
++
++
+ async def test_research_specialist_uses_provider_sources_and_model_output():
+     provider = ContentProvider()
+     source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
+@@ -164,6 +182,63 @@
+     assert provider.calls[0]["citations"][0]["url"] == "https://example.com/source"
+ 
+ 
++async def test_real_research_and_quality_boundaries_report_progress() -> None:
++    """研究波次和质量门禁必须从实际执行边界报告阶段。"""
++
++    progress_events = []
++    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
++
++    with operation_progress_binding(progress_events):
++        await build_research_agent(ContentProvider()).handle(source)
++
++    assert [
++        phase for event, phase, _payload in progress_events if event == "phase_started"
++    ] == ["collecting_sources", "checking_evidence", "checking_delivery"]
++    assert [event for event, _phase, _payload in progress_events].count(
++        "quality_checked"
++    ) == 1
++
++
++def test_mixed_wave_progress_counts_only_matching_successful_outcomes() -> None:
++    """混合波次的研究与创作计数必须按任务类型隔离并只计成功结果。"""
++
++    from efficiency_platform_agent.core.multi_agent import TaskExecutionStatus
++    from efficiency_platform_agent.orchestration.supervisor import (
++        _wave_progress_counts,
++    )
++
++    ready_nodes = (
++        SimpleNamespace(task_id="research", task_type="operation.research"),
++        SimpleNamespace(task_id="wechat", task_type="operation.channel_content"),
++        SimpleNamespace(task_id="toutiao", task_type="operation.channel_content"),
++    )
++    outcomes = (
++        SimpleNamespace(task_id="research", status=TaskExecutionStatus.FAILED),
++        SimpleNamespace(task_id="wechat", status=TaskExecutionStatus.SUCCEEDED),
++        SimpleNamespace(task_id="toutiao", status=TaskExecutionStatus.SUCCEEDED),
++    )
++
++    assert _wave_progress_counts(ready_nodes, outcomes, research=True) == (0, 1)
++    assert _wave_progress_counts(ready_nodes, outcomes, research=False) == (2, 2)
++
++
++async def test_failed_research_wave_does_not_claim_completed_success() -> None:
++    """研究 Specialist 失败后不得发送 research_completed 成功事件。"""
++
++    progress_events = []
++    source = submission_from_sample(sample_by_id("industry_digest.complete/1"))
++
++    with operation_progress_binding(progress_events):
++        execution = await build_research_agent(
++            ContentProvider(failure="research")
++        ).execute(source)
++
++    assert execution.deliverables is None
++    assert not any(
++        event == "research_completed" for event, _phase, _payload in progress_events
++    )
++
++
+ async def test_large_server_search_usage_keeps_industry_digest_generation_alive():
+     """研究 Specialist 不应把服务端搜索上下文误判为生成预算耗尽。"""
+ 
+@@ -559,42 +634,47 @@
+         )
+     )
+     runtime = GraphRuntime(registry)
+-    result = await runtime.execute(
+-        StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
+-        {
+-            "run_id": "run-task-e",
+-            "tenant_id": source.task_spec.tenant_id,
+-            "user_id": source.task_spec.user_id,
+-            "request_id": source.request.request.request_id,
+-            "strategy_payload_schema_version": "operation-strategy-payload/1",
+-            "strategy_payload": JsonObject(
+-                (
++    progress_events = []
++    with operation_progress_binding(progress_events):
++        result = await runtime.execute(
++            StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
++            {
++                "run_id": "run-task-e",
++                "tenant_id": source.task_spec.tenant_id,
++                "user_id": source.task_spec.user_id,
++                "request_id": source.request.request.request_id,
++                "strategy_payload_schema_version": "operation-strategy-payload/1",
++                "strategy_payload": JsonObject(
+                     (
+-                        "operation_request",
+-                        JsonObject(
+-                            (
+-                                ("operation_id", source.request.operation_id),
++                        (
++                            "operation_request",
++                            JsonObject(
+                                 (
+-                                    "request",
+-                                    JsonObject(
+-                                        (
++                                    ("operation_id", source.request.operation_id),
++                                    (
++                                        "request",
++                                        JsonObject(
+                                             (
+-                                                "request_id",
+-                                                source.request.request.request_id,
+-                                            ),
+-                                            ("tenant_id", source.task_spec.tenant_id),
+-                                            ("user_id", source.task_spec.user_id),
+-                                            ("input_text", "新品三平台文案"),
+-                                        )
++                                                (
++                                                    "request_id",
++                                                    source.request.request.request_id,
++                                                ),
++                                                (
++                                                    "tenant_id",
++                                                    source.task_spec.tenant_id,
++                                                ),
++                                                ("user_id", source.task_spec.user_id),
++                                                ("input_text", "新品三平台文案"),
++                                            )
++                                        ),
+                                     ),
+-                                ),
+-                            )
++                                )
++                            ),
+                         ),
+-                    ),
+-                )
+-            ),
+-        },
+-    )
++                    )
++                ),
++            },
++        )
+     assert result.next_status is RunStatus.SUCCEEDED
+     assert result.usage.input_tokens == 30
+     assert result.usage.output_tokens == 60
+@@ -606,6 +686,90 @@
+         len(dict(dict(result.output.items)["deliverable_set"].items)["deliverables"])
+         == 3
+     )
++    assert [
++        phase for event, phase, _payload in progress_events if event == "phase_started"
++    ] == ["understanding_request", "creating_content", "checking_delivery"]
++
++
++async def test_registered_research_content_graph_reports_all_real_phase_boundaries():
++    """真实解析、研究、内容波次和质量门禁组合后形成完整五阶段。"""
++
++    from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
++    from efficiency_platform_agent.core.run import JsonObject
++    from efficiency_platform_agent.orchestration.builders.operation_runtime import (
++        build_operation_multi_agent_registration,
++    )
++    from efficiency_platform_agent.orchestration.registry import GraphRegistry
++    from efficiency_platform_agent.orchestration.runtime import GraphRuntime
++    from efficiency_platform_agent.routing.strategy_router import StrategySelection
++
++    source = submission()
++    source = replace(
++        source,
++        task_spec=replace(source.task_spec, requires_research=True),
++    )
++
++    async def resolve(_request, _state):
++        return source
++
++    registry = GraphRegistry()
++    registry.register(
++        build_operation_multi_agent_registration(
++            build_research_agent(ContentProvider()), resolve
++        )
++    )
++    progress_events = []
++    with operation_progress_binding(progress_events):
++        result = await GraphRuntime(registry).execute(
++            StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
++            {
++                "run_id": "run-research-content",
++                "tenant_id": source.task_spec.tenant_id,
++                "user_id": source.task_spec.user_id,
++                "request_id": source.request.request.request_id,
++                "strategy_payload_schema_version": "operation-strategy-payload/1",
++                "strategy_payload": JsonObject(
++                    (
++                        (
++                            "operation_request",
++                            JsonObject(
++                                (
++                                    ("operation_id", source.request.operation_id),
++                                    (
++                                        "request",
++                                        JsonObject(
++                                            (
++                                                (
++                                                    "request_id",
++                                                    source.request.request.request_id,
++                                                ),
++                                                (
++                                                    "tenant_id",
++                                                    source.task_spec.tenant_id,
++                                                ),
++                                                ("user_id", source.task_spec.user_id),
++                                                ("input_text", "研究后生成三平台文案"),
++                                            )
++                                        ),
++                                    ),
++                                )
++                            ),
++                        ),
++                    )
++                ),
++            },
++        )
++
++    assert result.next_status is RunStatus.SUCCEEDED
++    assert [
++        phase for event, phase, _payload in progress_events if event == "phase_started"
++    ] == [
++        "understanding_request",
++        "collecting_sources",
++        "checking_evidence",
++        "creating_content",
++        "checking_delivery",
++    ]
+ 
+ 
+ async def test_missing_research_provider_fails_transparently():
+@@ -784,6 +948,10 @@
+     assert result.status.value == "succeeded"
+     assert result.usage.input_tokens == 30
+     assert result.usage.output_tokens == 60
++    events = await service.event_hub.replay(result.run_id, 0)
++    assert [
++        item.payload["phase"] for item in events if item.event == "phase_started"
++    ] == ["understanding_request", "creating_content", "checking_delivery"]
+ 
+ 
+ async def test_unknown_platform_is_not_silently_dropped():

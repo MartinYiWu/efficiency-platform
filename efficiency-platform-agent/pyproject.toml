@@ -21,10 +21,13 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     "charset-normalizer>=3,<4",
     "cos-python-sdk-v5>=1.9,<2",
+    "dateparser>=1.2.2,<2",
     "defusedxml>=0.7,<1",
     "docling>=2,<3",
     "fastapi>=0.135,<1",
     "fastexcel>=0.16,<1",
+    "feedparser>=6.0.12,<7",
+    "httpx>=0.28.1,<1",
     "jinja2>=3.1,<4",
     "langgraph>=1,<2",
     "langgraph-checkpoint-postgres>=3,<4",
@@ -47,7 +50,9 @@ dependencies = [
     "sqlalchemy>=2,<3",
     "taskiq>=0.11,<1",
     "taskiq-redis>=1,<2",
+    "trafilatura>=2,<3",
     "uvicorn>=0.52.4",
+    "tzdata>=2026.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -62,7 +67,6 @@ start-directory = "tests"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

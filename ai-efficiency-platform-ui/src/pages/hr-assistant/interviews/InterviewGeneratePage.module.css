@@ -1,0 +1,405 @@
+.stage {
+  min-height: calc(100vh - 120px);
+  overflow: hidden;
+  position: relative;
+  padding: 18px 0;
+}
+.backdrop {
+  background: rgba(15, 23, 42, 0.2);
+  inset: -18px 0;
+  position: absolute;
+}
+.dialog {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+  margin: 0 auto;
+  max-height: calc(100vh - 120px);
+  max-width: 680px;
+  overflow: auto;
+  position: relative;
+  width: calc(100% - 32px);
+}
+.dialogHeader {
+  align-items: flex-start;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+}
+.dialogHeader h1 {
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 28px;
+  margin: 0 !important;
+}
+.dialogHeader p,
+.hint {
+  color: #94a3b8;
+  font-size: 13px;
+  line-height: 20px;
+  margin: 4px 0 0;
+}
+.candidate,
+.batchCandidate {
+  align-items: center;
+  background: #f8fafc;
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  margin: 16px 24px 0;
+  min-width: 0;
+  padding: 12px;
+}
+.candidate > i,
+.avatarGroup i {
+  align-items: center;
+  background: #2563eb;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  font-size: 18px;
+  font-style: normal;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+.candidate b {
+  color: #0f172a;
+  font-size: 16px;
+}
+.candidate > span {
+  color: #475569;
+  font-size: 14px;
+}
+.candidate .ant-tag {
+  margin-left: auto;
+}
+.batchCandidate {
+  flex-wrap: wrap;
+}
+.batchCandidate > span {
+  color: #0f172a;
+  font-weight: 600;
+}
+.batchCandidate p {
+  color: #475569;
+  font-size: 13px;
+  margin: 0;
+  width: 100%;
+}
+.avatarGroup {
+  display: flex;
+  margin-left: 4px;
+}
+.avatarGroup i {
+  border: 2px solid #f8fafc;
+  font-size: 12px;
+  height: 27px;
+  margin-left: -7px;
+  width: 27px;
+}
+.avatarGroup i:last-child {
+  background: #7c3aed;
+}
+.form {
+  padding: 4px 24px 18px;
+}
+.formGroup {
+  margin-top: 18px;
+}
+.formGroup h2 {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+.pillGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.pillGroup button {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #334155;
+  cursor: pointer;
+  font: inherit;
+  height: 33px;
+  min-width: 92px;
+  padding: 0 16px;
+}
+.pillGroup button.selected {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+  font-weight: 600;
+}
+.roleGroup {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.roleCard {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #2563eb;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-height: 70px;
+  overflow: hidden;
+  padding: 10px;
+  position: relative;
+  text-align: left;
+}
+.roleCard > span {
+  color: #0f172a;
+  display: grid;
+  gap: 3px;
+}
+.roleCard small {
+  color: #64748b;
+  font-size: 11px;
+}
+.roleCard.selected {
+  background: #f8fbff;
+  border-color: #2563eb;
+}
+.cornerCheck {
+  background: #2563eb;
+  bottom: -3px;
+  color: #fff;
+  font-size: 11px;
+  padding: 3px 4px 5px;
+  position: absolute;
+  right: -3px;
+}
+.dimensionGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.dimension {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  color: #475569;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 6px;
+  height: 31px;
+  padding: 0 9px;
+}
+.dimension > span {
+  align-items: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 3px;
+  display: inline-flex;
+  height: 14px;
+  justify-content: center;
+  width: 14px;
+}
+.dimension.checked {
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+.dimension.checked > span {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+  font-size: 9px;
+}
+.custom {
+  border-style: dashed !important;
+  color: #2563eb !important;
+}
+.coverage {
+  background: #eff6ff;
+  border-radius: 6px;
+  display: grid;
+  gap: 7px;
+  margin-top: 18px;
+  padding: 12px;
+}
+.coverage > b {
+  color: #1e3a8a;
+  font-size: 13px;
+}
+.coverageRow {
+  align-items: center;
+  display: grid;
+  font-size: 13px;
+  gap: 8px;
+  grid-template-columns: 18px 66px 32px 16px 84px;
+}
+.coverageRow > span,
+.coverageRow > em {
+  color: #2563eb;
+  font-style: normal;
+}
+.coverageRow > strong {
+  color: #334155;
+  font-size: 12px;
+}
+.coverageRow > small {
+  color: #64748b;
+  font-size: 12px;
+  grid-column: 2 / -1;
+}
+.quantity {
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-top: 14px;
+  overflow: hidden;
+}
+.quantityHeader {
+  align-items: center;
+  background: #fff;
+  border: 0;
+  color: #334155;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  justify-content: space-between;
+  padding: 9px 12px;
+  width: 100%;
+}
+.quantityGrid {
+  border-top: 1px solid #e2e8f0;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 10px 12px;
+}
+.quantityGrid label {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+.quantityGrid label b {
+  color: #1e3a8a;
+  font-size: 12px;
+}
+.quantityGrid label span {
+  color: #475569;
+  flex: 1;
+  font-size: 12px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.quantityGrid label small {
+  color: #64748b;
+}
+.quantityGrid .ant-input-number {
+  width: 48px;
+}
+.quantityGrid p {
+  border-top: 1px dashed #cbd5e1;
+  color: #1e3a8a;
+  font-size: 13px;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  padding-top: 8px;
+  text-align: right;
+}
+.insight {
+  background: #eff6ff;
+  border-radius: 5px;
+  color: #4770be;
+  font-size: 12px;
+  line-height: 19px;
+  margin-top: 14px;
+  padding: 9px 10px;
+}
+.insight svg {
+  color: #2563eb;
+  margin-right: 6px;
+}
+.dialogFooter {
+  align-items: center;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  padding: 16px 24px;
+}
+.dialogFooter .ant-checkbox-wrapper {
+  color: #475569;
+  font-size: 13px;
+}
+.dialogFooter > div {
+  display: flex;
+  gap: 10px;
+}
+.generateButton {
+  background: linear-gradient(90deg, #2563eb, #7c3aed) !important;
+  border: 0 !important;
+}
+@media (max-width: 720px) {
+  .stage {
+    padding: 0;
+  }
+  .backdrop {
+    inset: 0;
+  }
+  .dialog {
+    border-radius: 0;
+    max-height: calc(100vh - 86px);
+    width: 100%;
+  }
+  .dialogHeader,
+  .dialogFooter {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .candidate,
+  .batchCandidate {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+  .candidate {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .candidate .ant-tag {
+    margin-left: 46px;
+  }
+  .form {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .roleGroup {
+    grid-template-columns: 1fr;
+  }
+  .roleCard {
+    min-height: 58px;
+  }
+  .coverageRow {
+    grid-template-columns: 16px 62px 28px 12px 72px;
+    gap: 4px;
+  }
+  .coverageRow > small {
+    line-height: 17px;
+  }
+  .quantityGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dialogFooter {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .dialogFooter > div {
+    width: 100%;
+  }
+  .dialogFooter > div .ant-btn {
+    flex: 1;
+  }
+}

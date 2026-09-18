@@ -17,11 +17,15 @@ from efficiency_platform_agent.agents.operation.scenarios.contracts import (
 from efficiency_platform_agent.agents.operation.specialists.model_backed import (
     plain,
 )
+from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
 from efficiency_platform_agent.contracts.operation_strategy import (
     OperationStrategyPayloadAdapter,
     decode_operation_request,
 )
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
+from efficiency_platform_agent.core.operation_progress import (
+    report_operation_progress,
+)
 from efficiency_platform_agent.core.run import JsonObject
 from efficiency_platform_agent.orchestration.builders.operation_supervisor import (
     _CompiledOperationGraph,
@@ -64,6 +68,7 @@ class OperationRuntimeGraphBuilder:
                 or submission.request.request.user_id != request.request.user_id
             ):
                 raise ValueError("SCENARIO_IDENTITY_MISMATCH")
+            await report_operation_progress("understanding_request")
             try:
                 execution = await self.agent.execute(submission, run_id=state["run_id"])
             except ValueError as error:
@@ -109,7 +114,10 @@ class OperationRuntimeGraphBuilder:
             return {
                 "next_status": "succeeded",
                 "output": {
-                    "content": result.summary,
+                    "delivery_contract_version": result.contract_version,
+                    "content": result.summary.message
+                    if isinstance(result, DeliverableSetV2)
+                    else result.summary,
                     "deliverable_set": result.model_dump(mode="json"),
                     "quality_report": asdict(execution.scenario_result.quality_report)
                     if execution.scenario_result

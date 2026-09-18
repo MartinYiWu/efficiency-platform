@@ -1,0 +1,29 @@
+.page {
+  display: grid;
+  gap: 18px;
+  max-width: 1420px;
+  margin: 0 auto;
+}
+.page h1 {
+  margin: 0 !important;
+  font-size: 25px !important;
+}
+.card {
+  display: grid;
+  min-height: 340px;
+  place-content: center;
+  justify-items: center;
+  text-align: center;
+}
+.card :global(.anticon) {
+  color: #1677ff;
+  font-size: 44px;
+}
+.card h2 {
+  margin: 16px 0 8px !important;
+  font-size: 18px !important;
+}
+.card :global(.ant-typography) {
+  max-width: 420px;
+  color: #64748b;
+}

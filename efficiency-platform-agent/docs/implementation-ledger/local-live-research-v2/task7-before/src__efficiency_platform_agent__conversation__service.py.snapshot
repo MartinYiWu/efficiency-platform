@@ -1,0 +1,1463 @@
+"""自然语言会话到唯一 Run 生命周期的受控门面。"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import inspect
+import re
+import time
+from collections import OrderedDict
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from typing import Any, Protocol, cast
+
+from efficiency_platform_agent.agents.operation.contracts.profiles import (
+    AudienceProfile,
+    BrandProfile,
+    CampaignProfile,
+    ChannelProfile,
+    IPProfile,
+    MetricProfile,
+    ProductProfile,
+    ProfileFact,
+    ProfileFactState,
+    ProfileKind,
+)
+from efficiency_platform_agent.agents.operation.contracts.task import (
+    ConditionImportance,
+    KeyCondition,
+    OperationDomain,
+    OperationGoal,
+    OperationGoalKind,
+    OperationObject,
+    OperationObjectKind,
+    OperationRequest,
+    SourceScope,
+)
+from efficiency_platform_agent.agents.operation.scenarios.contracts import (
+    ScenarioSubmission,
+)
+from efficiency_platform_agent.agents.operation.scenarios.registry import (
+    InMemoryScenarioPackRegistry,
+)
+from efficiency_platform_agent.contracts.conversation import (
+    ConversationMessageV1,
+    ConversationSubmitViewV1,
+)
+from efficiency_platform_agent.contracts.direct_conversation import (
+    DIRECT_CONVERSATION_CONTRACT_VERSION,
+    DirectConversationSubmission,
+)
+from efficiency_platform_agent.contracts.intent import (
+    IntentEnvelopeV1,
+    IntentRequirementsV1,
+)
+from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
+from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
+from efficiency_platform_agent.contracts.research_request_policy import (
+    has_explicit_time_window,
+    resolve_research_window,
+)
+from efficiency_platform_agent.contracts.stream_events import StreamEventName
+from efficiency_platform_agent.core.budget import BudgetCharge, BudgetGuard
+from efficiency_platform_agent.core.enums import StrategyMode
+from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunRequest
+from efficiency_platform_agent.core.runtime import UsageSnapshot
+from efficiency_platform_agent.harness.errors import HarnessError
+from efficiency_platform_agent.harness.referenced_inputs import (
+    reference_error,
+    requested_rank,
+    rewrite_intent,
+    select_ranked_reference,
+)
+from efficiency_platform_agent.harness.service import (
+    AgentRuntimeService,
+    RunPipelineContext,
+    RunPipelinePreparation,
+)
+from efficiency_platform_agent.orchestration.intent_fast_path import (
+    detect_fast_path_intent,
+)
+from efficiency_platform_agent.orchestration.intent_interpreter import IntentInterpreter
+from efficiency_platform_agent.orchestration.scenario_resolver import (
+    ScenarioResolution,
+    ScenarioResolver,
+)
+
+from .clarification import ClarificationManager
+from .context import ConversationContext, ConversationTurn
+from .direct_submission import DirectConversationSubmissionStore
+from .local_responder import LocalConversationResponder
+
+_PUBLIC_ID = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})")
+_PLATFORM_ALIASES = {
+    "xiaohongshu": "xiaohongshu",
+    "小红书": "xiaohongshu",
+    "wechat_official_account": "wechat_official_account",
+    "wechat-official-account": "wechat_official_account",
+    "wechat": "wechat_official_account",
+    "微信公众号": "wechat_official_account",
+    "公众号": "wechat_official_account",
+    "toutiao": "toutiao",
+    "今日头条": "toutiao",
+    "头条": "toutiao",
+}
+_DEFAULT_LATEST_TIME_WINDOW = "最近7天（默认最新信息窗口）"
+_UNBOUNDED_RESEARCH_TIME_WINDOW = "未限定时间范围（公开资料核验）"
+_GENERIC_RESEARCH_REFERENCES = frozenset(
+    {
+        "查一下",
+        "查最新",
+        "查一下最新",
+        "查询",
+        "查询最新",
+        "搜索",
+        "搜索最新",
+        "搜一下",
+        "搜一下最新",
+        "查找",
+        "查找最新",
+        "核实",
+        "核实一下",
+        "查证",
+        "验证",
+        "验证一下",
+        "获取最新信息",
+        "给我来源",
+        "给来源",
+        "来源",
+    }
+)
+_RESEARCH_REFERENCE_PREFIXES = ("那", "请", "麻烦", "帮我", "帮忙", "可以", "能否")
+_EXPLICIT_RESEARCH_MARKERS = (
+    "搜索",
+    "搜一下",
+    "查一下",
+    "查找",
+    "查询",
+    "核实",
+    "查证",
+    "验证",
+    "最新",
+    "来源",
+    "联网",
+)
+_NEGATED_RESEARCH_MARKERS = (
+    "不需要联网搜索",
+    "无需联网搜索",
+    "不用联网搜索",
+    "不要联网搜索",
+    "不需要联网",
+    "无需联网",
+    "不用联网",
+    "不要联网",
+    "不联网",
+    "不需要搜索",
+    "无需搜索",
+    "不用搜索",
+    "不要搜索",
+)
+_INDEPENDENT_CONTEXT_MARKERS = (
+    "不要引用刚才",
+    "不要引用之前",
+    "不要参考刚才",
+    "不要参考之前",
+    "不引用刚才",
+    "不引用之前",
+    "独立回答",
+)
+_DIRECT_QUESTION_MARKERS = ("解释", "是什么", "为什么", "怎么", "如何", "回答")
+_OPERATION_REQUEST_MARKERS = (
+    "写文案",
+    "写一篇",
+    "策划",
+    "活动方案",
+    "推广方案",
+    "生成内容",
+    "收集",
+    "行业新闻",
+    "行业动态",
+    "全球热点",
+)
+
+
+def _stable_id(prefix: str, value: str) -> str:
+    """把外部标识单向映射为领域允许的稳定小写标识。"""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}-{digest}"
+
+
+def _normalise_research_reference(value: str) -> str:
+    """压缩问法中的空白和标点，供研究主题是否明确的保守判断使用。"""
+    normalised = re.sub(r"[\s，。！？、；：,.!?;:]+", "", value).strip()
+    for prefix in _RESEARCH_REFERENCE_PREFIXES:
+        normalised = normalised.removeprefix(prefix)
+    return normalised.removesuffix("的")
+
+
+def _is_generic_research_reference(value: str | None) -> bool:
+    """识别没有可复用主题的短研究追问，避免把“给我来源”当作主题。"""
+    if not isinstance(value, str) or not value.strip():
+        return True
+    normalised = _normalise_research_reference(value)
+    return normalised in _GENERIC_RESEARCH_REFERENCES
+
+
+def _has_explicit_research_request(value: str) -> bool:
+    """以用户明示的在线核验词做确定性兜底，不依赖意图模型分类。"""
+    normalised = _normalise_research_reference(value)
+    for marker in _NEGATED_RESEARCH_MARKERS:
+        normalised = normalised.replace(marker, "")
+    return any(marker in normalised for marker in _EXPLICIT_RESEARCH_MARKERS)
+
+
+def _is_explicit_offline_independent_question(value: str) -> bool:
+    """识别用户明确要求切断研究上下文的普通问答，不猜测未表达的意图。"""
+
+    normalised = _normalise_research_reference(value)
+    return (
+        any(marker in normalised for marker in _NEGATED_RESEARCH_MARKERS)
+        and any(marker in normalised for marker in _INDEPENDENT_CONTEXT_MARKERS)
+        and any(marker in normalised for marker in _DIRECT_QUESTION_MARKERS)
+        and not any(marker in normalised for marker in _OPERATION_REQUEST_MARKERS)
+    )
+
+
+def _research_topic(
+    intent: IntentEnvelopeV1,
+    message: ConversationMessageV1,
+    context: ConversationContext,
+    *,
+    inherit_history: bool = False,
+    prefer_message: bool = False,
+) -> str | None:
+    """泛指追问继承历史；误分类的显式主题优先当前消息。"""
+    history = tuple(
+        turn.content for turn in reversed(context.turns) if turn.role == "user"
+    )
+    candidates: tuple[str | None, ...]
+    if inherit_history and _is_generic_research_reference(message.message):
+        candidates = history
+    elif prefer_message:
+        candidates = (message.message, intent.requirements.topic, intent.goal, *history)
+    else:
+        candidates = (intent.requirements.topic, intent.goal, message.message, *history)
+    for candidate in candidates:
+        if (
+            isinstance(candidate, str)
+            and candidate.strip()
+            and not _is_generic_research_reference(candidate)
+        ):
+            return candidate.strip()
+    return None
+
+
+def _research_time_window(
+    intent: IntentEnvelopeV1, message: ConversationMessageV1
+) -> str:
+    """为研究场景保留显式时间范围，并把“最新”收敛为可审计默认窗口。"""
+    if has_explicit_time_window(message.message):
+        return resolve_research_window(message.message).original_text or message.message
+    if intent.requirements.time_window:
+        return intent.requirements.time_window
+    if intent.time_range:
+        return intent.time_range
+    if "最新" in message.message or "最新" in intent.goal:
+        return _DEFAULT_LATEST_TIME_WINDOW
+    return _UNBOUNDED_RESEARCH_TIME_WINDOW
+
+
+def _normalise_research_intent(
+    intent: IntentEnvelopeV1,
+    message: ConversationMessageV1,
+    context: ConversationContext,
+) -> IntentEnvelopeV1:
+    """把研究标记的普通对话收敛到既有研究场景，禁止其落入 DIRECT。"""
+    explicit_research = _has_explicit_research_request(message.message)
+    if not (intent.needs_research or explicit_research) or intent.task_type not in {
+        "general_chat",
+        "industry_digest",
+    }:
+        return intent
+    topic = _research_topic(
+        intent,
+        message,
+        context,
+        inherit_history=explicit_research,
+        prefer_message=explicit_research and not intent.needs_research,
+    )
+    time_window = _research_time_window(intent, message)
+    goal = f"公开资料核验：{topic}" if explicit_research and topic else intent.goal
+    if time_window == _DEFAULT_LATEST_TIME_WINDOW:
+        goal = f"{goal}；时间范围为{time_window}，请在最终回答中说明该默认窗口"
+    return intent.model_copy(
+        update={
+            "domain": "公开资料研究",
+            "goal": goal,
+            "task_type": "industry_digest",
+            "needs_research": True,
+            "needs_multi_agent": True,
+            "requirements": IntentRequirementsV1(
+                topic=topic,
+                time_window=time_window,
+            ),
+            "missing_fields": [] if topic is not None else ["topic"],
+            "needs_clarification": topic is None,
+        }
+    )
+
+
+def _requested_deliverables(manifest, intent: IntentEnvelopeV1):
+    """把多平台场景的公开请求范围收敛到用户明确指定的平台。"""
+
+    declared = manifest.output_requirements
+    if manifest.scenario_id != "multi_platform_content":
+        return declared
+    platforms = intent.requirements.platforms
+    if not platforms:
+        return declared
+    requested: set[str] = set()
+    for item in platforms:
+        key = item.strip().lower()
+        canonical = _PLATFORM_ALIASES.get(key)
+        if canonical is None:
+            raise HarnessError(
+                "UNSUPPORTED_PLATFORM",
+                "包含暂不支持的平台，请改为小红书、微信公众号或今日头条",
+                category="request",
+            )
+        requested.add(canonical)
+    selected = tuple(
+        requirement
+        for requirement in declared
+        if any(
+            channel.strip().lower().replace("-", "_") in requested
+            for channel in requirement.channel_ids
+        )
+    )
+    if not selected:
+        raise HarnessError(
+            "UNSUPPORTED_PLATFORM",
+            "没有可执行的平台范围",
+            category="request",
+        )
+    return selected
+
+
+def _merge_pending_intent(
+    previous: IntentEnvelopeV1 | None, current: IntentEnvelopeV1
+) -> IntentEnvelopeV1:
+    """澄清轮只补齐缺失字段，不覆盖上一轮已确认的结构化约束。"""
+
+    if previous is None:
+        return current
+    if (
+        previous.task_type != current.task_type
+        and not _is_clarification_answer(previous, current)
+    ):
+        return current
+    missing = set(previous.missing_fields)
+    if not missing:
+        return current
+    prior_values = previous.requirements.model_dump(mode="python")
+    current_values = current.requirements.model_dump(mode="python")
+    merged_values = dict(prior_values)
+    resolved: set[str] = set()
+    for field_name in missing:
+        candidate = current_values.get(field_name)
+        if candidate in {None, "", ()} and _is_temporal_field(field_name):
+            candidate = current.time_range or current.goal
+        if candidate not in {None, "", ()}:
+            merged_values[field_name] = candidate
+            resolved.add(field_name)
+    merged_requirements = type(previous.requirements).model_validate(merged_values)
+    unresolved = [item for item in previous.missing_fields if item not in resolved]
+    return previous.model_copy(
+        update={
+            "requirements": merged_requirements,
+            "missing_fields": unresolved,
+            "needs_clarification": bool(unresolved),
+            "confidence": current.confidence,
+            "model_hint": current.model_hint or previous.model_hint,
+            "needs_research": previous.needs_research or current.needs_research,
+            "needs_multi_agent": (
+                previous.needs_multi_agent or current.needs_multi_agent
+            ),
+        }
+    )
+
+
+_TEMPORAL_REQUIREMENT_FIELDS = frozenset(
+    {
+        "time_window",
+        "planning_window",
+        "incubation_window",
+        "campaign_window",
+        "calendar_window",
+        "experiment_window",
+        "review_window",
+    }
+)
+_DATE_ANSWER = re.compile(
+    r"(?:20\d{2}[-/.年]\d{1,2}[-/.月]\d{1,2}日?|今天|明天|后天|昨天|"
+    r"本周|下周|上周|本月|下月|\d+\s*(?:天|周|月))"
+)
+_STANDALONE_REQUEST_MARKERS = (
+    "请",
+    "收集",
+    "搜索",
+    "写",
+    "策划",
+    "解释",
+    "什么",
+    "输出",
+    "忽略",
+    "告诉我",
+)
+
+
+def _is_temporal_field(field_name: str) -> bool:
+    return field_name in _TEMPORAL_REQUIREMENT_FIELDS
+
+
+def _is_clarification_answer(
+    previous: IntentEnvelopeV1, current: IntentEnvelopeV1
+) -> bool:
+    """只在当前文本确实像缺失字段答案时延续旧任务，否则开始新意图。"""
+
+    text = current.goal.strip()
+    if any(marker in text for marker in _STANDALONE_REQUEST_MARKERS):
+        return False
+    missing = tuple(previous.missing_fields)
+    if len(missing) != 1:
+        return False
+    field_name = missing[0]
+    if _is_temporal_field(field_name):
+        return _DATE_ANSWER.search(text) is not None
+    candidate = current.requirements.model_dump(mode="python").get(field_name)
+    return candidate not in {None, "", ()}
+
+
+def _operation_input_text(message: str, intent: IntentEnvelopeV1) -> str:
+    """把当前消息与已解析结构化约束合成为 Specialist 的完整输入。"""
+
+    constraints = tuple(
+        f"{name}={value}"
+        for name, value in intent.requirements.model_dump(mode="python").items()
+        if name != "contract_version" and value not in {None, "", ()}
+    )
+    sections = [f"目标：{intent.goal}"]
+    if constraints:
+        sections.append("已确认约束：" + "；".join(constraints))
+    if message.strip() != intent.goal.strip():
+        sections.append(f"当前补充：{message.strip()}")
+    return "\n".join(sections)
+
+
+@dataclass(frozen=True, slots=True)
+class _SubmissionEntry:
+    tenant_id: str
+    request_id: str
+    submission: ScenarioSubmission
+    expires_at: float
+
+
+class ConversationSubmissionStore:
+    """把一次意图解析结果交给同一 Run 内的 SubmissionResolver。"""
+
+    def __init__(
+        self,
+        *,
+        max_entries: int = 1_024,
+        ttl_seconds: float = 300,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries 必须为正数")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds 必须为正数")
+        self.max_entries = max_entries
+        self.ttl_seconds = ttl_seconds
+        self.monotonic = monotonic
+        self._entries: OrderedDict[tuple[str, str], _SubmissionEntry] = OrderedDict()
+        self._lock = asyncio.Lock()
+
+    async def put(self, submission: ScenarioSubmission) -> None:
+        """在调度前保存不可变提交，避免图启动后竞态。"""
+        request = submission.request.request
+        async with self._lock:
+            self._purge_expired(self.monotonic())
+            key = (request.tenant_id, request.request_id)
+            if key not in self._entries and len(self._entries) >= self.max_entries:
+                raise ValueError("CONVERSATION_SUBMISSION_CAPACITY_EXCEEDED")
+            self._entries[key] = _SubmissionEntry(
+                request.tenant_id,
+                request.request_id,
+                submission,
+                self.monotonic() + self.ttl_seconds,
+            )
+            self._entries.move_to_end(key)
+
+    async def resolve(
+        self, request: OperationRequest, state: dict[str, Any]
+    ) -> ScenarioSubmission:
+        """按租户和 request_id 取回解析结果，不再次调用意图模型。"""
+        key = (request.request.tenant_id, request.request.request_id)
+        async with self._lock:
+            self._purge_expired(self.monotonic())
+            entry = self._entries.get(key)
+            if entry is None:
+                raise ValueError("CONVERSATION_SUBMISSION_NOT_FOUND")
+            if state.get("tenant_id") != entry.tenant_id:
+                raise ValueError("SCENARIO_IDENTITY_MISMATCH")
+            self._entries.pop(key, None)
+            return entry.submission
+
+    async def discard(self, tenant_id: str, request_id: str) -> None:
+        """终态或提前取消时清除尚未被图消费的提交。"""
+        async with self._lock:
+            self._entries.pop((tenant_id, request_id), None)
+
+    def _purge_expired(self, now: float) -> None:
+        """清除未被图消费且已超过短期交接窗口的提交。"""
+        for key, entry in tuple(self._entries.items()):
+            if entry.expires_at <= now:
+                self._entries.pop(key, None)
+
+
+@dataclass(frozen=True, slots=True)
+class _IdempotencyEntry:
+    conversation_id: str
+    user_id: str
+    message: str
+    view: ConversationSubmitViewV1
+    expires_at: float
+
+
+@dataclass(slots=True)
+class _ContextEntry:
+    context: ConversationContext
+    expires_at: float
+    waiting_runs: set[str] = field(default_factory=set)
+    turn_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    pending_intent: IntentEnvelopeV1 | None = None
+    latest_run: tuple[str, str] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _ActiveRun:
+    tenant_id: str
+    request_id: str
+    context_key: tuple[str, str]
+    context_entry: _ContextEntry
+
+
+class IntentV2ConversationCoordinator(Protocol):
+    """可选 V2 接线点；返回 None 时继续既有 V1 路径。"""
+
+    async def prepare(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+    ) -> RunPipelinePreparation | None: ...
+
+
+class ConversationService:
+    """把基础会话与运营意图分派到受控 DIRECT 或 MULTI_AGENT Run。"""
+
+    def __init__(
+        self,
+        *,
+        runtime: AgentRuntimeService,
+        interpreter: IntentInterpreter,
+        resolver: ScenarioResolver,
+        submissions: ConversationSubmissionStore,
+        direct_submissions: DirectConversationSubmissionStore | None = None,
+        clarification: ClarificationManager | None = None,
+        fast_path_detector: Callable[
+            [str, ConversationContext], IntentEnvelopeV1 | None
+        ]
+        | None = detect_fast_path_intent,
+        intent_v2_coordinator: IntentV2ConversationCoordinator | None = None,
+        max_contexts: int = 256,
+        max_requests: int = 2_048,
+        max_active_runs: int = 1_024,
+        ttl_seconds: float = 3_600,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        if max_contexts < 1 or max_requests < 1 or max_active_runs < 1:
+            raise ValueError("缓存容量必须为正数")
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds 必须为正数")
+        self.runtime = runtime
+        self.interpreter = interpreter
+        self.resolver = resolver
+        self.submissions = submissions
+        self.direct_submissions = (
+            direct_submissions or DirectConversationSubmissionStore()
+        )
+        self.local_responder = LocalConversationResponder()
+        self.clarification = clarification or ClarificationManager()
+        self.fast_path_detector = fast_path_detector
+        self.intent_v2_coordinator = intent_v2_coordinator
+        self.max_contexts = max_contexts
+        self.max_requests = max_requests
+        self.max_active_runs = max_active_runs
+        self.ttl_seconds = ttl_seconds
+        self.monotonic = monotonic
+        self._contexts: OrderedDict[tuple[str, str], _ContextEntry] = OrderedDict()
+        self._requests: OrderedDict[tuple[str, str], _IdempotencyEntry] = OrderedDict()
+        self._pending: dict[
+            tuple[str, str], asyncio.Future[ConversationSubmitViewV1]
+        ] = {}
+        self._active_runs: dict[str, _ActiveRun] = {}
+        self._lock = asyncio.Lock()
+        register = getattr(runtime, "add_run_state_listener", None)
+        if callable(register):
+            register(self.on_run_state)
+
+    async def submit(
+        self,
+        conversation_id: str,
+        tenant_id: str,
+        message: ConversationMessageV1,
+    ) -> ConversationSubmitViewV1:
+        """提交一轮消息；同租户 request_id 只创建一个 Run。"""
+        if (
+            not isinstance(conversation_id, str)
+            or _PUBLIC_ID.fullmatch(conversation_id) is None
+        ):
+            raise HarnessError(
+                "INVALID_CONVERSATION_ID", "会话标识无效", category="request"
+            )
+        if not tenant_id.strip():
+            raise HarnessError("INVALID_TENANT", "租户标识无效", category="request")
+        request_key = (tenant_id, message.request_id)
+        context_key = (tenant_id, conversation_id)
+        owner = False
+        async with self._lock:
+            now = self.monotonic()
+            self._purge_expired(now)
+            existing = self._requests.get(request_key)
+            if existing is not None:
+                if (
+                    existing.conversation_id != conversation_id
+                    or existing.user_id != message.user_id
+                    or existing.message != message.message
+                ):
+                    raise HarnessError(
+                        "REQUEST_ID_CONFLICT",
+                        "request_id 已用于其他消息",
+                        category="request",
+                    )
+                self._requests.move_to_end(request_key)
+                return existing.view
+            pending = self._pending.get(request_key)
+            if pending is None:
+                if len(self._pending) + len(self._active_runs) >= self.max_active_runs:
+                    raise HarnessError(
+                        "CONVERSATION_CAPACITY_EXCEEDED",
+                        "当前会话任务过多，请稍后重试",
+                        category="runtime",
+                        retryable=True,
+                    )
+                pending = asyncio.get_running_loop().create_future()
+                self._pending[request_key] = pending
+                owner = True
+            context_entry = self._context_entry(context_key, now)
+
+        if not owner:
+            return await asyncio.shield(pending)
+
+        raw_request = CreateRunRequestV1(
+            request_id=message.request_id,
+            tenant_id=tenant_id,
+            user_id=message.user_id,
+            input_text=message.message,
+            requested_strategy=StrategyMode.MULTI_AGENT,
+            strategy_payload_schema_version="operation-strategy-payload/1",
+            strategy_payload={},
+        )
+
+        async def prepare(pipeline: RunPipelineContext) -> RunPipelinePreparation:
+            return await self._prepare_pipeline(
+                pipeline,
+                tenant_id,
+                conversation_id,
+                message,
+                context_key,
+                context_entry,
+                previous_run,
+            )
+
+        queued_view: ConversationSubmitViewV1 | None = None
+        previous_run: tuple[str, str] | None = None
+
+        async def on_queued(run: Any) -> None:
+            """在后台任务可运行前原子登记幂等键与活动 Run。"""
+            nonlocal queued_view, previous_run
+            view = ConversationSubmitViewV1(
+                conversation_id=conversation_id,
+                turn_id=_stable_id("turn", message.request_id),
+                run_id=run.run_id,
+                status="queued",
+            )
+            async with self._lock:
+                previous_run = context_entry.latest_run
+                context_entry.latest_run = (run.run_id, message.user_id)
+                expires_at = self.monotonic() + self.ttl_seconds
+                self._requests[request_key] = _IdempotencyEntry(
+                    conversation_id,
+                    message.user_id,
+                    message.message,
+                    view,
+                    expires_at,
+                )
+                self._requests.move_to_end(request_key)
+                self._evict_requests()
+                self._active_runs[run.run_id] = _ActiveRun(
+                    tenant_id, message.request_id, context_key, context_entry
+                )
+                self._pending.pop(request_key, None)
+                if not pending.done():
+                    pending.set_result(view)
+                queued_view = view
+
+        try:
+            await self.runtime.create_and_schedule_pipeline(
+                raw_request, prepare, on_queued=on_queued
+            )
+            if queued_view is None:
+                raise RuntimeError("PIPELINE_QUEUED_CALLBACK_MISSING")
+            return queued_view
+        except Exception as error:
+            async with self._lock:
+                self._pending.pop(request_key, None)
+                if not pending.done():
+                    pending.set_exception(error)
+                    pending.exception()
+            raise
+
+    async def _prepare_pipeline(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+        context_key: tuple[str, str],
+        entry: _ContextEntry,
+        previous_run: tuple[str, str] | None = None,
+    ) -> RunPipelinePreparation:
+        """在后台解释意图；全局锁不跨任何模型 I/O。"""
+        started = self.monotonic()
+        async with entry.turn_lock:
+            referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
+            rank = requested_rank(message.message)
+            reference_intent = None
+            if rank is not None:
+                if previous_run is None or previous_run[1] != message.user_id:
+                    raise reference_error()
+                try:
+                    previous_view = await self.runtime.get_run(
+                        previous_run[0], tenant_id
+                    )
+                except HarnessError as error:
+                    raise reference_error() from error
+                referenced_inputs = (
+                    select_ranked_reference(
+                        previous_view,
+                        rank,
+                        tenant_id=tenant_id,
+                        user_id=message.user_id,
+                        conversation_id=conversation_id,
+                    ),
+                )
+                reference_intent = rewrite_intent(message.message)
+            async with self._lock:
+                context = ConversationContext()
+                for turn in () if referenced_inputs else entry.context.turns:
+                    context.append(turn)
+                entry.expires_at = self.monotonic() + self.ttl_seconds
+                if self._contexts.get(context_key) is entry:
+                    self._contexts.move_to_end(context_key)
+            local_response = (
+                self.local_responder.respond(message.message)
+                if entry.pending_intent is None
+                else None
+            )
+            if local_response is not None:
+                return await self._prepare_direct(
+                    pipeline,
+                    tenant_id,
+                    message,
+                    context,
+                    entry,
+                    local_response,
+                    UsageSnapshot(),
+                    False,
+                    BudgetCharge(),
+                    started,
+                )
+            if _is_explicit_offline_independent_question(message.message):
+                return await self._prepare_direct(
+                    pipeline,
+                    tenant_id,
+                    message,
+                    ConversationContext(),
+                    entry,
+                    None,
+                    UsageSnapshot(),
+                    False,
+                    BudgetCharge(),
+                    started,
+                )
+            # 已进入 V1 澄清的任务必须继续由 V1 消费；只允许新任务尝试 V2。
+            if (
+                reference_intent is None
+                and self.intent_v2_coordinator is not None
+                and entry.pending_intent is None
+            ):
+                v2_preparation = await self.intent_v2_coordinator.prepare(
+                    pipeline,
+                    tenant_id,
+                    conversation_id,
+                    message,
+                )
+                if v2_preparation is not None:
+                    return v2_preparation
+            usage = UsageSnapshot()
+            degraded = False
+            charge = BudgetCharge()
+            intent = reference_intent or (
+                self.fast_path_detector(message.message, context)
+                if self.fast_path_detector is not None
+                else None
+            )
+            if intent is None:
+                execute = getattr(self.interpreter, "execute", None)
+                if callable(execute):
+                    execution = await self._execute_intent(
+                        execute, message.message, context, pipeline
+                    )
+                    intent = cast(IntentEnvelopeV1, execution.intent)
+                    usage = cast(UsageSnapshot, execution.usage)
+                    degraded = bool(execution.degraded)
+                    charge = self._intent_charge(execution)
+                else:
+                    intent = await self.interpreter.interpret(message.message, context)
+                    charge = BudgetCharge(iterations=1)
+            if reference_intent is None:
+                intent = _merge_pending_intent(entry.pending_intent, intent)
+                intent = _normalise_research_intent(intent, message, context)
+            if await pipeline.is_cancelled():
+                cancelled = HarnessError("CANCELLED", "运行已取消", category="runtime")
+                cast(Any, cancelled).usage = usage
+                cast(Any, cancelled).degraded = degraded
+                raise cancelled
+            if intent.task_type == "general_chat":
+                return await self._prepare_direct(
+                    pipeline,
+                    tenant_id,
+                    message,
+                    context,
+                    entry,
+                    None,
+                    usage,
+                    degraded,
+                    charge,
+                    started,
+                )
+            resolution = self.resolver.resolve(intent)
+            if resolution.scenario_id is None or resolution.semantic_version is None:
+                raise HarnessError(
+                    "UNKNOWN_SCENARIO", "无法匹配受控运营场景", category="request"
+                )
+            actual_missing = tuple(
+                dict.fromkeys(
+                    item.replace("-", "_")
+                    for item in (
+                        *resolution.missing_condition_ids,
+                        *resolution.missing_profile_fields,
+                    )
+                )
+            )
+            if actual_missing:
+                intent = intent.model_copy(
+                    update={
+                        "missing_fields": list(actual_missing),
+                        "needs_clarification": True,
+                    }
+                )
+            elif intent.missing_fields or intent.needs_clarification:
+                intent = intent.model_copy(
+                    update={"missing_fields": [], "needs_clarification": False}
+                )
+            operation_request, submission, question, missing_fields = (
+                self._build_submission(
+                    tenant_id, conversation_id, message, intent, resolution
+                )
+            )
+            submission = replace(submission, referenced_inputs=referenced_inputs)
+            await self.submissions.put(submission)
+            async with self._lock:
+                entry.context.append(ConversationTurn("user", message.message))
+                if question is not None:
+                    entry.context.append(ConversationTurn("assistant", question))
+                    entry.pending_intent = intent
+                else:
+                    entry.pending_intent = None
+                entry.expires_at = self.monotonic() + self.ttl_seconds
+            events: list[tuple[StreamEventName, dict[str, Any]]] = [
+                (
+                    "intent_detected",
+                    {
+                        "domain": intent.domain,
+                        "task_type": intent.task_type,
+                        "scenario_id": resolution.scenario_id,
+                        "confidence": intent.confidence,
+                        "degraded": degraded,
+                    },
+                )
+            ]
+            if question is not None:
+                events.append(
+                    (
+                        "clarification_required",
+                        {"question": question, "fields": list(missing_fields)},
+                    )
+                )
+            if usage != UsageSnapshot() or degraded:
+                events.append(
+                    (
+                        "usage_update",
+                        {
+                            "input_tokens": usage.input_tokens,
+                            "output_tokens": usage.output_tokens,
+                            "cost_microunits": usage.cost_microunits,
+                            "estimated": usage.estimated,
+                            "degraded": degraded,
+                        },
+                    )
+                )
+            prepared = CreateRunRequestV1(
+                request_id=message.request_id,
+                tenant_id=tenant_id,
+                user_id=message.user_id,
+                input_text=message.message,
+                requested_strategy=StrategyMode.MULTI_AGENT,
+                strategy_payload_schema_version="operation-strategy-payload/1",
+                strategy_payload={
+                    "operation_request": self._operation_payload(operation_request)
+                },
+            )
+            return RunPipelinePreparation(
+                prepared, tuple(events), usage, degraded, charge
+            )
+
+    async def _prepare_direct(
+        self,
+        pipeline: RunPipelineContext,
+        tenant_id: str,
+        message: ConversationMessageV1,
+        context: ConversationContext,
+        entry: _ContextEntry,
+        local_response: str | None,
+        usage: UsageSnapshot,
+        degraded: bool,
+        charge: BudgetCharge,
+        started: float,
+    ) -> RunPipelinePreparation:
+        """保存普通对话提交，并从统一快照扣除意图消耗和准备耗时。"""
+        try:
+            if await pipeline.is_cancelled():
+                raise HarnessError("CANCELLED", "运行已取消", category="runtime")
+            available = pipeline.remaining_budget
+            budget = ExecutionBudget(
+                available.iterations,
+                available.tool_calls,
+                available.input_tokens,
+                available.output_tokens,
+                available.timeout_ms,
+                available.cost_microunits,
+            )
+            guard = BudgetGuard()
+            elapsed = max(0, int((self.monotonic() - started) * 1_000))
+            state, _ = guard.record_after_node(
+                budget,
+                guard.start(budget, now_epoch_ms=0),
+                charge,
+                now_epoch_ms=elapsed,
+            )
+            remaining = guard.check_before_node(
+                budget,
+                state,
+                BudgetCharge(iterations=1, input_tokens=1, output_tokens=1),
+                now_epoch_ms=elapsed,
+            )
+            submission = DirectConversationSubmission(
+                DIRECT_CONVERSATION_CONTRACT_VERSION,
+                RunRequest(
+                    message.request_id, tenant_id, message.user_id, message.message
+                ),
+                context.provider_messages(),
+                message.message,
+                local_response,
+                remaining,
+            )
+            # 与终态监听共用锁，防止取消清理后出现迟到的提交写入。
+            async with self._lock:
+                if pipeline.run_id not in self._active_runs:
+                    raise HarnessError("CANCELLED", "运行已取消", category="runtime")
+                await self.direct_submissions.put(submission)
+                entry.context.append(ConversationTurn("user", message.message))
+                entry.pending_intent = None
+                entry.expires_at = self.monotonic() + self.ttl_seconds
+        except Exception as error:
+            cast(Any, error).usage = usage
+            cast(Any, error).degraded = degraded
+            cast(Any, error).charge = charge
+            raise
+        return RunPipelinePreparation(
+            CreateRunRequestV1(
+                request_id=message.request_id,
+                tenant_id=tenant_id,
+                user_id=message.user_id,
+                input_text=message.message,
+                requested_strategy=StrategyMode.DIRECT,
+                strategy_payload_schema_version="strategy.none/1",
+                strategy_payload={},
+            ),
+            (),
+            usage,
+            degraded,
+            charge,
+        )
+
+    async def _execute_intent(
+        self,
+        execute: Callable[..., Any],
+        text: str,
+        context: ConversationContext,
+        pipeline: RunPipelineContext,
+    ) -> Any:
+        """竞速意图模型与 Run 取消，并回收仍在进行的模型任务。"""
+        arguments: dict[str, Any] = {}
+        if "remaining_budget" in inspect.signature(execute).parameters:
+            arguments["remaining_budget"] = pipeline.remaining_budget
+        model_task = asyncio.create_task(execute(text, context, **arguments))
+        cancellation_task: asyncio.Future[None] = asyncio.ensure_future(
+            pipeline.wait_cancelled()
+        )
+        done, _ = await asyncio.wait(
+            {model_task, cancellation_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if cancellation_task in done:
+            model_task.cancel()
+            outcome = (await asyncio.gather(model_task, return_exceptions=True))[0]
+            usage = getattr(outcome, "usage", UsageSnapshot())
+            if not isinstance(usage, UsageSnapshot):
+                usage = UsageSnapshot()
+            degraded = bool(getattr(outcome, "degraded", False))
+            attempts = getattr(outcome, "attempts", ())
+            cancelled = HarnessError("CANCELLED", "运行已取消", category="runtime")
+            cast(Any, cancelled).usage = usage
+            cast(Any, cancelled).degraded = degraded
+            cast(Any, cancelled).attempts = attempts
+            cast(Any, cancelled).charge = self._intent_charge(
+                outcome, minimum_iterations=1
+            )
+            raise cancelled
+        cancellation_task.cancel()
+        await asyncio.gather(cancellation_task, return_exceptions=True)
+        try:
+            return model_task.result()
+        except Exception as error:
+            cast(Any, error).charge = self._intent_charge(error)
+            raise
+
+    @staticmethod
+    def _intent_charge(value: Any, *, minimum_iterations: int = 0) -> BudgetCharge:
+        """按 IntentExecution 的实际候选尝试数构造不可变消耗。"""
+        usage = getattr(value, "usage", UsageSnapshot())
+        if not isinstance(usage, UsageSnapshot):
+            usage = UsageSnapshot()
+        attempts = getattr(value, "attempts", ())
+        count = len(attempts) if isinstance(attempts, tuple) else 0
+        return BudgetCharge(
+            iterations=max(minimum_iterations, count),
+            input_tokens=usage.input_tokens,
+            output_tokens=usage.output_tokens,
+            cost_microunits=usage.cost_microunits,
+        )
+
+    def _build_submission(
+        self,
+        tenant_id: str,
+        conversation_id: str,
+        message: ConversationMessageV1,
+        intent: IntentEnvelopeV1,
+        resolution: ScenarioResolution,
+    ) -> tuple[OperationRequest, ScenarioSubmission, str | None, tuple[str, ...]]:
+        """依据权威 Manifest 生成最小 ScenarioSubmission。"""
+        scenario_id = resolution.scenario_id
+        semantic_version = resolution.semantic_version
+        if scenario_id is None or semantic_version is None:
+            raise HarnessError(
+                "UNKNOWN_SCENARIO", "无法匹配受控运营场景", category="request"
+            )
+        registry = self.resolver.registry
+        if not isinstance(registry, InMemoryScenarioPackRegistry):
+            manifest = registry.get(scenario_id, semantic_version)
+        else:
+            manifest = registry.get(scenario_id, semantic_version)
+        operation_id = _stable_id("operation", message.request_id)
+        task_id = _stable_id("task", message.request_id)
+        domains = self._domains_for_scenario(scenario_id)
+        base = RunRequest(
+            request_id=message.request_id,
+            tenant_id=tenant_id,
+            user_id=message.user_id,
+            input_text=_operation_input_text(message.message, intent),
+        )
+        operation = OperationRequest(
+            "operation-request/1",
+            base,
+            operation_id,
+            _stable_id("session", conversation_id),
+            None,
+            domains,
+            _requested_deliverables(manifest, intent),
+        )
+        values = {
+            item.condition_id: JsonObject(
+                (
+                    (
+                        item.condition_id,
+                        item.value,
+                    ),
+                )
+            )
+            for item in resolution.condition_values
+        }
+        missing = resolution.missing_condition_ids
+        profile_missing = resolution.missing_profile_fields
+        missing = tuple(dict.fromkeys((*missing, *profile_missing)))
+        low_confidence = intent.confidence < self.resolver.confidence_threshold
+        generic_clarification = (
+            low_confidence or resolution.needs_clarification
+        ) and not missing
+        if generic_clarification:
+            missing = ("goal",)
+        displayed_missing = tuple(intent.missing_fields)
+        if not displayed_missing and not generic_clarification:
+            displayed_missing = tuple(
+                dict.fromkeys((*resolution.missing_condition_ids, *profile_missing))
+            )
+        question_intent = intent.model_copy(
+            update={
+                "missing_fields": list(displayed_missing),
+                "needs_clarification": bool(missing)
+                or intent.needs_clarification
+                or low_confidence,
+            }
+        )
+        question = self.clarification.next_question(question_intent)
+        conditions = tuple(
+            KeyCondition(
+                item.condition_id,
+                item.label,
+                ConditionImportance.CRITICAL,
+                values.get(item.condition_id),
+            )
+            for item in manifest.trigger_conditions
+        ) + tuple(
+            KeyCondition(
+                field_name,
+                field_name.replace("-", " "),
+                ConditionImportance.CRITICAL,
+                None,
+            )
+            for field_name in profile_missing
+            if field_name
+            not in {item.condition_id for item in manifest.trigger_conditions}
+        )
+        task = operation.to_task_spec(
+            task_id=task_id,
+            tenant_id=tenant_id,
+            user_id=message.user_id,
+            intent=min(manifest.applicable_intents, key=lambda item: item.value),
+            domains=domains,
+            goals=(
+                OperationGoal(
+                    "goal-primary",
+                    OperationGoalKind.EFFICIENCY,
+                    None,
+                    intent.goal,
+                ),
+            ),
+            objects=self._objects_for_scenario(scenario_id, intent),
+            key_conditions=conditions,
+            assumptions=(),
+            source_scopes=frozenset({SourceScope.USER_INPUT}),
+            missing_critical_condition_ids=missing,
+            requires_user_input=bool(missing),
+            requires_research=intent.needs_research,
+        )
+        submission = ScenarioSubmission(
+            "scenario-submission/1",
+            _stable_id("submission", message.request_id),
+            scenario_id,
+            semantic_version,
+            _stable_id("plan", message.request_id),
+            operation,
+            task,
+            self._profile_candidates(tenant_id, message, intent, resolution),
+            None,
+        )
+        return operation, submission, question, displayed_missing
+
+    @staticmethod
+    def _domains_for_scenario(scenario_id: str) -> frozenset[OperationDomain]:
+        mapping = {
+            "industry_digest": frozenset({OperationDomain.CONTENT}),
+            "multi_platform_content": frozenset(
+                {OperationDomain.CONTENT, OperationDomain.CHANNEL}
+            ),
+            "brand_operation_plan": frozenset(
+                {OperationDomain.BRAND, OperationDomain.PRODUCT}
+            ),
+            "ip_operation_plan": frozenset(
+                {OperationDomain.IP, OperationDomain.AUDIENCE}
+            ),
+            "campaign_plan": frozenset(
+                {OperationDomain.CAMPAIGN, OperationDomain.AUDIENCE}
+            ),
+            "content_calendar": frozenset({OperationDomain.CONTENT}),
+            # Profile 选择器当前把 domain 同名项解释为必需 Profile；增长场景
+            # Manifest 未声明 Audience Profile，因此保留内容运营执行域。
+            "growth_experiment": frozenset({OperationDomain.CONTENT}),
+            "operation_review": frozenset({OperationDomain.METRIC}),
+        }
+        return mapping[scenario_id]
+
+    @staticmethod
+    def _objects_for_scenario(
+        scenario_id: str, intent: IntentEnvelopeV1
+    ) -> tuple[OperationObject, ...]:
+        kind = {
+            "multi_platform_content": OperationObjectKind.CONTENT,
+            "content_calendar": OperationObjectKind.CONTENT,
+            "campaign_plan": OperationObjectKind.CAMPAIGN,
+            "brand_operation_plan": OperationObjectKind.BRAND,
+            "ip_operation_plan": OperationObjectKind.IP,
+        }.get(scenario_id)
+        if kind is None:
+            return ()
+        return (OperationObject("object-primary", kind, intent.goal, None),)
+
+    @staticmethod
+    def _profile_candidates(
+        tenant_id: str,
+        message: ConversationMessageV1,
+        intent: IntentEnvelopeV1,
+        resolution: ScenarioResolution,
+    ) -> tuple[object, ...]:
+        """只用受控意图字段构造 CANDIDATE Profile，不提升为已确认事实。"""
+        requirements = intent.requirements
+
+        def fact(kind: ProfileKind, field_name: str, value: JsonObject) -> ProfileFact:
+            return ProfileFact(
+                _stable_id(f"fact-{kind.value}", message.request_id),
+                field_name,
+                value,
+                SourceScope.USER_INPUT,
+                message.request_id,
+                ProfileFactState.CANDIDATE,
+                None,
+                None,
+            )
+
+        def common(kind: ProfileKind, value: JsonObject) -> dict[str, Any]:
+            return {
+                "contract_version": "profile/1",
+                "profile_id": _stable_id(f"profile-{kind.value}", message.request_id),
+                "tenant_id": tenant_id,
+                "semantic_version": "1.0.0",
+                "facts": (fact(kind, kind.value, value),),
+            }
+
+        profiles: list[object] = []
+        for kind in resolution.required_profile_kinds:
+            if kind is ProfileKind.CHANNEL and requirements.platforms:
+                value = JsonObject((("platforms", requirements.platforms),))
+                profiles.append(
+                    ChannelProfile(
+                        **common(kind, value),
+                        channel_id="multi-channel",
+                        rules_version="1.0.0",
+                        rules=JsonObject(
+                            (
+                                ("platforms", requirements.platforms),
+                                ("style", intent.style),
+                            )
+                        ),
+                    )
+                )
+            elif kind is ProfileKind.BRAND and requirements.brand:
+                value = JsonObject((("brand", requirements.brand),))
+                profiles.append(BrandProfile(**common(kind, value)))
+            elif kind is ProfileKind.PRODUCT and requirements.product:
+                value = JsonObject((("product", requirements.product),))
+                profiles.append(
+                    ProductProfile(
+                        **common(kind, value),
+                        product_id=_stable_id("product", requirements.product),
+                    )
+                )
+            elif kind is ProfileKind.IP and requirements.ip:
+                value = JsonObject((("ip", requirements.ip),))
+                profiles.append(
+                    IPProfile(**common(kind, value), identity_state="candidate")
+                )
+            elif kind is ProfileKind.AUDIENCE and requirements.audience:
+                value = JsonObject((("audience", requirements.audience),))
+                profiles.append(
+                    AudienceProfile(
+                        **common(kind, value),
+                        segment_id=_stable_id("segment", requirements.audience),
+                    )
+                )
+            elif kind is ProfileKind.CAMPAIGN and requirements.campaign_goal:
+                value = JsonObject(
+                    (
+                        ("campaign_goal", requirements.campaign_goal),
+                        ("campaign_window", requirements.campaign_window),
+                    )
+                )
+                profiles.append(
+                    CampaignProfile(
+                        **common(kind, value),
+                        campaign_id=_stable_id("campaign", message.request_id),
+                    )
+                )
+            elif kind is ProfileKind.METRIC and requirements.metric_definition:
+                value = JsonObject(
+                    (("metric_definition", requirements.metric_definition),)
+                )
+                profiles.append(
+                    MetricProfile(
+                        **common(kind, value),
+                        metric_id=_stable_id("metric", message.request_id),
+                        definition=requirements.metric_definition,
+                        target_value=None,
+                        period=requirements.review_window or "unspecified",
+                    )
+                )
+        return tuple(profiles)
+
+    def _context_entry(self, key: tuple[str, str], now: float) -> _ContextEntry:
+        entry = self._contexts.get(key)
+        if entry is None:
+            if len(self._contexts) >= self.max_contexts:
+                removable = next(
+                    (
+                        candidate
+                        for candidate, existing in self._contexts.items()
+                        if not existing.waiting_runs
+                    ),
+                    None,
+                )
+                if removable is None:
+                    raise HarnessError(
+                        "CONVERSATION_CAPACITY_EXCEEDED",
+                        "等待输入的会话已达到容量上限，请先完成或取消现有会话",
+                        category="runtime",
+                        retryable=True,
+                    )
+                self._contexts.pop(removable, None)
+            entry = _ContextEntry(ConversationContext(), now + self.ttl_seconds)
+            self._contexts[key] = entry
+        else:
+            entry.expires_at = now + self.ttl_seconds
+            self._contexts.move_to_end(key)
+        self._evict_contexts()
+        return entry
+
+    def _purge_expired(self, now: float) -> None:
+        for key, request_entry in tuple(self._requests.items()):
+            if request_entry.expires_at <= now:
+                self._requests.pop(key, None)
+        for key, context_entry in tuple(self._contexts.items()):
+            if context_entry.expires_at <= now and not context_entry.waiting_runs:
+                self._contexts.pop(key, None)
+
+    def _evict_requests(self) -> None:
+        while len(self._requests) > self.max_requests:
+            self._requests.popitem(last=False)
+
+    def _evict_contexts(self) -> None:
+        while len(self._contexts) > self.max_contexts:
+            removable = next(
+                (
+                    key
+                    for key, entry in self._contexts.items()
+                    if not entry.waiting_runs
+                ),
+                None,
+            )
+            if removable is None:
+                return
+            self._contexts.pop(removable, None)
+
+    async def on_run_state(self, view: Any) -> None:
+        """等待输入保留上下文，终态释放 Run 与一次性提交。"""
+        async with self._lock:
+            active = self._active_runs.get(view.run_id)
+            if active is None:
+                return
+            entry = active.context_entry
+            status = getattr(view.status, "value", str(view.status))
+            if status == "waiting_input":
+                entry.waiting_runs.add(view.run_id)
+                entry.expires_at = self.monotonic() + self.ttl_seconds
+                self._contexts[active.context_key] = entry
+                self._contexts.move_to_end(active.context_key)
+                self._evict_contexts()
+                return
+            if status not in {"succeeded", "failed", "cancelled", "timed_out"}:
+                return
+            self._active_runs.pop(view.run_id, None)
+            entry.waiting_runs.discard(view.run_id)
+            if status == "succeeded" and isinstance(view.output, dict):
+                content = view.output.get("content")
+                if isinstance(content, str) and content:
+                    entry.context.append(ConversationTurn("assistant", content))
+        await self.submissions.discard(active.tenant_id, active.request_id)
+        await self.direct_submissions.discard(active.tenant_id, active.request_id)
+
+    @staticmethod
+    def _operation_payload(request: OperationRequest) -> dict[str, Any]:
+        """只输出策略适配器允许的原始请求字段。"""
+        return {
+            "contract_version": request.contract_version,
+            "request": {
+                "request_id": request.request.request_id,
+                "tenant_id": request.request.tenant_id,
+                "user_id": request.request.user_id,
+                "input_text": request.request.input_text,
+            },
+            "operation_id": request.operation_id,
+            "session_id": request.session_id,
+            "parent_task_id": request.parent_task_id,
+        }
+
+
+__all__ = [
+    "ConversationService",
+    "ConversationSubmissionStore",
+    "IntentV2ConversationCoordinator",
+]

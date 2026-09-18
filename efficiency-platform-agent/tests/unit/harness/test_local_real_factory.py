@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import cast
 
 import httpx
 import pytest
@@ -19,8 +20,16 @@ from efficiency_platform_agent.capabilities.research.contracts import (
     ResearchResult,
     ResearchStatus,
 )
+from efficiency_platform_agent.capabilities.research.public_sources import (
+    FreePublicResearchProvider,
+)
 from efficiency_platform_agent.configuration.integration import S7IntegrationSettings
+from efficiency_platform_agent.configuration.research import ResearchPipelineSettings
 from efficiency_platform_agent.contracts.conversation import ConversationMessageV1
+from efficiency_platform_agent.conversation.intent_v2_adapter import (
+    IntentV2ConversationAdapter,
+)
+from efficiency_platform_agent.conversation.service import ConversationSubmissionStore
 from efficiency_platform_agent.core.diagnostics import NoopDiagnosticRecorder
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
 from efficiency_platform_agent.core.run import (
@@ -302,7 +311,7 @@ def test_factory_creates_one_logger_and_reports_research_capability_state(
         assert len(instances) == 1
         assert instances[0].capabilities == [
             ("capability_ready", "deepseek_chat", True, None),
-            (event_name, "deepseek_web_search", research_enabled, reason_code)
+            (event_name, "free_public_research", research_enabled, reason_code),
         ]
         assert "synthetic-key" not in repr(instances[0].capabilities)
         assert "synthetic.invalid" not in repr(instances[0].capabilities)
@@ -310,8 +319,10 @@ def test_factory_creates_one_logger_and_reports_research_capability_state(
         asyncio.run(bundle.close())
 
 
-def test_factory_disables_openai_sdk_hidden_retries(monkeypatch) -> None:
-    """研究调用次数必须由 Agent 显式治理，SDK 不得暗中自动重试。"""
+def test_factory_free_public_research_does_not_create_openai_search_client(
+    monkeypatch,
+) -> None:
+    """免费公开源研究不应再创建厂商搜索 SDK 客户端。"""
 
     captured_options = []
 
@@ -344,8 +355,45 @@ def test_factory_disables_openai_sdk_hidden_retries(monkeypatch) -> None:
         test_mode=True,
     )
     try:
-        assert len(captured_options) == 1
-        assert captured_options[0]["max_retries"] == 0
+        assert captured_options == []
+    finally:
+        asyncio.run(bundle.close())
+
+
+@pytest.mark.parametrize(
+    ("explicit_contract_version", "expected_contract_version"),
+    (
+        (None, "deliverable-set/1"),
+        ("deliverable-set/2", "deliverable-set/2"),
+    ),
+)
+def test_factory_free_public_research_resolves_delivery_contract(
+    monkeypatch,
+    explicit_contract_version,
+    expected_contract_version,
+) -> None:
+    """V1 免费研究默认使用 V1 交付契约，显式版本仍保持优先。"""
+    captured = {}
+    original = local_real_factory.build_operation_agent
+
+    def capture(*args, **kwargs):
+        captured["research_provider"] = kwargs.get("research_provider")
+        captured["contract_version"] = kwargs.get("deliverable_set_contract_version")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(local_real_factory, "build_operation_agent", capture)
+    settings = synthetic_settings().model_copy(
+        update={"gates": {"deepseek_web_search": True}}
+    )
+    bundle = build_local_agent_application(
+        settings,
+        provider=FakeModelProvider("synthetic", []),
+        test_mode=True,
+        deliverable_set_contract_version=explicit_contract_version,
+    )
+    try:
+        assert isinstance(captured["research_provider"], FreePublicResearchProvider)
+        assert captured["contract_version"] == expected_contract_version
     finally:
         asyncio.run(bundle.close())
 
@@ -373,9 +421,7 @@ def test_factory_injects_one_logger_into_all_diagnostic_boundaries(monkeypatch) 
             del view
 
     class CapturingResearchProvider:
-        def __init__(self, client, *, model, recorder) -> None:
-            self.client = client
-            self.model = model
+        def __init__(self, *, recorder) -> None:
             self.recorder = recorder
             research_provider_instances.append(self)
 
@@ -383,7 +429,7 @@ def test_factory_injects_one_logger_into_all_diagnostic_boundaries(monkeypatch) 
         local_real_factory, "LocalExecutionLogger", CapturingExecutionLogger
     )
     monkeypatch.setattr(
-        local_real_factory, "DeepSeekWebSearchProvider", CapturingResearchProvider
+        local_real_factory, "FreePublicResearchProvider", CapturingResearchProvider
     )
     settings = synthetic_settings().model_copy(
         update={"gates": {"deepseek_web_search": True}}
@@ -393,7 +439,10 @@ def test_factory_injects_one_logger_into_all_diagnostic_boundaries(monkeypatch) 
         assert len(logger_instances) == 1
         assert len(research_provider_instances) == 1
         recorder = logger_instances[0]
-        assert bundle.conversation.interpreter.model_runtime.diagnostic_recorder is recorder
+        assert (
+            bundle.conversation.interpreter.model_runtime.diagnostic_recorder
+            is recorder
+        )
         assert bundle.runtime.graph_runtime.diagnostic_recorder is recorder
         assert bundle.runtime.diagnostic_recorder is recorder
         assert research_provider_instances[0].recorder is recorder
@@ -401,7 +450,9 @@ def test_factory_injects_one_logger_into_all_diagnostic_boundaries(monkeypatch) 
         asyncio.run(bundle.close())
 
 
-def test_factory_test_mode_uses_one_noop_recorder_without_terminal_logger(monkeypatch) -> None:
+def test_factory_test_mode_uses_one_noop_recorder_without_terminal_logger(
+    monkeypatch,
+) -> None:
     """测试模式复用 Noop Recorder，且不得构造本地终端日志器。"""
 
     def reject_logger_creation():
@@ -472,6 +523,86 @@ def test_factory_accepts_mock_provider_only_in_explicit_test_mode() -> None:
     assert bundle.conversation.interpreter.timeout_ms == 60_000
 
 
+def test_factory_local_live_snapshot_uses_authoritative_runtime_mode_gate() -> None:
+    """local_live 不得被测试模式或旧 production=False 兼容桥降级放行。"""
+    source_registry = object()
+    tool_runtime = object()
+    research_service = object()
+    intent_state_store = object()
+
+    class ResearchStateStore:
+        async def get_brief(self, tenant_id, task_id):
+            del tenant_id, task_id
+
+    research_state_store = ResearchStateStore()
+
+    class CompleteDelegate:
+        def __init__(self) -> None:
+            self.submissions = ConversationSubmissionStore()
+            self.source_registry = source_registry
+            self.tool_runtime = tool_runtime
+            self.research_service = research_service
+            self.intent_state_store = intent_state_store
+            self.research_state_store: object = research_state_store
+
+        async def prepare_v2(
+            self, pipeline, tenant_id, conversation_id, message, versions
+        ):
+            del pipeline, tenant_id, conversation_id, message, versions
+
+    research_settings = ResearchPipelineSettings(
+        runtime_mode="local_live",
+        intent_pipeline_version="intent-v2",
+        research_pipeline_version="research-v2",
+        state_backend="memory",
+        research_source_allowlist=("google_blog_rss",),
+        research_policy_version="local-live-research/1",
+        rollout_mode="tenant_allowlist",
+        rollout_tenant_allowlist=("local-team",),
+    )
+    bundle = build_local_agent_application(
+        synthetic_settings(),
+        provider=FakeModelProvider("synthetic", []),
+        test_mode=True,
+        research_v2_settings=research_settings,
+        intent_v2_delegate=CompleteDelegate(),
+        research_v2_source_registry=source_registry,
+        research_v2_tool_runtime=tool_runtime,
+        research_service_v2=research_service,
+        intent_v2_state_store=intent_state_store,
+        research_v2_state_store=research_state_store,
+    )
+    try:
+        adapter = cast(
+            IntentV2ConversationAdapter, bundle.conversation.intent_v2_coordinator
+        )
+        assert adapter.settings.runtime_mode == "local_live"
+        with pytest.raises(
+            RuntimeError, match="RESEARCH_LOCAL_LIVE_LEGACY_BYPASS_FORBIDDEN"
+        ):
+            adapter.assert_runtime_ready(production=False)
+    finally:
+        asyncio.run(bundle.close())
+
+
+def test_factory_default_v1_keeps_production_runtime_mode() -> None:
+    """默认 production/V1 继续通过旧测试组合根，不误启用 V2。"""
+    bundle = build_local_agent_application(
+        synthetic_settings(),
+        provider=FakeModelProvider("synthetic", []),
+        test_mode=True,
+        research_v2_settings=ResearchPipelineSettings(),
+    )
+    try:
+        adapter = cast(
+            IntentV2ConversationAdapter, bundle.conversation.intent_v2_coordinator
+        )
+        assert adapter.settings.runtime_mode == "production"
+        assert adapter.settings.v2_enabled is False
+    finally:
+        asyncio.run(bundle.close())
+
+
 def test_factory_real_streaming_providers_allow_operation_step_budget() -> None:
     """真实组合根的模型 HTTP 上限不得短于运营单节点预算。"""
     client = httpx.AsyncClient(
@@ -489,10 +620,10 @@ def test_factory_real_streaming_providers_allow_operation_step_budget() -> None:
     assert {provider.timeout_ms for provider in providers.values()} == {120_000}
 
 
-
-
 @pytest.mark.asyncio
-async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None:
+async def test_factory_v1_pipeline_reaches_research_provider_with_default_contract() -> (
+    None
+):
     intent = {
         "contract_version": "intent/1",
         "domain": "内容",
@@ -566,7 +697,11 @@ async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None
     )
 
     class ResearchFake:
+        def __init__(self) -> None:
+            self.calls = 0
+
         async def research(self, request):
+            self.calls += 1
             return ResearchResult(
                 "research-result/1",
                 request.request_id,
@@ -595,11 +730,12 @@ async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None
     settings = synthetic_settings().model_copy(
         update={"gates": {"deepseek_web_search": True}}
     )
+    research = ResearchFake()
     bundle = build_local_agent_application(
         settings,
         provider=model,
         test_mode=True,
-        research_provider=ResearchFake(),
+        research_provider=research,
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=bundle.app), base_url="http://test"
@@ -616,6 +752,7 @@ async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None
         assert response.status_code == 201
         await bundle.runtime.wait_for_background_tasks()
         run = await bundle.runtime.get_run(response.json()["run_id"], "tenant-1")
+        assert research.calls == 1
         assert run.status.value == "succeeded"
         assert run.output is not None
         stream = await client.get(
@@ -623,6 +760,7 @@ async def test_factory_fake_http_research_flow_keeps_provider_citation() -> None
             headers={"X-Tenant-ID": "tenant-1"},
         )
         assert stream.status_code == 200
+        assert "research_started" in stream.text
         assert "https://example.com/hot" in stream.text
         assert "stream_done" in stream.text
     await bundle.close()

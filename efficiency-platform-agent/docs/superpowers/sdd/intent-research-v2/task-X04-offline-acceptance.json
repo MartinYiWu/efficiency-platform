@@ -1,0 +1,21 @@
+{
+  "schema_version": "research-v2-acceptance/1",
+  "case_id": "yesterday_ai",
+  "status": "PASS",
+  "execution_mode": "offline_replay",
+  "external_io": false,
+  "real_source_verified": false,
+  "real_model_verified": false,
+  "production_ready": false,
+  "outcome": "PARTIAL",
+  "stop_reason": "ROUND_LIMIT",
+  "requested_count": 5,
+  "delivered_event_count": 4,
+  "citation_coverage": 1.0,
+  "resolved_window": {
+    "start": "2026-09-14T16:00:00Z",
+    "end": "2026-09-15T16:00:00Z",
+    "timezone": "Asia/Shanghai",
+    "label": "昨天"
+  }
+}

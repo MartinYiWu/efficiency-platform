@@ -90,6 +90,20 @@ class DeepSeekModelProviderContractTests(unittest.IsolatedAsyncioTestCase):
             client.chat.completions.calls[0]["response_format"], {"type": "json_object"}
         )
 
+    async def test_runtime_logical_model_option_is_not_forwarded_to_sdk(self):
+        response = SimpleNamespace(
+            choices=(SimpleNamespace(message=SimpleNamespace(content="完成")),),
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=5),
+        )
+        client = _Client(response)
+
+        result = await DeepSeekModelProvider(client, "deepseek-chat").complete(
+            _request(JsonObject((("logical_model", "deepseek-chat"),)))
+        )
+
+        self.assertIsNone(result.error)
+        self.assertNotIn("logical_model", client.chat.completions.calls[0])
+
     async def test_responses_api_shape_is_supported(self):
         client = _ResponsesClient(SimpleNamespace(output_text="响应结果", usage=None))
         result = await DeepSeekModelProvider(client, "deepseek-chat").complete(
@@ -100,7 +114,11 @@ class DeepSeekModelProviderContractTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_error_statuses_are_safe_and_normalized(self):
         for status, code, retryable in (
+            (400, "PROVIDER_BAD_REQUEST", False),
             (401, "PROVIDER_AUTHENTICATION", False),
+            (403, "PROVIDER_FORBIDDEN", False),
+            (404, "PROVIDER_NOT_FOUND", False),
+            (422, "PROVIDER_BAD_REQUEST", False),
             (429, "PROVIDER_RATE_LIMITED", True),
             (503, "PROVIDER_UPSTREAM", True),
         ):

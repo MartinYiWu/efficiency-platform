@@ -1,0 +1,522 @@
+"""同 Run 的确定性输出阶段和物化器；不创建采集、网络或预算。"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import time
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import cast
+
+from efficiency_platform_agent.capabilities.research.v2.claims import (
+    _numbers,
+    _unit_supported,
+)
+from efficiency_platform_agent.capabilities.research.v2.delivery import (
+    DeliveryPackBuilder,
+)
+from efficiency_platform_agent.capabilities.research.v2.evidence import (
+    EvidenceValidator,
+)
+from efficiency_platform_agent.capabilities.research.v2.output_verifier import (
+    OutputVerificationPolicyV2,
+    OutputVerifier,
+)
+from efficiency_platform_agent.capabilities.research.v2.renderer import render_markdown
+from efficiency_platform_agent.capabilities.research.v2.source_families import (
+    SourceFamilyResolver,
+)
+from efficiency_platform_agent.contracts.research_evidence_v2 import (
+    CoverageSnapshotV2,
+    EvidenceSnapshotV2,
+)
+from efficiency_platform_agent.contracts.research_local_runtime_v2 import (
+    LocalResearchRunFactsV2,
+    LocalResearchRunKeyV2,
+)
+from efficiency_platform_agent.contracts.research_v2 import (
+    DeliveryDraftV2,
+    DeliveryPackV2,
+    QualityGapV2,
+    ResearchBriefV2,
+    ResearchOutcomeV2,
+    ResearchUsageV2,
+)
+from efficiency_platform_agent.core.budget_execution import (
+    BudgetExecutionBinding,
+    bind_budget_execution,
+)
+from efficiency_platform_agent.persistence.research_local_memory import (
+    LocalResearchRunStore,
+)
+from efficiency_platform_agent.tools.runtime.service import CancellationPort
+
+from .graph import ResearchStage, ResearchStageUpdateV2, _terminal_patch
+from .state import ResearchGraphState
+
+
+class LocalLiveResearchOutcomeMaterializer:
+    """身份、原父预算和取消信号均由组合根注入；默认输出不调用模型。"""
+
+    def __init__(
+        self,
+        *,
+        key: LocalResearchRunKeyV2,
+        store: LocalResearchRunStore,
+        brief: ResearchBriefV2,
+        binding: BudgetExecutionBinding,
+        deadline_monotonic: float,
+        cancellation_signal: CancellationPort,
+        draft_generator: Callable[
+            [ResearchBriefV2, DeliveryPackV2], Awaitable[DeliveryDraftV2]
+        ]
+        | None = None,
+    ) -> None:
+        trusted = brief.trusted_context
+        if (key.tenant_id, key.run_id, key.task_id, key.revision) != (
+            trusted.tenant_id,
+            trusted.run_id,
+            trusted.task_id,
+            brief.intent_revision,
+        ) or (binding.scope.tenant_id, binding.scope.run_id, binding.lease_id) != (
+            trusted.tenant_id,
+            trusted.run_id,
+            trusted.budget_lease_id,
+        ):
+            raise ValueError("RESEARCH_OUTCOME_IDENTITY_MISMATCH")
+        self.key, self.store, self.brief, self.binding = key, store, brief, binding
+        self.deadline_monotonic = deadline_monotonic
+        self.cancellation_signal = cancellation_signal
+        self.draft_generator = draft_generator
+
+    def _control(self, state: ResearchGraphState) -> None:
+        if state.get("cancelled") or self.cancellation_signal.is_requested():
+            raise asyncio.CancelledError
+        if (
+            state.get("hard_deadline_reached")
+            or time.monotonic() >= self.deadline_monotonic
+        ):
+            raise TimeoutError("LOCAL_RESEARCH_HARD_DEADLINE")
+
+    async def _facts(
+        self, brief: ResearchBriefV2, state: ResearchGraphState
+    ) -> LocalResearchRunFactsV2:
+        self._control(state)
+        if brief != self.brief or state.get("brief_digest") != brief.canonical_digest():
+            raise ValueError("RESEARCH_OUTCOME_BRIEF_MISMATCH")
+        facts = await self.store.get(self.key)
+        if facts.key != self.key or facts.brief != brief or facts.status != "active":
+            raise ValueError("RESEARCH_OUTCOME_IDENTITY_MISMATCH")
+        expected = {
+            "schema_version": "research-graph-state/2",
+            "intent_revision": self.key.revision,
+            "quality_policy_id": brief.quality_policy_id,
+            "policy_version": brief.policy_version,
+            "budget_lease_id": self.binding.lease_id,
+        }
+        if any(state.get(key) != value for key, value in expected.items()) or not (
+            isinstance(state.get("budget_version"), int)
+            and 0 <= state["budget_version"] <= self.binding.version
+        ):
+            raise ValueError("RESEARCH_OUTCOME_SCOPE_MISMATCH")
+        self._control(state)
+        return facts
+
+    def _snapshot(
+        self, facts: LocalResearchRunFactsV2, state: ResearchGraphState
+    ) -> EvidenceSnapshotV2:
+        for field, mapping, attribute in (
+            ("event_ids", facts.events, "event_id"),
+            ("qualified_event_ids", facts.events, "event_id"),
+            ("claim_ids", facts.claims, "claim_id"),
+            ("evidence_ids", facts.evidence, "evidence_id"),
+        ):
+            _select(mapping, cast(Sequence[str], state.get(field, ())), attribute)
+        report_id = state.get("quality_report_id")
+        report = facts.quality_reports.get(report_id or "")
+        qualified = tuple(state.get("qualified_event_ids", ()))
+        if report is None or (
+            report.report_id != report_id
+            or report.brief_digest != self.brief.canonical_digest()
+            or report.policy_version != self.brief.policy_version
+            or report.usable_event_ids != qualified
+            or tuple(gap.gap_id for gap in report.gaps)
+            != tuple(state.get("hard_gap_ids", ()))
+            or facts.stage_artifact_ids.get("quality") != (report_id,)
+            or facts.stage_artifact_ids.get("qualified_events", ()) != qualified
+            or (qualified and not report.gaps and not report.hard_gates_passed)
+        ):
+            raise ValueError("RESEARCH_OUTCOME_QUALITY_MISMATCH")
+        claims = _select(
+            facts.claims,
+            facts.stage_artifact_ids.get("qualified_claims", ()),
+            "claim_id",
+        )
+        refs = _select(
+            facts.evidence,
+            facts.stage_artifact_ids.get("qualified_evidence", ()),
+            "evidence_id",
+        )
+        events = _select(facts.events, qualified, "event_id")
+        if (
+            not set(qualified).issubset(state.get("event_ids", ()))
+            or not {item.claim_id for item in claims}.issubset(
+                state.get("claim_ids", ())
+            )
+            or not {item.evidence_id for item in refs}.issubset(
+                state.get("evidence_ids", ())
+            )
+            or {item.event_id for item in claims} != set(qualified)
+            or {ref_id for claim in claims for ref_id in claim.support_refs}
+            != {item.evidence_id for item in refs}
+        ):
+            raise ValueError("RESEARCH_OUTPUT_CLOSURE_INVALID")
+        document_ids = tuple(
+            sorted({doc_id for event in events for doc_id in event.member_document_ids})
+        )
+        documents = _select(facts.documents, document_ids, "document_id")
+        docs = {item.document_id: item for item in documents}
+        ref_map = {item.evidence_id: item for item in refs}
+        event_map = {item.event_id: item for item in events}
+        validator = EvidenceValidator()
+        for ref in refs:
+            if not validator.validate(ref, docs.get(ref.document_id)).valid:
+                raise ValueError("RESEARCH_OUTPUT_EVIDENCE_INVALID")
+        for claim in claims:
+            selected = [ref_map[ref_id] for ref_id in claim.support_refs]
+            excerpts = "\n".join(ref.excerpt for ref in selected)
+            members = event_map[claim.event_id].member_document_ids
+            if (
+                any(ref.document_id not in members for ref in selected)
+                or not any(
+                    docs[ref.document_id].content_scope in {"full", "platform_text"}
+                    for ref in selected
+                )
+                or claim.subject.casefold() not in excerpts.casefold()
+                or not _numbers(claim.text).issubset(_numbers(excerpts))
+                or (
+                    claim.numeric_value is not None
+                    and (
+                        claim.numeric_value not in _numbers(excerpts)
+                        or claim.numeric_value not in _numbers(claim.text)
+                        or not _unit_supported(claim.unit or "", excerpts)
+                    )
+                )
+                or (
+                    claim.assertion_mode == "objective"
+                    and claim.conflict_status == "unresolved"
+                )
+                or (
+                    claim.claim_type in {"announcement", "opinion"}
+                    and claim.assertion_mode != "attributed"
+                )
+            ):
+                raise ValueError("RESEARCH_OUTPUT_CLAIM_INVALID")
+        covered = tuple(
+            sorted(
+                {item.claim_key for item in claims}.intersection(
+                    self.brief.required_facets
+                )
+            )
+        )
+        return EvidenceSnapshotV2(
+            snapshot_id=f"output-{self.key.run_id}",
+            brief_digest=self.brief.canonical_digest(),
+            documents=documents,
+            events=events,
+            claims=claims,
+            evidence_refs=refs,
+            coverage=CoverageSnapshotV2(
+                required_facets=self.brief.required_facets,
+                covered_facets=covered,
+                missing_facets=tuple(
+                    sorted(set(self.brief.required_facets) - set(covered))
+                ),
+            ),
+        )
+
+    def _outcome(
+        self, facts: LocalResearchRunFactsV2, state: ResearchGraphState
+    ) -> ResearchOutcomeV2:
+        predicted = dict(state)
+        predicted["output_verified"] = True
+        terminal = _terminal_patch(cast(ResearchGraphState, predicted))
+        report = facts.quality_reports.get(state.get("quality_report_id") or "")
+        gaps = report.gaps if report else ()
+        if state.get("output_degraded"):
+            gaps = (
+                *gaps,
+                QualityGapV2(
+                    gap_id="output-degraded",
+                    requirement_id="output_requirements",
+                    code="OUTPUT_GENERATION_FAILED",
+                    detail="输出生成未通过，已降级为逐项核验的确定性简报。",
+                    recoverable=False,
+                ),
+            )
+        return ResearchOutcomeV2.model_validate(
+            {
+                "outcome": terminal["domain_status"],
+                "stop_reason": terminal["stop_reason"],
+                "usable_event_ids": tuple(state.get("qualified_event_ids", ())),
+                "evidence_ids": facts.stage_artifact_ids.get("qualified_evidence", ()),
+                "gaps": gaps,
+                "usage": ResearchUsageV2(
+                    source_requests=facts.resources.http_requests,
+                    model_calls=facts.resources.model_calls,
+                    downloaded_bytes=facts.resources.downloaded_bytes,
+                ),
+            }
+        )
+
+    def _pack(
+        self,
+        facts: LocalResearchRunFactsV2,
+        state: ResearchGraphState,
+        snapshot: EvidenceSnapshotV2,
+    ) -> DeliveryPackV2:
+        pack = DeliveryPackBuilder().build(
+            self.brief, self._outcome(facts, state), snapshot
+        )
+        documents = {item.document_id: item for item in snapshot.documents}
+        family_by_document = {
+            document_id: family.family_id
+            for family in SourceFamilyResolver()
+            .resolve(tuple(facts.documents.values()))
+            .families
+            for document_id in family.member_document_ids
+        }
+        events = tuple(
+            event.model_copy(
+                update={
+                    "citations": tuple(
+                        citation.model_copy(
+                            update={
+                                "content_scope": documents[
+                                    citation.document_id
+                                ].content_scope,
+                                "verification_status": "verified",
+                                "content_hash": documents[
+                                    citation.document_id
+                                ].content_hash,
+                                "acquisition_method": documents[
+                                    citation.document_id
+                                ].discovered_via,
+                                "published_at": documents[
+                                    citation.document_id
+                                ].published_at,
+                                "independent_source_group": family_by_document[
+                                    citation.document_id
+                                ],
+                            }
+                        )
+                        for citation in event.citations
+                    )
+                }
+            )
+            for event in pack.events
+        )
+        pack = pack.model_copy(
+            update={
+                "events": events,
+                "output_verified": True,
+                "quality_report_id": state["quality_report_id"],
+                "limitations": (
+                    *pack.limitations,
+                    "条目顺序沿用上游已核验事件顺序；未生成重要性或热度评分。",
+                ),
+            }
+        )
+        return pack.model_copy(update={"content": render_markdown(pack)})
+
+    def _draft(self, pack: DeliveryPackV2) -> DeliveryDraftV2:
+        # 模型不能提供 URL；实际链接只由事实表生成的包交给渲染器。
+        content = (
+            "\n".join(
+                text
+                + " "
+                + " ".join(
+                    f"[evidence:{source.evidence_id}]" for source in event.citations
+                )
+                for event in pack.events
+                for text in event.claim_texts
+            )
+            or "在已声明检查范围内未发现符合条件的事件。"
+        )
+        return DeliveryDraftV2(
+            draft_id="draft-"
+            + hashlib.sha256(pack.model_dump_json().encode()).hexdigest()[:32],
+            brief_digest=pack.brief_digest,
+            content=content,
+            event_ids=pack.event_ids,
+            claim_ids=pack.claim_ids,
+            evidence_ids=pack.evidence_ids,
+            declared_outcome=pack.outcome,
+            output_type=self.brief.output_requirements.output_types[0],
+        )
+
+    async def run_stage(
+        self, stage: ResearchStage, state: ResearchGraphState
+    ) -> ResearchStageUpdateV2:
+        if stage not in {"compose", "verify", "render"}:
+            raise ValueError("RESEARCH_OUTPUT_STAGE_INVALID")
+        facts = await self._facts(self.brief, state)
+        snapshot = self._snapshot(facts, state)
+        if stage == "compose":
+            degraded = False
+            pack = self._pack(facts, state, snapshot)
+            draft = self._draft(pack)
+            if (
+                self.draft_generator is not None
+                and not state.get("budget_exhausted")
+                and not state.get("soft_deadline_reached")
+            ):
+                try:
+                    with bind_budget_execution(self.binding):
+                        proposed = await self.draft_generator(self.brief, pack)
+                    decision = await OutputVerifier().verify(
+                        proposed,
+                        self.brief,
+                        snapshot,
+                        OutputVerificationPolicyV2(expected_outcome=pack.outcome),
+                    )
+                    degraded = decision.outcome != "ACCEPT"
+                except (TimeoutError, asyncio.CancelledError):
+                    raise
+                except Exception:  # noqa: BLE001 -- 只保留失败分类，不泄漏模型正文或异常。
+                    degraded = True
+                self._control(state)
+            if degraded:
+                fallback = state.copy()
+                fallback["output_degraded"] = True
+                draft = self._draft(self._pack(facts, fallback, snapshot))
+            artifacts = {**facts.stage_artifact_ids, "compose": (draft.draft_id,)}
+            artifacts["output_degraded"] = (
+                ("OUTPUT_GENERATION_FAILED",) if degraded else ()
+            )
+            await self.store.put(
+                self.key,
+                facts.model_copy(
+                    update={
+                        "drafts": {**facts.drafts, draft.draft_id: draft},
+                        "stage_artifact_ids": artifacts,
+                    }
+                ),
+            )
+            return ResearchStageUpdateV2(
+                output_verified=False,
+                output_degraded=degraded,
+                output_recollect_requested=False,
+            )
+        draft_ids = facts.stage_artifact_ids.get("compose", ())
+        if len(draft_ids) != 1:
+            raise ValueError("RESEARCH_OUTPUT_DRAFT_INVALID")
+        draft = _select(facts.drafts, draft_ids, "draft_id")[0]
+        expected = self._draft(self._pack(facts, state, snapshot))
+        if draft != expected:
+            raise ValueError("RESEARCH_OUTPUT_DRAFT_INVALID")
+        decision = await OutputVerifier().verify(
+            draft,
+            self.brief,
+            snapshot,
+            OutputVerificationPolicyV2(expected_outcome=draft.declared_outcome),
+        )
+        self._control(state)
+        if stage == "verify":
+            await self.store.put(
+                self.key,
+                facts.model_copy(
+                    update={
+                        "output_decisions": {
+                            **facts.output_decisions,
+                            draft.draft_id: decision,
+                        },
+                        "stage_artifact_ids": {
+                            **facts.stage_artifact_ids,
+                            "verify": (draft.draft_id,),
+                        },
+                    }
+                ),
+            )
+            return ResearchStageUpdateV2(
+                output_verified=decision.outcome == "ACCEPT",
+                output_recollect_requested=False,
+            )
+        if (
+            not state.get("output_verified")
+            or decision.outcome != "ACCEPT"
+            or facts.output_decisions.get(draft.draft_id) != decision
+        ):
+            raise ValueError("RESEARCH_OUTCOME_OUTPUT_UNVERIFIED")
+        pack = self._pack(facts, state, snapshot)
+        await self.store.put(
+            self.key,
+            facts.model_copy(
+                update={
+                    "deliveries": {**facts.deliveries, pack.delivery_id: pack},
+                    "stage_artifact_ids": {
+                        **facts.stage_artifact_ids,
+                        "render": (pack.delivery_id,),
+                    },
+                }
+            ),
+        )
+        return ResearchStageUpdateV2(output_artifact_id=pack.delivery_id)
+
+    async def materialize(
+        self, brief: ResearchBriefV2, state: ResearchGraphState
+    ) -> ResearchOutcomeV2:
+        facts = await self._facts(brief, state)
+        if state.get("domain_status") != "FAILED" and not state.get("output_verified"):
+            raise ValueError("RESEARCH_OUTCOME_OUTPUT_UNVERIFIED")
+        terminal = _terminal_patch(state)
+        if any(state.get(key) != value for key, value in terminal.items()):
+            raise ValueError("RESEARCH_OUTCOME_STATUS_MISMATCH")
+        if state.get("domain_status") == "FAILED":
+            return self._outcome(facts, state)
+        snapshot = self._snapshot(facts, state)
+        if not state.get("output_verified"):
+            raise ValueError("RESEARCH_OUTCOME_OUTPUT_UNVERIFIED")
+        draft_ids = facts.stage_artifact_ids.get("verify", ())
+        if (
+            len(draft_ids) != 1
+            or facts.output_decisions.get(draft_ids[0]) is None
+            or facts.output_decisions[draft_ids[0]].outcome != "ACCEPT"
+        ):
+            raise ValueError("RESEARCH_OUTCOME_OUTPUT_UNVERIFIED")
+        pack = self._pack(facts, state, snapshot)
+        expected_draft = self._draft(pack)
+        if (
+            facts.stage_artifact_ids.get("compose") != draft_ids
+            or facts.drafts.get(draft_ids[0]) != expected_draft
+        ):
+            raise ValueError("RESEARCH_OUTPUT_DRAFT_INVALID")
+        decision = await OutputVerifier().verify(
+            expected_draft,
+            brief,
+            snapshot,
+            OutputVerificationPolicyV2(expected_outcome=pack.outcome),
+        )
+        if (
+            decision.outcome != "ACCEPT"
+            or decision != facts.output_decisions[draft_ids[0]]
+        ):
+            raise ValueError("RESEARCH_OUTCOME_OUTPUT_UNVERIFIED")
+        if (
+            state.get("output_artifact_id") != pack.delivery_id
+            or facts.stage_artifact_ids.get("render") != (pack.delivery_id,)
+            or facts.deliveries.get(pack.delivery_id) != pack
+        ):
+            raise ValueError("RESEARCH_OUTCOME_DELIVERY_MISMATCH")
+        self._control(state)
+        return self._outcome(facts, state).model_copy(update={"delivery": pack})
+
+
+def _select[T](
+    mapping: Mapping[str, T], ids: Sequence[str], attribute: str
+) -> tuple[T, ...]:
+    if len(set(ids)) != len(ids) or any(
+        item not in mapping or getattr(mapping[item], attribute) != item for item in ids
+    ):
+        raise ValueError("RESEARCH_OUTPUT_CLOSURE_INVALID")
+    return tuple(mapping[item] for item in ids)

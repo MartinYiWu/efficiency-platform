@@ -1,0 +1,154 @@
+{
+  "schema_version": "intent-v2-evaluation-report/2",
+  "dataset_version": "2026-09-16.1",
+  "split": "frozen",
+  "dataset_count": 60,
+  "evaluation_run_count": 3,
+  "status": "PASS",
+  "thresholds": {
+    "key_field_accuracy": 0.95,
+    "ready_precision": 0.98,
+    "complete_request_coverage": 0.9
+  },
+  "usage": {
+    "model_calls": 18,
+    "failed_model_calls": 0,
+    "cost_microunits": 0
+  },
+  "runs": [
+    {
+      "run_id": "live-20260917T021219Z-0bb414aa1a5d",
+      "model_id": "deepseek-v4-flash",
+      "prompt_versions": [
+        "intent-v2-live-evaluation@1.0.0"
+      ],
+      "usage": {
+        "model_calls": 6,
+        "failed_model_calls": 0,
+        "cost_microunits": 0
+      },
+      "prediction_digest": "7618b93a89e25d3b2eeb5c5512ee75dda3fd224a86f0e99b75d020291d8cc3bb",
+      "passed": true,
+      "metrics": {
+        "key_field_accuracy": 1.0,
+        "ready_precision": 1.0,
+        "complete_request_coverage": 1.0,
+        "case_accuracy": 1.0,
+        "field_numerator": 143,
+        "field_denominator": 143,
+        "ready_true_positive": 48,
+        "ready_predicted": 48,
+        "ready_expected": 48,
+        "complete_ready": 48,
+        "case_numerator": 60,
+        "case_denominator": 60
+      },
+      "errors": []
+    },
+    {
+      "run_id": "live-20260917T021255Z-b4bff5bb8bc6",
+      "model_id": "deepseek-v4-flash",
+      "prompt_versions": [
+        "intent-v2-live-evaluation@1.0.0"
+      ],
+      "usage": {
+        "model_calls": 6,
+        "failed_model_calls": 0,
+        "cost_microunits": 0
+      },
+      "prediction_digest": "7618b93a89e25d3b2eeb5c5512ee75dda3fd224a86f0e99b75d020291d8cc3bb",
+      "passed": true,
+      "metrics": {
+        "key_field_accuracy": 1.0,
+        "ready_precision": 1.0,
+        "complete_request_coverage": 1.0,
+        "case_accuracy": 1.0,
+        "field_numerator": 143,
+        "field_denominator": 143,
+        "ready_true_positive": 48,
+        "ready_predicted": 48,
+        "ready_expected": 48,
+        "complete_ready": 48,
+        "case_numerator": 60,
+        "case_denominator": 60
+      },
+      "errors": []
+    },
+    {
+      "run_id": "live-20260917T021333Z-1d22289caab5",
+      "model_id": "deepseek-v4-flash",
+      "prompt_versions": [
+        "intent-v2-live-evaluation@1.0.0"
+      ],
+      "usage": {
+        "model_calls": 6,
+        "failed_model_calls": 0,
+        "cost_microunits": 0
+      },
+      "prediction_digest": "33d6c651813a1b9be6480034d5aa46d0b2db2f6948ca41559a54308d308b36c2",
+      "passed": true,
+      "metrics": {
+        "key_field_accuracy": 0.951048951048951,
+        "ready_precision": 1.0,
+        "complete_request_coverage": 1.0,
+        "case_accuracy": 0.8833333333333333,
+        "field_numerator": 136,
+        "field_denominator": 143,
+        "ready_true_positive": 48,
+        "ready_predicted": 48,
+        "ready_expected": 48,
+        "complete_ready": 48,
+        "case_numerator": 53,
+        "case_denominator": 60
+      },
+      "errors": [
+        "frozen-attack-001:field:safe_error",
+        "frozen-attack-002:field:safe_error",
+        "frozen-attack-003:field:safe_error",
+        "frozen-attack-004:field:safe_error",
+        "frozen-attack-005:field:safe_error",
+        "frozen-attack-006:field:safe_error",
+        "frozen-attack-007:field:safe_error"
+      ]
+    }
+  ],
+  "execution_mode": "live",
+  "external_io": true,
+  "executions": [
+    {
+      "run_id": "live-20260917T021219Z-0bb414aa1a5d",
+      "model_calls": 6,
+      "failed_model_calls": 0,
+      "input_tokens": 4328,
+      "output_tokens": 8147,
+      "cost_microunits": 0,
+      "latency_ms": 35495,
+      "external_io": true
+    },
+    {
+      "run_id": "live-20260917T021255Z-b4bff5bb8bc6",
+      "model_calls": 6,
+      "failed_model_calls": 0,
+      "input_tokens": 4328,
+      "output_tokens": 8973,
+      "cost_microunits": 0,
+      "latency_ms": 38786,
+      "external_io": true
+    },
+    {
+      "run_id": "live-20260917T021333Z-1d22289caab5",
+      "model_calls": 6,
+      "failed_model_calls": 0,
+      "input_tokens": 4328,
+      "output_tokens": 8177,
+      "cost_microunits": 0,
+      "latency_ms": 35332,
+      "external_io": true
+    }
+  ],
+  "prediction_artifacts": [
+    ".local-acceptance\\intent-v2\\live-20260917T021219Z-0bb414aa1a5d.json",
+    ".local-acceptance\\intent-v2\\live-20260917T021255Z-b4bff5bb8bc6.json",
+    ".local-acceptance\\intent-v2\\live-20260917T021333Z-1d22289caab5.json"
+  ]
+}

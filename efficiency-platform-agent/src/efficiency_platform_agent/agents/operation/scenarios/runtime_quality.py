@@ -12,6 +12,13 @@ from efficiency_platform_agent.agents.operation.scenarios.manifests import (
 from efficiency_platform_agent.capabilities.quality.deliverable_assembler import (
     DeliverableAssembler,
 )
+from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
+    project_set_v2_to_v1,
+)
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV2,
+    DeliverySummaryV2,
+)
 from efficiency_platform_agent.core.run import JsonObject
 
 
@@ -26,6 +33,9 @@ def _plain(value):
 
 class RuntimeScenarioQualityGate:
     """合并专家报告并实际检查成品结构、来源、范围与平台独立性。"""
+
+    def __init__(self, deliverable_contract_version: str = "deliverable/1") -> None:
+        self.deliverable_contract_version = deliverable_contract_version
 
     def validate(self, manifest, result) -> OperationQualityReport:
         """原始质量 ID 保存在检查说明，report_id 独立遵守稳定 ID 契约。"""
@@ -54,6 +64,19 @@ class RuntimeScenarioQualityGate:
         if inherited and inherited.revision_count > 2:
             statuses["q.review-round-limit/1"] = QualityStatus.FAILED
         payloads = [_plain(item.payload) for item in items]
+        if self.deliverable_contract_version == "deliverable/2":
+            view = DeliverableSetV2(
+                run_id="quality-view",
+                intent_revision=0,
+                summary=DeliverySummaryV2(
+                    message="场景质量视图", result_count=len(payloads), complete=True
+                ),
+                deliverables=payloads,
+            )
+            payloads = [
+                item.model_dump(mode="json")
+                for item in project_set_v2_to_v1(view).deliverables
+            ]
         format_report = DeliverableAssembler().assess(
             payloads,
             task_id=bundle.task_id if bundle else "scenario-task",

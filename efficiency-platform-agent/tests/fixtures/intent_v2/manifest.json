@@ -1,0 +1,41 @@
+{
+  "schema_version": "intent-evaluation-manifest/2",
+  "dataset_version": "2026-09-16.1",
+  "created_at": "2026-09-16",
+  "source": "Agent语义意图与多轮理解设计及最小验收用例",
+  "annotator": "agent-maintainer",
+  "annotation_method": "按已批准语义族人工定义模板并逐类复核期望字段",
+  "default_timezone": "Asia/Shanghai",
+  "total_count": 240,
+  "category_counts": {
+    "single": 60,
+    "multi": 60,
+    "date": 40,
+    "composite": 30,
+    "attack": 30,
+    "failure": 20
+  },
+  "files": [
+    {
+      "split": "development",
+      "path": "development.jsonl",
+      "count": 120,
+      "sha256": "f6125d4d5a457195271e1a11d0531b7e6f8b0119450f825d91ca24e425fea5c2",
+      "tuning_allowed": true
+    },
+    {
+      "split": "regression",
+      "path": "regression.jsonl",
+      "count": 60,
+      "sha256": "3076b4918fdfb4ba11aad9cce0ca861279b18abeffd16cfe24a04fa523a2c33b",
+      "tuning_allowed": true
+    },
+    {
+      "split": "frozen",
+      "path": "frozen.jsonl",
+      "count": 60,
+      "sha256": "04f1d5a1ecae468609886b0c64665efa45d3f139c81493041ce1179ae6911791",
+      "tuning_allowed": false
+    }
+  ]
+}

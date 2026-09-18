@@ -1,0 +1,103 @@
+.page > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+.page h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.page header p {
+  color: #64748b;
+  margin: 5px 0;
+}
+.info,
+footer {
+  background: #eff6ff;
+  border-radius: 7px;
+  color: #2563eb;
+  font-size: 13px;
+  margin: 12px 0;
+  padding: 11px;
+}
+.filters {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(190px, 1fr) 150px 130px minmax(190px, 1fr) auto auto;
+  padding: 14px;
+}
+.metrics {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0;
+}
+.metrics article {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  display: grid;
+  gap: 4px;
+  padding: 15px;
+}
+.metrics span,
+.metrics small {
+  color: #64748b;
+  font-size: 12px;
+}
+.metrics b {
+  font-size: 27px;
+}
+.metrics .绿 b,
+.metrics .绿 small {
+  color: #16a34a;
+}
+.metrics .橙 b,
+.metrics .橙 small {
+  color: #f59e0b;
+}
+.table {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  overflow: hidden;
+}
+.pagination {
+  align-items: center;
+  color: #475569;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+}
+@media (max-width: 900px) {
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 600px) {
+  .page > header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .filters {
+    grid-template-columns: 1fr;
+  }
+  .metrics {
+    gap: 8px;
+  }
+  .metrics article {
+    padding: 10px;
+  }
+  .pagination {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

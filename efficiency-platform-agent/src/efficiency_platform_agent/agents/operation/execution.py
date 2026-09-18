@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from efficiency_platform_agent.agents.operation.scenarios.contracts import (
     ScenarioExecutionResult,
 )
-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV1
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV1,
+    DeliverableSetV2,
+)
+from efficiency_platform_agent.contracts.research_v2 import (
+    ResearchBriefV2,
+    ResearchOutcomeV2,
+)
 from efficiency_platform_agent.core.model import ModelExecutionResult
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
 from efficiency_platform_agent.core.runtime import UsageSnapshot
@@ -17,6 +24,18 @@ class OperationUsage:
 
     executions: list[ModelExecutionResult] = field(default_factory=list)
     capability_usage: list[UsageSnapshot] = field(default_factory=list)
+    research_results: dict[
+        tuple[str, str], tuple[ResearchBriefV2, ResearchOutcomeV2]
+    ] = field(default_factory=dict)
+    research_request_ids: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def record_research(
+        self, request_id: str, brief: ResearchBriefV2, outcome: ResearchOutcomeV2
+    ) -> None:
+        """只保存当前 Run 的受控研究事实，不从模型输出反推。"""
+        key = (brief.trusted_context.tenant_id, brief.trusted_context.task_id)
+        self.research_results[key] = (brief, outcome)
+        self.research_request_ids[key] = request_id
 
     def record(self, execution: ModelExecutionResult) -> None:
         """在业务输出校验前记账，失败成品也不得免除模型消耗。"""
@@ -44,7 +63,7 @@ class OperationUsage:
 class OperationExecution:
     """图节点消费的结果，保持 S6 契约原样并显式携带用量。"""
 
-    deliverables: DeliverableSetV1 | None
+    deliverables: DeliverableSetV1 | DeliverableSetV2 | None
     status: CompletionStatus
     usage: UsageSnapshot
     error_code: str | None = None

@@ -1,0 +1,6 @@
+# 离线默认研究策略；不启用任何真实来源或付费能力。
+policy_version = "research-policy/2-offline"
+admission_ttl_days = 30
+cost_evidence_ttl_days = 30
+max_collection_rounds = 3
+max_no_gain_rounds = 1
