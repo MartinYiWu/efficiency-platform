@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { AppRouter } from './AppRouter';
 
@@ -237,6 +237,48 @@ it('renders the HR intelligent conversation page and sends typed text', async ()
 }, 30_000);
 
 it('renders the operations intelligent conversation page with content-operations copy', async () => {
+  const success = (data: unknown, status = 200) =>
+    new Response(JSON.stringify({ code: 'SUCCESS', message: 'success', data, traceId: null }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+    const target = String(input);
+    if (target.endsWith('/conversations'))
+      return success({
+        conversationId: 'router-conversation',
+        title: null,
+        status: 'active',
+        createdAt: '2026-10-15T08:00:00',
+      });
+    if (target.endsWith('/messages'))
+      return success(
+        {
+          conversationId: 'router-conversation',
+          runId: 'router-run',
+          agentRunId: 'router-agent-run',
+          status: 'queued',
+          failureCode: null,
+          failureMessage: null,
+          lastEventSequence: 0,
+        },
+        202,
+      );
+    if (target.includes('/events?afterSequence=0'))
+      return new Response(
+        `id: 1\nevent: stream_done\ndata: ${JSON.stringify({
+          contract_version: 'run.stream.event/1',
+          event: 'stream_done',
+          run_id: 'router-run',
+          sequence: 1,
+          payload: { status: 'succeeded', degraded: false },
+        })}\n\n`,
+        { status: 200 },
+      );
+    if (target.endsWith('/artifacts'))
+      return success({ conversationId: 'router-conversation', artifacts: [] });
+    throw new Error(`unexpected request: ${target}`);
+  });
   const user = userEvent.setup();
   render(
     <MemoryRouter initialEntries={['/ai-assistants/operations/chat']}>
@@ -249,8 +291,12 @@ it('renders the operations intelligent conversation page with content-operations
   expect(screen.getByRole('navigation', { name: 'AI 内容运营助手导航' })).toBeInTheDocument();
 
   const input = screen.getByRole('textbox', { name: '输入消息' });
+  await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   await user.type(input, '帮我为新品发布准备三条内容选题');
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled());
   await user.click(screen.getByRole('button', { name: '发送消息' }));
 
   expect(screen.getByText('帮我为新品发布准备三条内容选题')).toBeInTheDocument();
+  fetchMock.mockRestore();
+  window.history.replaceState(null, '', '/');
 }, 20_000);

@@ -2,7 +2,9 @@ import {
   parseDeliverableSet,
   type OperationChatStatus,
   type DeliverableSetDto,
+  type OperationMessageView,
   type OperationPhaseProgress,
+  type OperationRunView,
   type OperationVisiblePhase,
   type StreamEventV1,
   type VisibleOperationPhase,
@@ -27,9 +29,11 @@ export interface OperationChatState {
   phaseProgress: OperationPhaseProgress | null;
   error: string | null;
   lastEventId: string | null;
+  lastEventRunId: string | null;
   seenEventIds: string[];
 }
 export type OperationChatEvent =
+  | { type: 'history_loaded'; messages: OperationMessageView[]; run: OperationRunView | null }
   | { type: 'submit_started'; requestId: string; content: string }
   | { type: 'run_created'; runId: string; requestId: string }
   | { type: 'sse_event'; event: StreamEventV1 }
@@ -52,6 +56,7 @@ export function createInitialOperationChatState(): OperationChatState {
     phaseProgress: null,
     error: null,
     lastEventId: null,
+    lastEventRunId: null,
     seenEventIds: [],
   };
 }
@@ -105,6 +110,15 @@ function isTerminalStatus(status: OperationChatStatus): boolean {
     status === 'cancelled'
   );
 }
+function restoredStatus(run: OperationRunView | null): OperationChatStatus {
+  if (!run) return 'idle';
+  if (run.status === 'waiting_input') return 'waiting_input';
+  if (run.status === 'succeeded') return 'succeeded';
+  if (run.status === 'degraded_succeeded') return 'degraded_succeeded';
+  if (run.status === 'failed') return 'failed';
+  if (run.status === 'cancelled') return 'cancelled';
+  return 'streaming';
+}
 function hasActiveRequest(
   state: OperationChatState,
   requestId: string | null | undefined,
@@ -134,6 +148,26 @@ export function operationChatReducer(
   action: OperationChatEvent,
 ): OperationChatState {
   if (action.type === 'reset') return createInitialOperationChatState();
+  if (action.type === 'history_loaded') {
+    const run = action.run;
+    const status = restoredStatus(run);
+    return {
+      ...createInitialOperationChatState(),
+      status,
+      runId: run?.runId ?? null,
+      requestId: run ? `restored:${run.runId}` : null,
+      messages: action.messages.map((message) => ({
+        id: message.messageId,
+        role: message.role,
+        content: message.content,
+        createdAt: new Date(message.createdAt).getTime(),
+        frozen: true,
+      })),
+      error: status === 'failed' ? (run?.failureMessage ?? '运营助手未能完成请求。') : null,
+      lastEventId: run && run.lastEventSequence > 0 ? String(run.lastEventSequence) : null,
+      lastEventRunId: run && run.lastEventSequence > 0 ? run.runId : null,
+    };
+  }
   if (action.type === 'submit_started')
     return {
       ...state,
@@ -146,6 +180,8 @@ export function operationChatReducer(
       deliverableSets: [],
       visiblePhase: null,
       phaseProgress: null,
+      lastEventId: null,
+      lastEventRunId: null,
       messages: [
         ...state.messages,
         {
@@ -232,10 +268,17 @@ export function operationChatReducer(
   )
     return state;
   const eventKey = `${event.run_id}:${event.sequence}`;
-  if (state.seenEventIds.includes(eventKey)) return state;
+  if (
+    state.seenEventIds.includes(eventKey) ||
+    (state.lastEventRunId === event.run_id &&
+      state.lastEventId !== null &&
+      event.sequence <= Number(state.lastEventId))
+  )
+    return state;
   const base = {
     ...state,
     lastEventId: String(event.sequence),
+    lastEventRunId: event.run_id,
     seenEventIds: [...state.seenEventIds, eventKey].slice(-200),
   };
   switch (event.event) {
@@ -291,7 +334,9 @@ export function operationChatReducer(
       };
     case 'deliverable': {
       const set = parseDeliverableSet(event.payload.deliverable_set ?? event.payload);
-      return set ? { ...base, deliverableSets: [...base.deliverableSets, set] } : base;
+      return set && ('run_id' in set ? set.run_id === event.run_id : true)
+        ? { ...base, deliverableSets: [...base.deliverableSets, set] }
+        : base;
     }
     case 'stream_error':
       return {

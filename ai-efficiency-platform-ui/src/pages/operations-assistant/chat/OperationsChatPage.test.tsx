@@ -26,6 +26,7 @@ const baseState = (overrides: Partial<OperationChatState>): OperationChatState =
   phaseProgress: null,
   error: null,
   lastEventId: null,
+  lastEventRunId: null,
   seenEventIds: [],
   ...overrides,
 });

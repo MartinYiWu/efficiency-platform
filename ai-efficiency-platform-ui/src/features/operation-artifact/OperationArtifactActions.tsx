@@ -26,7 +26,7 @@ export function OperationArtifactActions({ artifact, baseUrl }: OperationArtifac
 
   const isWechat = artifact.platform === 'wechat_official_account';
   return (
-    <Space wrap aria-label="文章操作">
+    <Space wrap aria-label={`${isWechat ? '公众号' : '平台'}文章操作`}>
       {contextHolder}
       <Button icon={<CopyOutlined />} onClick={() => void copy()}>
         复制成稿
@@ -46,6 +46,7 @@ export function OperationArtifactActions({ artifact, baseUrl }: OperationArtifac
         </Button>
       )}
       <Button
+        download
         href={artifactUrl(baseUrl, artifact.artifactId, 'download')}
         icon={<DownloadOutlined />}
       >

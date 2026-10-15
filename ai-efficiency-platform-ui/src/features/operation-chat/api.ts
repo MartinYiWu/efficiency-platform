@@ -1,6 +1,7 @@
 import type {
   OperationArtifactSummary,
   OperationConversationView,
+  OperationMessageView,
   OperationRunView,
   RunDisplayStatus,
 } from './types';
@@ -19,14 +20,68 @@ interface ApiEnvelope<T> {
   data: T;
 }
 
+export class OperationApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(message);
+  }
+}
+
 const url = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, '')}${path}`;
 
 async function readEnvelope<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
   if (!response.ok || !body || body.code !== 'SUCCESS') {
-    throw new Error(body?.message || `运营助手请求失败（${response.status}）`);
+    throw new OperationApiError(
+      body?.message || `运营助手请求失败（${response.status}）`,
+      response.status,
+      body?.code ?? null,
+    );
   }
   return body.data;
+}
+
+export async function getConversation(
+  conversationId: string,
+  options: OperationApiOptions,
+): Promise<OperationConversationView> {
+  const response = await (options.fetcher ?? fetch)(
+    url(options.baseUrl, `/api/operations/conversations/${encodeURIComponent(conversationId)}`),
+    { method: 'GET', signal: options.signal },
+  );
+  return readEnvelope(response);
+}
+
+export async function listConversationMessages(
+  conversationId: string,
+  options: OperationApiOptions,
+): Promise<OperationMessageView[]> {
+  const response = await (options.fetcher ?? fetch)(
+    url(
+      options.baseUrl,
+      `/api/operations/conversations/${encodeURIComponent(conversationId)}/messages`,
+    ),
+    { method: 'GET', signal: options.signal },
+  );
+  const value = await readEnvelope<{
+    conversationId: string;
+    messages: OperationMessageView[];
+  }>(response);
+  return value.messages;
+}
+
+export async function getRun(
+  runId: string,
+  options: OperationApiOptions,
+): Promise<OperationRunView> {
+  const response = await (options.fetcher ?? fetch)(
+    url(options.baseUrl, `/api/operations/runs/${encodeURIComponent(runId)}`),
+    { method: 'GET', signal: options.signal },
+  );
+  return readEnvelope(response);
 }
 
 export async function createConversation(

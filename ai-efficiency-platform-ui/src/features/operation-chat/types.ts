@@ -7,6 +7,7 @@ export {
 import type { DeliverableSetDto } from '../../entities/operation-deliverable';
 
 export type RunDisplayStatus =
+  | 'submitting'
   | 'queued'
   | 'running'
   | 'waiting_input'
@@ -44,6 +45,14 @@ export interface OperationRunView {
   status: RunDisplayStatus;
   failureCode: string | null;
   failureMessage: string | null;
+  lastEventSequence: number;
+}
+export interface OperationMessageView {
+  messageId: string;
+  role: 'user' | 'assistant';
+  content: string;
+  runId: string | null;
+  createdAt: string;
 }
 export interface OperationArtifactSummary {
   artifactId: string;

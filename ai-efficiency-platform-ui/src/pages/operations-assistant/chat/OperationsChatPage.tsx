@@ -8,6 +8,7 @@ import {
   StreamingAssistantContent,
   useOperationChat,
 } from '../../../features/operation-chat';
+import { OperationArtifactActions } from '../../../features/operation-artifact';
 import { OperationDelivery } from '../../../widgets/operation-delivery';
 import styles from './OperationsChatPage.module.css';
 
@@ -17,8 +18,16 @@ export function OperationsChatPage() {
   const messageViewportRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLElement>(null);
   const followUpFocusRef = useRef<'awaiting-control' | 'stop-focused' | null>(null);
-  const { state, sendMessage, cancel, isBusy, artifacts, artifactError, baseUrl } =
-    useOperationChat();
+  const {
+    state,
+    sendMessage,
+    cancel,
+    isBusy,
+    artifacts = [],
+    artifactError,
+    baseUrl = '',
+    isRestoring = false,
+  } = useOperationChat();
   const currentAssistantMessage =
     state.messages.at(-1)?.role === 'assistant' ? state.messages.at(-1) : null;
   const isActivelyStreaming = state.status === 'submitting' || state.status === 'streaming';
@@ -191,6 +200,23 @@ export function OperationsChatPage() {
               value={set}
             />
           ))}
+          {state.deliverableSets.length === 0 && artifacts.length > 0 && (
+            <section aria-label="历史制品">
+              <Typography.Title level={2}>已生成内容</Typography.Title>
+              {artifacts.map((artifact) => (
+                <Card key={artifact.artifactId} size="small" title={artifact.title}>
+                  <Typography.Paragraph type="secondary">
+                    {artifact.platform === 'wechat_official_account'
+                      ? '微信公众号成稿'
+                      : artifact.platform === 'xiaohongshu'
+                        ? '小红书成稿'
+                        : '运营内容'}
+                  </Typography.Paragraph>
+                  <OperationArtifactActions artifact={artifact} baseUrl={baseUrl} />
+                </Card>
+              ))}
+            </section>
+          )}
           {state.error && (
             <Typography.Text type="danger" role="alert">
               {state.error}
@@ -204,6 +230,7 @@ export function OperationsChatPage() {
           {state.status === 'cancelling' && (
             <Typography.Text type="secondary">正在停止当前任务…</Typography.Text>
           )}
+          {isRestoring && <Typography.Text type="secondary">正在恢复会话…</Typography.Text>}
         </div>
       </div>
       <footer ref={composerRef} className={styles.composer} aria-label="消息输入">

@@ -404,7 +404,7 @@ public class OperationAssistantService {
     private OperationViews.RunView toRunView(OperationRunPO value) {
         return new OperationViews.RunView(
                 value.getConversationId(), value.getId(), value.getAgentRunId(), value.getStatus(),
-                value.getFailureCode(), value.getFailureMessage());
+                value.getFailureCode(), value.getFailureMessage(), value.getLastEventSequence());
     }
 
     private OperationViews.ArtifactView toArtifactView(OperationArtifactPO value) {

@@ -178,6 +178,7 @@
 .platformBody {
   color: var(--ant-color-text);
   line-height: 1.75;
+  white-space: pre-wrap;
 }
 
 .platformBody :global(.ant-typography),

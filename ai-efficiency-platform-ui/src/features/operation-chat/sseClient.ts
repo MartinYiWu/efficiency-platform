@@ -87,6 +87,7 @@ export async function* connectRunStream(
   while (!completed && reconnects <= (options.maxReconnects ?? 3)) {
     if (isAborted(options.signal)) return;
     const headers: Record<string, string> = { Accept: 'text/event-stream' };
+    if (cursor > 0) headers['Last-Event-ID'] = String(cursor);
     try {
       const response = await fetcher(
         `${options.baseUrl.replace(/\/$/, '')}/api/operations/runs/${encodeURIComponent(runId)}/events?afterSequence=${cursor}`,
@@ -110,13 +111,15 @@ export async function* connectRunStream(
           buffer = parts.pop() ?? '';
           for (const part of parts) {
             const event = parseEventBlock(part);
-            if (
-              !event ||
-              event.run_id !== runId ||
-              event.sequence <= cursor ||
-              seen.has(event.sequence)
-            )
+            if (!event || event.run_id !== runId) continue;
+            if (event.sequence <= cursor || seen.has(event.sequence)) {
+              console.warn('operation_sse_event_ignored', {
+                runId,
+                sequence: event.sequence,
+                cursor,
+              });
               continue;
+            }
             seen.add(event.sequence);
             cursor = event.sequence;
             yield event;

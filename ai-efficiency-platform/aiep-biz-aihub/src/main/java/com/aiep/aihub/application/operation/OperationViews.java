@@ -17,7 +17,8 @@ public final class OperationViews {
             String agentRunId,
             String status,
             String failureCode,
-            String failureMessage) { }
+            String failureMessage,
+            long lastEventSequence) { }
     public record ArtifactView(
             String artifactId,
             String conversationId,

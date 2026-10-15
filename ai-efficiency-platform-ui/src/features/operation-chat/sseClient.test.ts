@@ -29,7 +29,7 @@ describe('SSE 客户端', () => {
       event,
     );
   });
-  it('携带租户和 sequence Last-Event-ID，网络异常后有限重连并严格去重', async () => {
+  it('携带 sequence 游标，网络异常后有限重连并严格去重', async () => {
     const fetchMock = vi
       .fn()
       .mockRejectedValueOnce(new Error('断开'))
@@ -49,8 +49,9 @@ describe('SSE 客户端', () => {
       events.push(item);
     expect(events.map((item) => item.sequence)).toEqual([2]);
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
-      headers: { 'X-Tenant-ID': 'tenant-demo', 'Last-Event-ID': '1' },
+      headers: { Accept: 'text/event-stream', 'Last-Event-ID': '1' },
     });
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).not.toHaveProperty('X-Tenant-ID');
   });
   it('Abort 后不重连', async () => {
     const controller = new AbortController();
