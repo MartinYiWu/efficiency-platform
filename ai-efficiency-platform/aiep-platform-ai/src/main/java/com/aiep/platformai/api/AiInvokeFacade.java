@@ -9,6 +9,11 @@ import com.aiep.platformai.api.dto.AiTaskStatusResponse;
 import com.aiep.platformai.api.dto.AiTextRequest;
 import com.aiep.platformai.api.dto.AiTextResponse;
 import com.aiep.platformai.api.dto.AiVectorDeleteRequest;
+import com.aiep.platformai.api.dto.OperationAgentCancelResponse;
+import com.aiep.platformai.api.dto.OperationAgentMessageRequest;
+import com.aiep.platformai.api.dto.OperationAgentRunEvent;
+import com.aiep.platformai.api.dto.OperationAgentRunResponse;
+import reactor.core.publisher.Flux;
 
 /** The only public Java entry point for all calls to the AI capability service. */
 public interface AiInvokeFacade {
@@ -19,4 +24,7 @@ public interface AiInvokeFacade {
     AiTaskStatusResponse submitIngest(AiIngestRequest request);
     AiTaskStatusResponse queryTask(String taskId);
     void deleteVectors(AiVectorDeleteRequest request);
+    OperationAgentRunResponse submitOperationMessage(String conversationId, OperationAgentMessageRequest request);
+    Flux<OperationAgentRunEvent> streamOperationRunEvents(String runId, String tenantId, long afterSequence);
+    OperationAgentCancelResponse cancelOperationRun(String runId, String tenantId);
 }
