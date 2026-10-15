@@ -257,6 +257,9 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
         attempts = 0
         while True:
             emitted = False
+            first_sse_event_recorded = False
+            first_reasoning_recorded = False
+            first_content_recorded = False
             if await self._cancel_requested():
                 raise asyncio.CancelledError
             attempt_number = attempts + 1
@@ -281,6 +284,15 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                     )
                     async with stream_context as response:
                         status = int(getattr(response, "status_code", 200))
+                        self._record_provider_attempt(
+                            "provider_response_headers_received",
+                            DiagnosticLevel.INFO,
+                            selected_model=selected_model,
+                            provider_call_id=provider_call_id,
+                            attempt=attempt_number,
+                            started_at_ns=started_at_ns,
+                            http_status=status,
+                        )
                         if status == 401:
                             self._record_provider_attempt(
                                 "provider_request_failed",
@@ -513,6 +525,17 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                             if not line or not line.startswith("data:"):
                                 continue
                             raw = line[5:].strip()
+                            if not first_sse_event_recorded:
+                                self._record_provider_attempt(
+                                    "provider_first_sse_event_received",
+                                    DiagnosticLevel.INFO,
+                                    selected_model=selected_model,
+                                    provider_call_id=provider_call_id,
+                                    attempt=attempt_number,
+                                    started_at_ns=started_at_ns,
+                                    http_status=status,
+                                )
+                                first_sse_event_recorded = True
                             if raw == "[DONE]":
                                 terminated = True
                                 self._record_provider_attempt(
@@ -547,9 +570,39 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 return
                             choices = _field(event, "choices", ()) or ()
                             choice = choices[0] if choices else None
+                            reasoning_delta = (
+                                _field(
+                                    _field(choice, "delta", {}),
+                                    "reasoning_content",
+                                    "",
+                                )
+                                or ""
+                            )
+                            if reasoning_delta and not first_reasoning_recorded:
+                                self._record_provider_attempt(
+                                    "provider_first_reasoning_received",
+                                    DiagnosticLevel.INFO,
+                                    selected_model=selected_model,
+                                    provider_call_id=provider_call_id,
+                                    attempt=attempt_number,
+                                    started_at_ns=started_at_ns,
+                                    http_status=status,
+                                )
+                                first_reasoning_recorded = True
                             delta = (
                                 _field(_field(choice, "delta", {}), "content", "") or ""
                             )
+                            if delta and not first_content_recorded:
+                                self._record_provider_attempt(
+                                    "provider_first_content_received",
+                                    DiagnosticLevel.INFO,
+                                    selected_model=selected_model,
+                                    provider_call_id=provider_call_id,
+                                    attempt=attempt_number,
+                                    started_at_ns=started_at_ns,
+                                    http_status=status,
+                                )
+                                first_content_recorded = True
                             finish_reason = _field(choice, "finish_reason")
                             usage = (
                                 _usage(event)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -41,6 +42,9 @@ from ._process_isolation import (
 )
 from ._xml_safety import UnsafeXmlError, parse_safe_xml
 from .extraction import DocumentExtractionError
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +166,17 @@ class FeedSourceProvider:
             )
         except Exception as exc:  # noqa: BLE001 - Provider 边界统一安全错误
             error = exception_error_code(exc)
+            logger.warning(
+                "研究订阅源读取失败 source=%s error_code=%s reason_code=%s "
+                "exception_type=%s requests=%s http_status=%s downloaded_bytes=%s",
+                request.source_id,
+                error,
+                getattr(exc, "reason_code", None),
+                type(exc).__name__,
+                error_request_count(exc) if request_started else 0,
+                error_http_status(exc),
+                error_downloaded_bytes(exc),
+            )
             attempt = make_attempt(
                 request_id=request.request_id,
                 source_id=request.source_id,
