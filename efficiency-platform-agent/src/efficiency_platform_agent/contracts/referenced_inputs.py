@@ -10,13 +10,13 @@ class ReferencedRankedInput(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    tenant_id: str = Field(min_length=1)
-    user_id: str = Field(min_length=1)
-    conversation_id: str = Field(min_length=1)
-    source_run_id: str = Field(min_length=1)
-    source_deliverable_id: str = Field(min_length=1)
+    tenant_id: str = Field(min_length=1, max_length=64)
+    user_id: str = Field(min_length=1, max_length=64)
+    conversation_id: str = Field(min_length=1, max_length=64)
+    source_run_id: str = Field(min_length=1, max_length=64)
+    source_deliverable_id: str = Field(min_length=1, max_length=128)
     item: RankedItemV2
-    citations: tuple[CitationV2, ...]
+    citations: tuple[CitationV2, ...] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_closure(self):

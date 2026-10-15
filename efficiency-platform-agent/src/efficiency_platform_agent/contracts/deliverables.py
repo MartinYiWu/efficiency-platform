@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 
@@ -218,6 +219,37 @@ class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
 
     deliverable_kind: Literal["platform_content"] = "platform_content"
     content: PlatformContentV2
+
+    @model_validator(mode="after")
+    def validate_platform_presentation(self) -> PlatformContentDeliverableV2:
+        body = self.content.body_markdown.strip()
+        if re.search(r"<[A-Za-z][^>]*>", body):
+            raise ValueError("PLATFORM_CONTENT_HTML_FORBIDDEN")
+        if self.platform == "wechat_official_account":
+            chinese_count = len(
+                re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", body)
+            )
+            if not 3_000 <= chinese_count <= 4_000:
+                raise ValueError("WECHAT_BODY_CHINESE_LENGTH_INVALID")
+            lines = body.splitlines()
+            if sum(line.startswith("# ") for line in lines) != 1 or sum(
+                line.startswith("## ") for line in lines
+            ) < 2:
+                raise ValueError("WECHAT_MARKDOWN_STRUCTURE_INVALID")
+        elif self.platform == "xiaohongshu":
+            paragraphs = [
+                value.strip()
+                for value in re.split(r"\n\s*\n", body)
+                if value.strip()
+            ]
+            hashtags = self.content.hashtags
+            if len(paragraphs) < 3:
+                raise ValueError("XIAOHONGSHU_PARAGRAPHS_INVALID")
+            if not 5 <= len(hashtags) <= 10 or any(
+                not value.startswith("#") or len(value) < 2 for value in hashtags
+            ):
+                raise ValueError("XIAOHONGSHU_HASHTAGS_INVALID")
+        return self
 
 
 class ActionPlanDeliverableV2(OperationDeliverableBaseV2):

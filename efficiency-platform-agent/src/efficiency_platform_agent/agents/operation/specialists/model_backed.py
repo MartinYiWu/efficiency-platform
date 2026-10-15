@@ -123,6 +123,16 @@ def plain(value: JsonValue) -> Any:
     return value
 
 
+def _validation_summary(error: ValidationError) -> str:
+    """只向修复调用传递字段位置和稳定错误，不回显模型正文。"""
+    summaries: list[str] = []
+    for item in error.errors(include_input=False, include_url=False)[:8]:
+        location = ".".join(str(value) for value in item.get("loc", ())) or "root"
+        message = str(item.get("msg", "validation failed"))
+        summaries.append(f"{location}: {message[:160]}")
+    return "; ".join(summaries) or "validation failed"
+
+
 class ModelBackedOperationSpecialist:
     """保留 S1 注册定义，通过模型端口返回 S3/S4 权威结果。"""
 
@@ -261,7 +271,7 @@ class ModelBackedOperationSpecialist:
             item = self._validate_deliverable(
                 output, schema_model, raw, kind, citations_v2
             )
-        except ValidationError:
+        except ValidationError as validation_error:
             retry_budget = replace(
                 self._retry_budget(remaining, execution),
                 timeout_ms=max(
@@ -289,7 +299,10 @@ class ModelBackedOperationSpecialist:
                     *rendered.messages,
                     ProviderMessage(
                         "system",
-                        "上一版输出未通过严格 Schema 校验。请重新生成；只能输出约定 JSON 对象，禁止额外字段、Markdown 围栏和解释。",
+                        "上一版输出未通过严格 Schema 与平台格式校验。"
+                        f"错误摘要：{_validation_summary(validation_error)}。"
+                        "请只修复这些问题并重新生成；只能输出约定 JSON 对象，"
+                        "禁止额外字段、Markdown 围栏和解释。",
                     ),
                     ProviderMessage("user", content),
                 ),

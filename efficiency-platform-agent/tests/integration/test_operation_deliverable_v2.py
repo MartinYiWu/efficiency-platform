@@ -37,6 +37,23 @@ class ContentProviderV2:
         self.calls.append(raw)
         if raw["platform"] == self.failed_platform:
             raise RuntimeError("离线平台故障")
+        if raw["platform"] == "wechat_official_account":
+            body = "\n\n".join(
+                (
+                    "# 公众号成稿",
+                    "## 事实与变化",
+                    "这" * 1600,
+                    "## 影响与运营观察",
+                    "人" * 1600,
+                )
+            )
+            hashtags = []
+        elif raw["platform"] == "xiaohongshu":
+            body = "第一段\n\n第二段\n\n第三段"
+            hashtags = ["#AI", "#人工智能", "#科技", "#产品", "#运营"]
+        else:
+            body = raw["platform"] + " 专属正文。"
+            hashtags = ["#新品"]
         value = {
             "contract_version": "deliverable/2",
             "deliverable_id": raw["deliverable_id"],
@@ -46,8 +63,8 @@ class ContentProviderV2:
             "lead": "面向渠道的独立发布内容",
             "content": {
                 "kind": "platform_content",
-                "body_markdown": raw["platform"] + " 专属正文。",
-                "hashtags": ["#新品"],
+                "body_markdown": body,
+                "hashtags": hashtags,
                 "format_notes": [],
             },
             "citations": [],

@@ -32,6 +32,9 @@ from efficiency_platform_agent.core.run import (
 )
 from efficiency_platform_agent.core.runtime import UsageSnapshot
 from efficiency_platform_agent.harness import operation_agent_factory
+from efficiency_platform_agent.harness.referenced_content_model import (
+    ReferencedContentModelRuntime,
+)
 from efficiency_platform_agent.prompts.runtime import PromptRuntime
 
 SOURCE = {"url": "https://example.com/news", "title": "发布消息", "source": "发布者"}
@@ -125,21 +128,28 @@ class RecordingModel:
 
 
 def task(
-    capability: str = "operation.research.insight", *, iterations: int = 4
+    capability: str = "operation.research.insight",
+    *,
+    iterations: int = 4,
+    platform: str | None = None,
+    input_deliverables: list[dict[str, Any]] | None = None,
 ) -> SupervisorTask:
     """创建已有 Supervisor 外壳中的最小输入。"""
     value = freeze(
         {
-            "platform": "research"
-            if capability.endswith("research.insight")
-            else "wechat",
+            "platform": platform
+            or (
+                "research"
+                if capability.endswith("research.insight")
+                else "wechat"
+            ),
             "tenant_id": "tenant-1",
             "goal": "生成内容",
             "task_id": "task-1",
             "plan_id": "plan-1",
             "deliverable_id": "delivery-1",
             "citations": [SOURCE],
-            "input_deliverables": [],
+            "input_deliverables": input_deliverables or [],
             "profile_reference_ids": [],
             "research": capability.endswith("research.insight"),
         }
@@ -552,3 +562,84 @@ async def test_evidence_metadata_is_selected_as_one_record() -> None:
         record.evidence_id,
         datetime.fromtimestamp(1_789_520_400_000 / 1000, tz=UTC).isoformat(),
     )
+
+
+def _wechat_draft(chinese_characters: int) -> dict[str, Any]:
+    value = draft("platform_content")
+    value["platform"] = "wechat_official_account"
+    value["content"]["body_markdown"] = "\n\n".join(
+        (
+            "# 本周人工智能行业观察",
+            "## 事实与变化",
+            "这" * (chinese_characters // 2),
+            "## 影响与运营观察",
+            "人" * (chinese_characters - chinese_characters // 2),
+            "## 结语",
+        )
+    )
+    return value
+
+
+@pytest.mark.asyncio
+async def test_wechat_quality_failure_is_repaired_once_with_safe_error_summary() -> None:
+    model = RecordingModel(_wechat_draft(200), _wechat_draft(3200))
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task(
+                "operation.content.create",
+                platform="wechat_official_account",
+            )
+        )
+    )
+
+    assert len(model.requests) == 2
+    assert "WECHAT_BODY_CHINESE_LENGTH_INVALID" in model.requests[1].messages[-2].content
+    assert result["platform"] == "wechat_official_account"
+
+
+@pytest.mark.asyncio
+async def test_xiaohongshu_requires_three_paragraphs_and_five_to_ten_hashtags() -> None:
+    invalid = draft("platform_content")
+    invalid["platform"] = "xiaohongshu"
+    invalid["content"].update(body_markdown="只有一段", hashtags=["#AI"])
+    valid = draft("platform_content")
+    valid["platform"] = "xiaohongshu"
+    valid["content"].update(
+        body_markdown="第一段\n\n第二段\n\n第三段",
+        hashtags=["#AI", "#人工智能", "#科技", "#产品", "#运营"],
+    )
+    model = RecordingModel(invalid, valid)
+
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task("operation.content.create", platform="xiaohongshu")
+        )
+    )
+
+    assert len(model.requests) == 2
+    assert len(result["content"]["hashtags"]) == 5
+
+
+@pytest.mark.asyncio
+async def test_referenced_content_runtime_always_delegates_to_model() -> None:
+    output = _wechat_draft(3200)
+    delegate = RecordingModel(output)
+    runtime = ReferencedContentModelRuntime(delegate)
+    request = SimpleNamespace(
+        messages=(
+            ProviderMessage(
+                "user",
+                json.dumps(
+                    {
+                        "platform": "wechat_official_account",
+                        "input_deliverables": [{"item": {"item_id": "item-1"}}],
+                    }
+                ),
+            ),
+        )
+    )
+
+    result = await runtime.complete(None, request, remaining_budget=None)
+
+    assert result.result.message is not None
+    assert len(delegate.requests) == 1
