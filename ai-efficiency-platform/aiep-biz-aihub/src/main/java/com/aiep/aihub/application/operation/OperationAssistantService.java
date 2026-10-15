@@ -73,8 +73,11 @@ public class OperationAssistantService {
     @Transactional(noRollbackFor = AgentTransportException.class)
     public OperationViews.RunView submitMessage(
             String conversationId, String message, String clientRequestId) {
+        long startedAt = System.nanoTime();
         OperationActor actor = OperationActor.developmentActor();
         OperationConversationPO conversation = ownedConversation(conversationId, actor);
+        log.info("event=operation_submit_started conversationId={} clientRequestId={}",
+                conversationId, clientRequestId);
         OperationMessagePO duplicate = messageMapper.selectOne(new LambdaQueryWrapper<OperationMessagePO>()
                 .eq(OperationMessagePO::getTenantId, actor.tenantId())
                 .eq(OperationMessagePO::getClientRequestId, clientRequestId)
@@ -86,6 +89,8 @@ public class OperationAssistantService {
             if (priorRun == null) {
                 throw new OperationAssistantException("IDEMPOTENCY_STATE_INVALID", "幂等请求状态不完整");
             }
+            log.info("event=operation_submit_deduplicated conversationId={} runId={} agentRunId={} status={}",
+                    conversationId, priorRun.getId(), priorRun.getAgentRunId(), priorRun.getStatus());
             return toRunView(priorRun);
         }
 
@@ -121,14 +126,17 @@ public class OperationAssistantService {
             run.setStatus(submitted.status());
             run.setUpdatedAt(LocalDateTime.now());
             runMapper.updateById(run);
+            log.info("event=operation_agent_run_bound conversationId={} runId={} agentRunId={} status={}",
+                    conversationId, run.getId(), run.getAgentRunId(), run.getStatus());
         } catch (AgentTransportException exception) {
             run.setStatus("failed");
             run.setFailureCode(exception.getErrorCode());
             run.setFailureMessage(exception.getMessage());
             run.setUpdatedAt(LocalDateTime.now());
             runMapper.updateById(run);
-            log.error("运营Agent提交失败，runId={}, code={}, status={}",
-                    run.getId(), exception.getErrorCode(), exception.getStatusCode());
+            log.error("event=operation_submit_failed conversationId={} runId={} code={} httpStatus={} elapsedMs={}",
+                    conversationId, run.getId(), exception.getErrorCode(), exception.getStatusCode(),
+                    elapsedMillis(startedAt));
             throw exception;
         }
 
@@ -137,6 +145,8 @@ public class OperationAssistantService {
             conversation.setTitle(normalizeTitle(message));
         }
         conversationMapper.updateById(conversation);
+        log.info("event=operation_submit_succeeded conversationId={} runId={} agentRunId={} status={} elapsedMs={}",
+                conversationId, run.getId(), run.getAgentRunId(), run.getStatus(), elapsedMillis(startedAt));
         return toRunView(run);
     }
 
@@ -146,7 +156,16 @@ public class OperationAssistantService {
             throw new OperationAssistantException("RUN_NOT_STREAMABLE", "运行任务未成功提交到Agent");
         }
         long cursor = Math.max(afterSequence, run.getLastEventSequence());
-        return aiInvokeFacade.streamOperationRunEvents(run.getAgentRunId(), run.getTenantId(), cursor);
+        return aiInvokeFacade.streamOperationRunEvents(run.getAgentRunId(), run.getTenantId(), cursor)
+                .doOnSubscribe(ignored -> log.info(
+                        "event=operation_sse_opened runId={} agentRunId={} afterSequence={}",
+                        run.getId(), run.getAgentRunId(), cursor))
+                .doOnComplete(() -> log.info(
+                        "event=operation_sse_completed runId={} agentRunId={}",
+                        run.getId(), run.getAgentRunId()))
+                .doOnError(error -> log.error(
+                        "event=operation_sse_failed runId={} agentRunId={} errorType={}",
+                        run.getId(), run.getAgentRunId(), error.getClass().getSimpleName()));
     }
 
     @Transactional
@@ -156,6 +175,8 @@ public class OperationAssistantService {
             throw new OperationAssistantException("RUN_EVENT_MISMATCH", "运行事件标识不匹配");
         }
         if (event.sequence() <= run.getLastEventSequence()) {
+            log.warn("event=operation_event_ignored runId={} agentRunId={} sequence={} lastSequence={}",
+                    run.getId(), run.getAgentRunId(), event.sequence(), run.getLastEventSequence());
             return;
         }
         run.setLastEventSequence(event.sequence());
@@ -173,6 +194,12 @@ public class OperationAssistantService {
             run.setStatus(stringValue(event.payload().get("status")));
         }
         runMapper.updateById(run);
+        log.info("event=operation_event_projected runId={} agentRunId={} sequence={} event={} status={}",
+                run.getId(), run.getAgentRunId(), event.sequence(), event.event(), run.getStatus());
+        if ("stream_done".equals(event.event())) {
+            log.info("event=operation_run_terminal runId={} agentRunId={} sequence={} status={}",
+                    run.getId(), run.getAgentRunId(), event.sequence(), run.getStatus());
+        }
     }
 
     @Transactional
@@ -185,7 +212,26 @@ public class OperationAssistantService {
         run.setStatus(cancelled.status());
         run.setUpdatedAt(LocalDateTime.now());
         runMapper.updateById(run);
+        log.info("event=operation_cancel_result runId={} agentRunId={} status={}",
+                run.getId(), run.getAgentRunId(), run.getStatus());
         return toRunView(run);
+    }
+
+    public OperationViews.ConversationView getConversation(String conversationId) {
+        return toConversationView(ownedConversation(conversationId, OperationActor.developmentActor()));
+    }
+
+    public OperationViews.MessageListView listMessages(String conversationId) {
+        OperationActor actor = OperationActor.developmentActor();
+        ownedConversation(conversationId, actor);
+        List<OperationViews.MessageView> messages = messageMapper
+                .selectConversationMessages(conversationId, actor.tenantId())
+                .stream()
+                .map(message -> new OperationViews.MessageView(
+                        message.getId(), message.getRole(), message.getContent(),
+                        message.getRunId(), message.getCreatedAt()))
+                .toList();
+        return new OperationViews.MessageListView(conversationId, messages);
     }
 
     public OperationViews.ArtifactView getArtifact(String artifactId) {
@@ -270,6 +316,9 @@ public class OperationAssistantService {
             conversationMapper.updateById(conversation);
         }
         persistAssistantMessage(run, artifacts);
+        log.info("event=operation_artifacts_persisted runId={} agentRunId={} count={} types={}",
+                run.getId(), run.getAgentRunId(), artifacts.size(), artifacts.stream()
+                        .map(OperationArtifactPO::getArtifactType).distinct().sorted().toList());
     }
 
     private void persistAssistantMessage(OperationRunPO run, List<OperationArtifactPO> artifacts) {
@@ -331,6 +380,7 @@ public class OperationAssistantService {
         if (value == null) {
             throw new OperationAssistantException("RUN_NOT_FOUND", "运行记录不存在");
         }
+        ownedConversation(value.getConversationId(), actor);
         return value;
     }
 
@@ -343,6 +393,7 @@ public class OperationAssistantService {
         if (value == null) {
             throw new OperationAssistantException("ARTIFACT_NOT_FOUND", "文章制品不存在");
         }
+        ownedConversation(value.getConversationId(), actor);
         return value;
     }
 
@@ -403,5 +454,9 @@ public class OperationAssistantService {
             throw new OperationAssistantException("INVALID_REQUEST", message);
         }
         return value.strip();
+    }
+
+    private static long elapsedMillis(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
     }
 }

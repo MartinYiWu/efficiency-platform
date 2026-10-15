@@ -17,6 +17,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelOption;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -31,6 +33,7 @@ import reactor.util.retry.Retry;
 
 @Component
 public class HttpAgentClient implements AgentClient {
+    private static final Logger log = LoggerFactory.getLogger(HttpAgentClient.class);
     private static final String TENANT_HEADER = "X-Tenant-ID";
     private static final ParameterizedTypeReference<ServerSentEvent<String>> EVENT_TYPE =
             new ParameterizedTypeReference<>() { };
@@ -53,7 +56,9 @@ public class HttpAgentClient implements AgentClient {
     @Override
     public OperationAgentRunResponse submitOperationMessage(
             String conversationId, OperationAgentMessageRequest request) {
-        return requireBody(webClient.post()
+        long startedAt = System.nanoTime();
+        log.info("event=agent_submit_started conversationId={} requestId={}", conversationId, request.requestId());
+        OperationAgentRunResponse result = requireBody(webClient.post()
                 .uri(AgentEndpoints.CONVERSATION_MESSAGES, conversationId)
                 .header(TENANT_HEADER, request.tenantId())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -64,6 +69,9 @@ public class HttpAgentClient implements AgentClient {
                 .retryWhen(Retry.max(1).filter(WebClientRequestException.class::isInstance))
                 .onErrorMap(WebClientRequestException.class,
                         error -> new AgentTransportException(503, "AGENT_UNAVAILABLE", "Agent 服务当前不可用")));
+        log.info("event=agent_submit_succeeded conversationId={} agentRunId={} status={} elapsedMs={}",
+                conversationId, result.runId(), result.status(), elapsedMillis(startedAt));
+        return result;
     }
 
     @Override
@@ -76,19 +84,28 @@ public class HttpAgentClient implements AgentClient {
         if (afterSequence > 0) {
             request = request.header("Last-Event-ID", Long.toString(afterSequence));
         }
+        log.info("event=agent_sse_connecting agentRunId={} afterSequence={}", runId, afterSequence);
         return request.retrieve()
                 .onStatus(status -> status.isError(), response -> downstreamError(response.statusCode().value()))
                 .bodyToFlux(EVENT_TYPE)
                 .filter(event -> event.data() != null)
                 .map(event -> Objects.requireNonNull(event.data()))
                 .map(this::decodeEvent)
+                .doOnNext(event -> log.info(
+                        "event=agent_sse_event agentRunId={} sequence={} type={}",
+                        runId, event.sequence(), event.event()))
+                .doOnComplete(() -> log.info("event=agent_sse_completed agentRunId={}", runId))
+                .doOnError(error -> log.error(
+                        "event=agent_sse_failed agentRunId={} errorType={}",
+                        runId, error.getClass().getSimpleName()))
                 .onErrorMap(WebClientRequestException.class,
                         error -> new AgentTransportException(503, "AGENT_UNAVAILABLE", "Agent 服务当前不可用"));
     }
 
     @Override
     public OperationAgentCancelResponse cancelOperationRun(String runId, String tenantId) {
-        return requireBody(webClient.post()
+        long startedAt = System.nanoTime();
+        OperationAgentCancelResponse result = requireBody(webClient.post()
                 .uri(AgentEndpoints.RUN_CANCEL, runId)
                 .header(TENANT_HEADER, tenantId)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -98,6 +115,9 @@ public class HttpAgentClient implements AgentClient {
                 .bodyToMono(OperationAgentCancelResponse.class)
                 .onErrorMap(WebClientRequestException.class,
                         error -> new AgentTransportException(503, "AGENT_UNAVAILABLE", "Agent 服务当前不可用")));
+        log.info("event=agent_cancel_succeeded agentRunId={} status={} elapsedMs={}",
+                runId, result.status(), elapsedMillis(startedAt));
+        return result;
     }
 
     @Override
@@ -171,6 +191,10 @@ public class HttpAgentClient implements AgentClient {
             throw new AgentTransportException(502, "AGENT_EMPTY_RESPONSE", "Agent 返回空响应");
         }
         return value;
+    }
+
+    private static long elapsedMillis(long startedAtNanos) {
+        return (System.nanoTime() - startedAtNanos) / 1_000_000L;
     }
 
     private record CancelRequest(

@@ -50,6 +50,16 @@ public class OperationAssistantController {
                 .body(ApiResponse.success(service.submitMessage(conversationId, request.message(), clientRequestId)));
     }
 
+    @GetMapping("/conversations/{conversationId}")
+    public ApiResponse<OperationViews.ConversationView> getConversation(@PathVariable String conversationId) {
+        return ApiResponse.success(service.getConversation(conversationId));
+    }
+
+    @GetMapping("/conversations/{conversationId}/messages")
+    public ApiResponse<OperationViews.MessageListView> listMessages(@PathVariable String conversationId) {
+        return ApiResponse.success(service.listMessages(conversationId));
+    }
+
     @GetMapping("/runs/{runId}")
     public ApiResponse<OperationViews.RunView> getRun(@PathVariable String runId) {
         return ApiResponse.success(service.getRun(runId));

@@ -8,6 +8,9 @@ public final class OperationViews {
     }
 
     public record ConversationView(String conversationId, String title, String status, LocalDateTime createdAt) { }
+    public record MessageView(
+            String messageId, String role, String content, String runId, LocalDateTime createdAt) { }
+    public record MessageListView(String conversationId, List<MessageView> messages) { }
     public record RunView(
             String conversationId,
             String runId,
