@@ -73,6 +73,11 @@ from efficiency_platform_agent.persistence.in_memory import (
     InMemoryRunEventStore,
     InMemoryRunRepository,
 )
+from efficiency_platform_agent.persistence.mysql_runtime import (
+    MySqlRunEventStore,
+    MySqlRunRepository,
+    MySqlRuntimeDatabase,
+)
 from efficiency_platform_agent.providers.deepseek_stream import (
     DeepSeekStreamingProvider,
 )
@@ -145,6 +150,7 @@ class LocalAgentApplication:
     event_hub: EventHub
     http_client: Any | None = None
     research_client: Any | None = None
+    runtime_database: MySqlRuntimeDatabase | None = None
 
     async def close(self) -> None:
         """等待后台任务并关闭组合根拥有的客户端。"""
@@ -157,6 +163,8 @@ class LocalAgentApplication:
                 result = close()
                 if hasattr(result, "__await__"):
                     await result
+        if self.runtime_database is not None:
+            await self.runtime_database.close()
 
 
 def _secret(settings: S7IntegrationSettings, name: str) -> str:
@@ -229,6 +237,16 @@ def build_local_agent_application(
     ):
         raise RuntimeError("LIVE_ACCEPTANCE_PERSISTENCE_NOT_READY")
     resolved = settings or S7IntegrationSettings.from_env_file(env_file)
+    runtime_database: MySqlRuntimeDatabase | None = None
+    if test_mode:
+        run_repository = InMemoryRunRepository()
+        run_event_store = InMemoryRunEventStore()
+    else:
+        runtime_database = MySqlRuntimeDatabase(
+            _secret(resolved, "runtime_database_url")
+        )
+        run_repository = MySqlRunRepository(runtime_database.engine)
+        run_event_store = MySqlRunEventStore(runtime_database.engine)
     resolved_research_v2 = research_v2_settings or ResearchPipelineSettings()
     auto_local_live = (
         resolved_research_v2.local_live_ready and intent_v2_delegate is None
@@ -368,8 +386,8 @@ def build_local_agent_application(
         diagnostic_recorder=execution_logger,
     )
     runtime = AgentRuntimeService(
-        repository=InMemoryRunRepository(),
-        event_store=InMemoryRunEventStore(),
+        repository=run_repository,
+        event_store=run_event_store,
         router=StrategyRouter(
             frozenset({StrategyMode.DIRECT, StrategyMode.MULTI_AGENT})
         ),
@@ -478,6 +496,10 @@ def build_local_agent_application(
         event_hub=event_hub,
         conversation_service=conversation,
         live_acceptance_service=resolved_live_acceptance_service,
+        runtime_mode="s2_fake_in_memory" if test_mode else "local_real_mysql",
+        dependency_probe=(
+            None if runtime_database is None else runtime_database.ping
+        ),
     )
     app.state.local_live_research_components = local_live_components
     app.state.local_test_mode = test_mode
@@ -491,6 +513,7 @@ def build_local_agent_application(
         event_hub,
         client if owns_client else None,
         research_client,
+        runtime_database,
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
@@ -33,6 +34,8 @@ def create_app(
     event_hub: EventHub | None = None,
     conversation_service: ConversationService | None = None,
     live_acceptance_service: LiveAcceptanceService | None = None,
+    runtime_mode: str = "s2_fake_in_memory",
+    dependency_probe: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
     """创建绑定运行服务并可选挂载文档摄取服务的 FastAPI 应用。"""
     app = FastAPI(title="Efficiency Platform Agent Runtime", version="s2")
@@ -82,8 +85,35 @@ def create_app(
 
     @app.get("/health/live")
     async def health_live() -> dict[str, str]:
-        """报告 S2 Fake/InMemory 模式，不执行外部依赖探活。"""
-        return {"status": "ok", "mode": "s2_fake_in_memory"}
+        """只报告进程存活和真实装配模式。"""
+        return {"status": "ok", "mode": runtime_mode}
+
+    async def readiness() -> dict[str, object] | JSONResponse:
+        if dependency_probe is None:
+            return {
+                "status": "ok",
+                "mode": runtime_mode,
+                "dependencies": {"runtime_database": "not_configured"},
+            }
+        try:
+            await dependency_probe()
+        except RuntimeError:
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "error",
+                    "mode": runtime_mode,
+                    "dependencies": {"runtime_database": "down"},
+                },
+            )
+        return {
+            "status": "ok",
+            "mode": runtime_mode,
+            "dependencies": {"runtime_database": "up"},
+        }
+
+    app.get("/health")(readiness)
+    app.get("/health/ready")(readiness)
 
     return app
 
