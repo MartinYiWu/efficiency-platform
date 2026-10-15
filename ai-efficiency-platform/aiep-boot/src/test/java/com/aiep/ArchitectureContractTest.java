@@ -30,7 +30,7 @@ class ArchitectureContractTest {
     }
 
     @Test
-    void centralizes_exactly_seven_agent_business_endpoint_constants() throws Exception {
+    void centralizes_agent_business_endpoint_constants() throws Exception {
         Class<?> endpoints = Class.forName("com.aiep.platformai.agent.AgentEndpoints");
         Set<String> endpointValues = Stream.of(endpoints.getFields())
                 .map(this::readStringConstant)
@@ -38,11 +38,13 @@ class ArchitectureContractTest {
 
         assertThat(endpointValues).containsExactlyInAnyOrder(
                 "/text/generate", "/chat/stream", "/skill/execute", "/kb/qa",
-                "/kb/ingest", "/task/{task_id}", "/kb/vectors");
+                "/kb/ingest", "/task/{task_id}", "/kb/vectors",
+                "/v1/conversations/{conversation_id}/messages",
+                "/v1/runs/{run_id}/events", "/v1/runs/{run_id}/cancel");
     }
 
     @Test
-    void exposes_the_seven_agent_operations_through_ai_invoke_facade() throws Exception {
+    void exposes_agent_operations_through_ai_invoke_facade() throws Exception {
         Class<?> facade = Class.forName("com.aiep.platformai.api.AiInvokeFacade");
         Set<String> operationNames = Stream.of(facade.getDeclaredMethods())
                 .map(method -> method.getName())
@@ -50,7 +52,8 @@ class ArchitectureContractTest {
 
         assertThat(operationNames).containsExactlyInAnyOrder(
                 "generateText", "streamChat", "executeSkill", "streamKbQa",
-                "submitIngest", "queryTask", "deleteVectors");
+                "submitIngest", "queryTask", "deleteVectors",
+                "submitOperationMessage", "streamOperationRunEvents", "cancelOperationRun");
     }
 
     @Test

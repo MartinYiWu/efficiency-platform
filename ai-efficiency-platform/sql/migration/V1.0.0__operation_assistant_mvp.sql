@@ -39,7 +39,7 @@ CREATE TABLE ai_operation_run (
     conversation_id CHAR(36) NOT NULL,
     tenant_id VARCHAR(64) NOT NULL,
     user_message_id CHAR(36) NOT NULL,
-    agent_run_id VARCHAR(128) NOT NULL,
+    agent_run_id VARCHAR(128) NULL,
     status VARCHAR(32) NOT NULL,
     last_event_sequence BIGINT NOT NULL DEFAULT 0,
     failure_code VARCHAR(128) NULL,
