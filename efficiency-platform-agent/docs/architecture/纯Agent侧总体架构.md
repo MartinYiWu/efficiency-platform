@@ -6,15 +6,17 @@
 | 状态 | 已批准 |
 | 作者/负责人 | Agent 平台架构负责人 |
 | 创建日期 | 2026-09-01 |
-| 最后更新日期 | 2026-09-02 |
+| 最后更新日期 | 2026-10-15 |
 | 评审人/批准人 | 项目负责人（用户）；批准日期：2026-09-02；批准范围：纯 Agent 侧 P0～P5 总体架构；评审结论：架构骨架及跨阶段边界通过；证据：本次任务完成逐项确认并明确回复“确认” |
 | 关联 ADR/设计/计划 | [Agent 侧 P0～P5 总体技术架构设计](../superpowers/specs/2026-09-02-Agent侧P0-P5总体技术架构-设计.md)、[Agent 侧架构骨架实施计划](../superpowers/plans/2026-09-01-Agent侧架构骨架-实施计划.md)、[Agent 侧技术组件选型](Agent侧技术组件选型.md)、[P1 Agent Runtime 技术组件选型设计](../superpowers/specs/2026-09-02-P1-Agent-Runtime技术组件选型-设计.md)、[扩展开发约定](扩展开发约定.md) |
-| 替代关系 | 无 |
+| 替代关系 | 运营助手运行态关系库由 [ADR-0005](../adr/ADR-0005-Agent运行态使用MySQL.md) 局部替代；向量存储不变 |
 | 适用范围 | 纯 Agent 侧已批准架构基线与标准库骨架；不适用于 Java、部署或真实运行时接入 |
 
 ## 1. 当前架构最终基线
 
 当前最终基线采用 **Harnessed Hybrid Multi-Agent Architecture（受控混合多 Agent 架构）**。P0～P5 技术架构和组件选型已经批准；批准不表示依赖已安装、代码已实现、PoC 已执行或系统可生产使用。
+
+> **2026-10-15 局部替代：** 运营助手 MVP 的 Run、Event 和幂等请求使用 Agent 独立 MySQL 数据库；PostgreSQL + pgvector 继续承担文档、切片与向量存储。详见 [ADR-0005](../adr/ADR-0005-Agent运行态使用MySQL.md)。本文其余历史基线保持不变。
 
 这不是在 ReAct、Plan-and-Execute 和 Multi-Agent 中三选一，而是：
 
