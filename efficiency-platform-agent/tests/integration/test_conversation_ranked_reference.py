@@ -295,7 +295,7 @@ async def test_invalid_v2_is_rejected_without_model(mutation):
 
 
 @pytest.mark.asyncio
-async def test_latest_queued_run_blocks_fallback_to_older_success():
+async def test_unrelated_queued_run_keeps_latest_ranked_reference():
     runtime, facade, interpreter, _ = await first_round()
     interpreter.intents.append(
         IntentEnvelopeV1(
@@ -324,9 +324,9 @@ async def test_latest_queued_run_blocks_fallback_to_older_success():
         ),
     )
     await runtime.wait()
-    with pytest.raises(HarnessError, match="上一轮"):
-        await submit_rewrite(facade, runtime)
-    assert runtime.reads == [(queued.run_id, "tenant-a")]
+    rewritten = await submit_rewrite(facade, runtime)
+    assert rewritten.status == "queued"
+    assert runtime.reads == [("run-1", "tenant-a")]
 
 
 @pytest.mark.asyncio
@@ -450,9 +450,12 @@ async def test_two_real_api_rounds_use_ranked_v2_then_selected_content():
             third_view = await bundle.runtime.get_run(
                 third.json()["run_id"], "tenant-a"
             )
-            assert third_view.status is RunStatus.FAILED
-            assert third_view.error.code == "CONVERSATION_REFERENCE_UNAVAILABLE"
-            assert third_view.usage.input_tokens == third_view.usage.output_tokens == 0
-            assert len(provider.calls) == 1
+            assert third_view.status is RunStatus.SUCCEEDED
+            assert len(provider.calls) == 2
+            assert (
+                provider.calls[1]["input_deliverables"][0]["item"]
+                == digest["content"]["items"][0]
+            )
+            assert provider.calls[1]["citations"] == digest["citations"]
     finally:
         await bundle.close()

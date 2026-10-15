@@ -73,6 +73,10 @@ from efficiency_platform_agent.persistence.in_memory import (
     InMemoryRunEventStore,
     InMemoryRunRepository,
 )
+from efficiency_platform_agent.persistence.mysql_ranked_references import (
+    InMemoryRankedReferenceRepository,
+    MySqlRankedReferenceRepository,
+)
 from efficiency_platform_agent.persistence.mysql_runtime import (
     MySqlRunEventStore,
     MySqlRunRepository,
@@ -241,12 +245,16 @@ def build_local_agent_application(
     if test_mode:
         run_repository = InMemoryRunRepository()
         run_event_store = InMemoryRunEventStore()
+        ranked_reference_repository = InMemoryRankedReferenceRepository()
     else:
         runtime_database = MySqlRuntimeDatabase(
             _secret(resolved, "runtime_database_url")
         )
         run_repository = MySqlRunRepository(runtime_database.engine)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
+        ranked_reference_repository = MySqlRankedReferenceRepository(
+            runtime_database.engine
+        )
     resolved_research_v2 = research_v2_settings or (
         ResearchPipelineSettings()
         if test_mode
@@ -415,6 +423,7 @@ def build_local_agent_application(
             model_runtime=model_runtime,
             runtime=runtime,
             submissions=submissions,
+            ranked_reference_repository=ranked_reference_repository,
         )
         intent_v2_delegate = local_live_components.delegate
         research_service_v2 = local_live_components.research_service
@@ -485,7 +494,9 @@ def build_local_agent_application(
         direct_submissions=direct_submissions,
         intent_v2_coordinator=intent_v2_adapter,
         ranked_reference_validator=(
-            LocalLiveRankedReferenceValidator(local_live_components.state_store)
+            LocalLiveRankedReferenceValidator(
+                local_live_components.ranked_reference_repository
+            )
             if local_live_components is not None
             else None
         ),
@@ -509,6 +520,7 @@ def build_local_agent_application(
         ),
     )
     app.state.local_live_research_components = local_live_components
+    app.state.ranked_reference_repository = ranked_reference_repository
     app.state.local_test_mode = test_mode
     app.state.research_v2_enabled = resolved_research_v2.v2_enabled
     app.state.research_v2_production_ready = resolved_research_v2.production_ready

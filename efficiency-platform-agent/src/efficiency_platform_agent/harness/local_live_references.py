@@ -3,39 +3,30 @@
 from urllib.parse import urlsplit
 
 from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
-from efficiency_platform_agent.persistence.research_local_memory import (
-    LocalResearchRunStore,
+from efficiency_platform_agent.persistence.mysql_ranked_references import (
+    RankedReferencePersistenceError,
+    RankedReferenceRepository,
 )
 
 from .referenced_inputs import reference_error
 
 
 class LocalLiveRankedReferenceValidator:
-    def __init__(self, store: LocalResearchRunStore) -> None:
-        self.store = store
+    def __init__(self, repository: RankedReferenceRepository) -> None:
+        self.repository = repository
 
     async def __call__(self, value: ReferencedRankedInput) -> None:
-        keys = [
-            key
-            for key in await self.store.retained_keys()
-            if (key.tenant_id, key.user_id, key.conversation_id, key.run_id)
-            == (
+        try:
+            delivery = await self.repository.get_verified(
                 value.tenant_id,
                 value.user_id,
                 value.conversation_id,
                 value.source_run_id,
             )
-        ]
-        if len(keys) != 1:
-            raise reference_error()
-        try:
-            facts = await self.store.get(keys[0])
-        except KeyError as error:
+        except RankedReferencePersistenceError as error:
             raise reference_error() from error
-        outcome = facts.outcome
-        if facts.status != "completed" or outcome is None or outcome.delivery is None:
+        if delivery is None:
             raise reference_error()
-        delivery = outcome.delivery
         item = value.item
         if not delivery.output_verified or not 1 <= item.rank <= len(delivery.events):
             raise reference_error()

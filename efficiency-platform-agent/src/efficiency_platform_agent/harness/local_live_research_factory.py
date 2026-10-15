@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from efficiency_platform_agent.agents.operation.scenarios.manifests import (
     build_s6_manifests,
@@ -102,6 +102,9 @@ from efficiency_platform_agent.orchestration.research_v2.service import (
 )
 from efficiency_platform_agent.orchestration.research_v2.stage_runner import (
     LocalLiveResearchStageRunner,
+)
+from efficiency_platform_agent.persistence.mysql_ranked_references import (
+    RankedReferenceRepository,
 )
 from efficiency_platform_agent.persistence.research_local_memory import (
     LocalResearchRunStore,
@@ -362,7 +365,34 @@ class LocalLiveResearchComponents:
     research_service: RunScopedResearchServiceV2
     intent_state_store: InMemoryIntentTaskRepositoryV2
     state_store: LocalResearchRunStore
+    ranked_reference_repository: RankedReferenceRepository
     network_limits: LocalResearchNetworkLimits
+
+
+class _SnapshottingLocalResearchRunStore(LocalResearchRunStore):
+    """成功终态先持久化已核验交付快照，再关闭执行期事实。"""
+
+    def __init__(self, repository: RankedReferenceRepository) -> None:
+        super().__init__()
+        self.repository = repository
+
+    async def finish(
+        self,
+        key,
+        *,
+        status: Literal["completed", "failed", "cancelled", "timed_out"],
+        outcome: ResearchOutcomeV2 | None = None,
+    ) -> None:
+        if status == "completed":
+            if (
+                outcome is None
+                or outcome.outcome not in {"COMPLETE", "PARTIAL"}
+                or outcome.delivery is None
+                or not outcome.delivery.output_verified
+            ):
+                raise ValueError("RANKED_REFERENCE_SNAPSHOT_UNVERIFIED")
+            await self.repository.save_verified(key, outcome.delivery)
+        await super().finish(key, status=status, outcome=outcome)
 
 
 class _LocalIntentTaskRepositoryV2(InMemoryIntentTaskRepositoryV2):
@@ -402,6 +432,7 @@ def build_local_live_research_components(
     model_runtime: ModelRuntime,
     runtime: AgentRuntimeService,
     submissions: ConversationSubmissionStore,
+    ranked_reference_repository: RankedReferenceRepository,
 ) -> LocalLiveResearchComponents:
     """只装配显式 local_live；来源授权来自静态 TOML，禁用源保持不可用。"""
     if not settings.local_live_ready:
@@ -421,7 +452,7 @@ def build_local_live_research_components(
     registry = build_local_source_registry(descriptors, now=datetime.now(UTC))
     network_limits = LocalResearchNetworkLimits()
     tools = LocalLiveToolRuntimeFactory(descriptors, network_limits)
-    store = LocalResearchRunStore()
+    store = _SnapshottingLocalResearchRunStore(ranked_reference_repository)
     policy = ResearchPolicySnapshotV2(
         quality_policy_id="local-live-quality/1",
         policy_version=settings.research_policy_version,
@@ -559,5 +590,12 @@ def build_local_live_research_components(
         research_state_store=service,
     )
     return LocalLiveResearchComponents(
-        delegate, registry, tools, service, intent_store, store, network_limits
+        delegate,
+        registry,
+        tools,
+        service,
+        intent_store,
+        store,
+        ranked_reference_repository,
+        network_limits,
     )

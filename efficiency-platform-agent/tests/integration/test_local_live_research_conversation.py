@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from types import SimpleNamespace
 
 import httpx
@@ -113,13 +114,29 @@ class BoundaryModel(FakeModelProvider):
         )
 
 
+def recent_rss_response():
+    """把共享固定样本的发布时间移入本次真实时钟窗口。"""
+    response = rss_response()
+    recent = format_datetime(datetime.now(UTC) - timedelta(days=1), usegmt=True)
+    return response.__class__(
+        response.status_code,
+        response.headers,
+        tuple(
+            chunk.replace(b"Tue, 15 Sep 2026 00:00:00 GMT", recent.encode("ascii"))
+            for chunk in response.body_chunks
+        ),
+    )
+
+
 async def build_case(monkeypatch, *, admitted=True):
     factory = module()
     model = BoundaryModel()
     monkeypatch.setattr(
         local_real_factory, "DeepSeekStreamingProvider", lambda *a, **k: model
     )
-    connector = Connector([rss_response(), body_response(), rss_response()])
+    connector = Connector(
+        [recent_rss_response(), body_response(), recent_rss_response()]
+    )
     monkeypatch.setattr(
         research_local_tools, "AsyncioPinnedHttpConnector", lambda: connector
     )
@@ -147,7 +164,13 @@ async def build_case(monkeypatch, *, admitted=True):
         transport=httpx.MockTransport(lambda request: pytest.fail("真实网络被禁止"))
     )
     bundle = local_real_factory.build_local_agent_application(
-        synthetic_settings(), http_client=client, research_v2_settings=settings()
+        synthetic_settings(),
+        provider=model,
+        test_mode=True,
+        http_client=client,
+        research_v2_settings=settings().model_copy(
+            update={"research_decision_mode": "deterministic"}
+        ),
     )
     return bundle, connector, model, client
 
@@ -194,15 +217,16 @@ async def test_formal_two_rounds_research_then_only_selected_reference(monkeypat
         item = pack["deliverables"][0]["content"]["items"][0]
         before = len(connector.calls)
         second = await post(bundle, "把上一轮第1条改写成小红书文案", "second")
-        assert second.status.value == "succeeded", second
+        assert second.status.value == "succeeded", second.failure
         assert len(connector.calls) == before
         raw = model.content.calls[-1]
         assert raw["input_deliverables"][0]["item"]["item_id"] == item["item_id"]
         assert len(raw["input_deliverables"]) == 1
         assert {x["citation_id"] for x in raw["citations"]} == set(item["source_refs"])
         third = await post(bundle, "把上一轮第1条改写成公众号", "third")
-        assert third.status.value == "failed"
-        assert third.failure.code == "CONVERSATION_REFERENCE_UNAVAILABLE"
+        assert third.status.value == "succeeded", third.failure
+        assert len(connector.calls) == before
+        assert len(model.content.calls) == 2
     finally:
         await bundle.close()
         await client.aclose()
@@ -238,17 +262,12 @@ async def test_unadmitted_source_cannot_produce_fabricated_research(monkeypatch)
         await client.aclose()
 
 
-@pytest.mark.parametrize(
-    "invalid", ["expired", "user", "tenant", "conversation", "rank"]
-)
+@pytest.mark.parametrize("invalid", ["user", "tenant", "conversation", "rank"])
 async def test_local_reference_requires_live_same_identity_facts(monkeypatch, invalid):
     bundle, connector, model, client = await build_case(monkeypatch)
     try:
         first = await post(bundle, "研究最近7天AI动态", "source")
         assert first.status.value == "succeeded", first.failure
-        components = bundle.app.state.local_live_research_components
-        if invalid == "expired":
-            await components.state_store.expire(datetime.now(UTC) + timedelta(hours=1))
         before = (len(connector.calls), len(model.calls))
         run = await post(
             bundle,
@@ -261,6 +280,25 @@ async def test_local_reference_requires_live_same_identity_facts(monkeypatch, in
         assert run.status.value == "failed", run.output
         assert run.failure.code == "CONVERSATION_REFERENCE_UNAVAILABLE"
         assert (len(connector.calls), len(model.calls)) == before
+    finally:
+        await bundle.close()
+        await client.aclose()
+
+
+async def test_reference_survives_execution_memory_expiry(monkeypatch):
+    bundle, connector, model, client = await build_case(monkeypatch)
+    try:
+        first = await post(bundle, "研究最近7天AI动态", "source")
+        assert first.status.value == "succeeded", first.failure
+        components = bundle.app.state.local_live_research_components
+        await components.state_store.expire(datetime.now(UTC) + timedelta(hours=1))
+        before = len(connector.calls)
+
+        run = await post(bundle, "把上一轮第1条改写成小红书", "after-expiry")
+
+        assert run.status.value == "succeeded", run.failure
+        assert len(connector.calls) == before
+        assert model.content.calls
     finally:
         await bundle.close()
         await client.aclose()
@@ -307,9 +345,9 @@ async def test_new_research_runs_share_only_application_network_limits(monkeypat
     monkeypatch.setattr(factory, "build_local_research_tools", capture_tools)
     bundle, connector, _model, client = await build_case(monkeypatch)
     connector.responses = [
-        rss_response(),
+        recent_rss_response(),
         body_response(),
-        rss_response(),
+        recent_rss_response(),
         body_response(),
     ]
     try:
@@ -386,7 +424,7 @@ async def test_formal_two_item_digest_rewrite_excludes_unselected_document(monke
     from efficiency_platform_agent.providers.research.transport import PinnedResponse
 
     bundle, connector, model, client = await build_case(monkeypatch)
-    feed = rss_response()
+    feed = recent_rss_response()
     xml = b"".join(feed.body_chunks)
     second = (
         xml.split(b"<item>")[1]
@@ -487,7 +525,7 @@ async def test_reference_validator_rejects_external_or_tampered_fields(
         before = len(connector.calls), len(model.calls)
         with pytest.raises(HarnessError) as error:
             await LocalLiveRankedReferenceValidator(
-                bundle.app.state.local_live_research_components.state_store
+                bundle.app.state.local_live_research_components.ranked_reference_repository
             )(value)
         assert error.value.code == "CONVERSATION_REFERENCE_UNAVAILABLE"
         assert (len(connector.calls), len(model.calls)) == before
