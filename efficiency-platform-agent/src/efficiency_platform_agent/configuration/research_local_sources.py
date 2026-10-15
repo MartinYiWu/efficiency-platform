@@ -16,6 +16,8 @@ LOCAL_SOURCE_ENDPOINTS = MappingProxyType(
         "google_blog_rss": "https://blog.google/rss/",
         "langgraph_releases_atom": "https://github.com/langchain-ai/langgraph/releases.atom",
         "hacker_news_api": "https://hacker-news.firebaseio.com/v0/topstories.json",
+        "openai_news_rss": "https://openai.com/news/rss.xml",
+        "huggingface_blog_rss": "https://huggingface.co/blog/feed.xml",
         "arxiv_api": "https://export.arxiv.org/api/query",
         "gdelt_doc_api": "https://api.gdeltproject.org/api/v2/doc/doc",
     }
@@ -34,6 +36,13 @@ _SOURCE_IDENTITIES = MappingProxyType(
             "api",
             "hacker_news",
             ("hacker-news.firebaseio.com",),
+        ),
+        "openai_news_rss": ("rss_atom", "rss", "openai", ("openai.com",)),
+        "huggingface_blog_rss": (
+            "rss_atom",
+            "rss",
+            "huggingface",
+            ("huggingface.co",),
         ),
         "arxiv_api": ("arxiv", "api", "arxiv", ("export.arxiv.org",)),
         "gdelt_doc_api": ("gdelt", "api", "gdelt", ("api.gdeltproject.org",)),

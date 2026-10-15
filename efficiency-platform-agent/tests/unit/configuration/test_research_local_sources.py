@@ -10,7 +10,7 @@ from efficiency_platform_agent.contracts.research_sources_v2 import SourceDescri
 from tests.unit.capabilities.research_v2.test_source_registry import brief, context
 
 CONFIG = Path(__file__).resolve().parents[3] / "config/research_local_live_sources.toml"
-NOW = datetime(2026, 9, 17, 14, tzinfo=UTC)
+NOW = datetime(2026, 10, 15, 8, tzinfo=UTC)
 
 
 def _module():
@@ -69,6 +69,13 @@ def _history_brief(source_id: str):
     request_brief = brief(source_ids=(source_id,))
     return request_brief.model_copy(
         update={
+            "time_window": request_brief.time_window.model_copy(
+                update={
+                    "start": NOW - timedelta(days=1),
+                    "end": NOW,
+                    "anchor": NOW,
+                }
+            ),
             "source_constraints": request_brief.source_constraints.model_copy(
                 update={
                     "languages": None,
@@ -86,19 +93,35 @@ def test_real_sources_have_complete_descriptors_and_closed_content_permissions()
         "google_blog_rss",
         "langgraph_releases_atom",
         "hacker_news_api",
+        "openai_news_rss",
+        "huggingface_blog_rss",
         "arxiv_api",
         "gdelt_doc_api",
     }
     assert all(isinstance(item, SourceDescriptorV2) for item in sources)
-    assert all(not item.enabled for item in sources)
+    assert {item.source_id for item in sources if item.enabled} == {
+        "google_blog_rss",
+        "langgraph_releases_atom",
+        "hacker_news_api",
+        "openai_news_rss",
+        "huggingface_blog_rss",
+    }
     assert all(item.content_policy.storage_mode != "full" for item in sources)
-    assert all(not item.admission.history_verified for item in sources)
+    assert {item.source_id for item in sources if item.admission.history_verified} == {
+        "google_blog_rss",
+        "langgraph_releases_atom",
+        "hacker_news_api",
+        "openai_news_rss",
+        "huggingface_blog_rss",
+    }
     assert {
         item.source_id for item in sources if item.admission.status == "VERIFIED"
     } == {
         "google_blog_rss",
         "langgraph_releases_atom",
         "hacker_news_api",
+        "openai_news_rss",
+        "huggingface_blog_rss",
     }
 
 

@@ -131,6 +131,92 @@ permission_verified = true
 reason_codes = ["TITLE_EXCERPT_ONLY", "COMMENTS_NOT_APPROVED", "THIRD_PARTY_BODY_NOT_APPROVED", "LATEST_TWO_DAYS_ONLY"]
 
 [[sources]]
+source_id = "openai_news_rss"
+adapter_id = "rss_atom"
+config_version = "local-live-sources/1"
+roles = ["primary", "discovery"]
+topics = ["AI", "product", "research"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "openai"
+ownership_group = "openai"
+allowed_hosts = ["openai.com"]
+access_mode = "rss"
+history_mode = "latest_only"
+max_lookback = "P2D"
+pagination = false
+freshness_sla = "P2D"
+enabled = true
+[sources.rate_policy]
+requests = 1
+period_seconds = 3
+concurrency = 1
+[sources.content_policy]
+storage_mode = "excerpt_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "仅登记 OpenAI 官方 RSS 元数据、规范 URL 和短摘录；不抓取文章正文，不保存全文。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://openai.com/news/rss.xml"
+verified_at = 2026-10-15T07:13:00Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-openai-news-rss-20261015"
+status = "VERIFIED"
+last_verified_at = 2026-10-15T07:13:00Z
+approved_by = "user-approved-operations-mvp"
+intended_uses = ["research", "feed_excerpt"]
+schema_verified = true
+history_verified = true
+permission_verified = true
+reason_codes = ["EXCERPT_ONLY", "ARTICLE_BODY_NOT_APPROVED", "LATEST_TWO_DAYS_ONLY"]
+
+[[sources]]
+source_id = "huggingface_blog_rss"
+adapter_id = "rss_atom"
+config_version = "local-live-sources/1"
+roles = ["primary", "discovery"]
+topics = ["AI", "open_source", "research"]
+languages = ["en"]
+regions = ["global"]
+publisher_id = "huggingface"
+ownership_group = "huggingface"
+allowed_hosts = ["huggingface.co"]
+access_mode = "rss"
+history_mode = "latest_only"
+max_lookback = "P2D"
+pagination = false
+freshness_sla = "P2D"
+enabled = true
+[sources.rate_policy]
+requests = 1
+period_seconds = 3
+concurrency = 1
+[sources.content_policy]
+storage_mode = "excerpt_only"
+retention_days = 1
+citation_allowed = true
+access_restriction = "仅登记 Hugging Face 官方博客 RSS 元数据、规范 URL 和短摘录；不抓取文章正文，不保存全文。"
+[sources.cost_policy]
+mode = "free"
+evidence_url = "https://huggingface.co/blog/feed.xml"
+verified_at = 2026-10-15T07:13:00Z
+requires_authentication = false
+overage_behavior = "hard_stop"
+[sources.admission]
+admission_record_id = "local-huggingface-blog-rss-20261015"
+status = "VERIFIED"
+last_verified_at = 2026-10-15T07:13:00Z
+approved_by = "user-approved-operations-mvp"
+intended_uses = ["research", "feed_excerpt"]
+schema_verified = true
+history_verified = true
+permission_verified = true
+reason_codes = ["EXCERPT_ONLY", "ARTICLE_BODY_NOT_APPROVED", "LATEST_TWO_DAYS_ONLY"]
+
+[[sources]]
 source_id = "arxiv_api"
 adapter_id = "arxiv"
 config_version = "local-live-sources/1"
