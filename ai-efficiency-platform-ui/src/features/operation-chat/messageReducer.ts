@@ -291,7 +291,6 @@ export function operationChatReducer(
       };
     case 'deliverable': {
       const set = parseDeliverableSet(event.payload.deliverable_set ?? event.payload);
-      if (set?.contract_version === 'deliverable-set/2' && set.run_id !== event.run_id) return base;
       return set ? { ...base, deliverableSets: [...base.deliverableSets, set] } : base;
     }
     case 'stream_error':

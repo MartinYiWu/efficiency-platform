@@ -111,10 +111,12 @@ public class OperationAssistantController {
     private void sendEvent(SseEmitter emitter, String runId, OperationAgentRunEvent event) {
         try {
             service.projectEvent(runId, event);
+            OperationAgentRunEvent publicEvent = new OperationAgentRunEvent(
+                    event.contractVersion(), event.event(), runId, event.sequence(), event.payload());
             emitter.send(SseEmitter.event()
                     .id(Long.toString(event.sequence()))
                     .name(event.event())
-                    .data(event, MediaType.APPLICATION_JSON));
+                    .data(publicEvent, MediaType.APPLICATION_JSON));
         } catch (Exception exception) {
             emitter.completeWithError(exception);
         }

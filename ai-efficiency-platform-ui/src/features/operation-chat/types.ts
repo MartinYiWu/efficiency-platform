@@ -31,6 +31,28 @@ export interface ConversationSubmitInput {
   userId: string;
   attachments?: Array<Record<string, unknown>>;
 }
+export interface OperationConversationView {
+  conversationId: string;
+  title: string | null;
+  status: string;
+  createdAt: string;
+}
+export interface OperationRunView {
+  conversationId: string;
+  runId: string;
+  agentRunId: string | null;
+  status: RunDisplayStatus;
+  failureCode: string | null;
+  failureMessage: string | null;
+}
+export interface OperationArtifactSummary {
+  artifactId: string;
+  artifactType: string;
+  platform: string;
+  version: number;
+  title: string;
+  createdAt: string;
+}
 export interface ConversationSubmitViewV1 {
   contract_version: 'conversation/1';
   conversation_id: string;

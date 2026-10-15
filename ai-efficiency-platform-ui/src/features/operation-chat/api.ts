@@ -1,47 +1,75 @@
-import {
-  conversationSubmitViewSchema,
-  type ConversationSubmitInput,
-  type ConversationSubmitViewV1,
-  type RunDisplayStatus,
+import type {
+  OperationArtifactSummary,
+  OperationConversationView,
+  OperationRunView,
+  RunDisplayStatus,
 } from './types';
 
 export interface OperationApiOptions {
   baseUrl: string;
-  tenantId: string;
+  /** 旧版直连 Agent 参数，仅保留类型兼容，Java API 不读取。 */
+  tenantId?: string;
   fetcher?: typeof fetch;
   signal?: AbortSignal;
 }
-const url = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, '')}${path}`;
-function apiError(response: Response): Error {
-  return new Error(
-    response.status === 401 ? '登录状态已失效，请重新登录。' : '运营助手请求失败，请稍后重试。',
-  );
+
+interface ApiEnvelope<T> {
+  code: string;
+  message: string;
+  data: T;
 }
 
-export async function submitConversationMessage(
-  input: ConversationSubmitInput & { conversationId: string },
+const url = (baseUrl: string, path: string) => `${baseUrl.replace(/\/$/, '')}${path}`;
+
+async function readEnvelope<T>(response: Response): Promise<T> {
+  const body = (await response.json().catch(() => null)) as ApiEnvelope<T> | null;
+  if (!response.ok || !body || body.code !== 'SUCCESS') {
+    throw new Error(body?.message || `运营助手请求失败（${response.status}）`);
+  }
+  return body.data;
+}
+
+export async function createConversation(
   options: OperationApiOptions,
-): Promise<ConversationSubmitViewV1> {
+): Promise<OperationConversationView> {
   const response = await (options.fetcher ?? fetch)(
-    url(options.baseUrl, `/v1/conversations/${encodeURIComponent(input.conversationId)}/messages`),
+    url(options.baseUrl, '/api/operations/conversations'),
     {
       method: 'POST',
       signal: options.signal,
-      headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': options.tenantId },
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  return readEnvelope(response);
+}
+
+export async function submitConversationMessage(
+  input: {
+    conversationId: string;
+    message: string;
+    clientRequestId?: string;
+    requestId?: string;
+    userId?: string;
+  },
+  options: OperationApiOptions,
+): Promise<OperationRunView> {
+  const response = await (options.fetcher ?? fetch)(
+    url(
+      options.baseUrl,
+      `/api/operations/conversations/${encodeURIComponent(input.conversationId)}/messages`,
+    ),
+    {
+      method: 'POST',
+      signal: options.signal,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contract_version: 'conversation/1',
         message: input.message,
-        request_id: input.requestId,
-        user_id: input.userId,
-        attachments: input.attachments ?? [],
+        clientRequestId: input.clientRequestId ?? input.requestId,
       }),
     },
   );
-  if (!response.ok) throw apiError(response);
-  const parsed = conversationSubmitViewSchema.safeParse(await response.json());
-  if (!parsed.success || parsed.data.conversation_id !== input.conversationId)
-    throw new Error('运营助手返回了无法识别的响应。');
-  return parsed.data;
+  return readEnvelope(response);
 }
 
 export async function cancelRun(
@@ -49,19 +77,35 @@ export async function cancelRun(
   options: OperationApiOptions,
 ): Promise<{ status: RunDisplayStatus }> {
   const response = await (options.fetcher ?? fetch)(
-    url(options.baseUrl, `/v1/runs/${encodeURIComponent(runId)}/cancel`),
-    {
-      method: 'POST',
-      signal: options.signal,
-      headers: { 'Content-Type': 'application/json', 'X-Tenant-ID': options.tenantId },
-      body: JSON.stringify({
-        contract_version: 'run.cancel/1',
-        tenant_id: options.tenantId,
-        reason_code: 'user_requested',
-      }),
-    },
+    url(options.baseUrl, `/api/operations/runs/${encodeURIComponent(runId)}/cancel`),
+    { method: 'POST', signal: options.signal },
   );
-  if (!response.ok) throw apiError(response);
-  const body = (await response.json().catch(() => ({}))) as { status?: RunDisplayStatus };
-  return { status: body.status ?? 'running' };
+  const run = await readEnvelope<OperationRunView>(response);
+  return { status: run.status };
+}
+
+export async function listConversationArtifacts(
+  conversationId: string,
+  options: OperationApiOptions,
+): Promise<OperationArtifactSummary[]> {
+  const response = await (options.fetcher ?? fetch)(
+    url(
+      options.baseUrl,
+      `/api/operations/conversations/${encodeURIComponent(conversationId)}/artifacts`,
+    ),
+    { method: 'GET', signal: options.signal },
+  );
+  const value = await readEnvelope<{
+    conversationId: string;
+    artifacts: OperationArtifactSummary[];
+  }>(response);
+  return value.artifacts;
+}
+
+export function artifactUrl(
+  baseUrl: string,
+  artifactId: string,
+  action: 'copy' | 'download' | 'wechat-html',
+) {
+  return url(baseUrl, `/api/operations/artifacts/${encodeURIComponent(artifactId)}/${action}`);
 }

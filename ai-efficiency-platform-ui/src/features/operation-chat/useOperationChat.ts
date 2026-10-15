@@ -1,12 +1,16 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react';
-import { cancelRun, submitConversationMessage } from './api';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import {
+  cancelRun,
+  createConversation,
+  listConversationArtifacts,
+  submitConversationMessage,
+} from './api';
 import { createInitialOperationChatState, operationChatReducer } from './messageReducer';
 import { connectRunStream } from './sseClient';
+import type { OperationArtifactSummary } from './types';
 
 export interface UseOperationChatOptions {
   baseUrl?: string;
-  tenantId?: string;
-  userId?: string;
   fetcher?: typeof fetch;
 }
 const defaultBaseUrl = (): string => {
@@ -22,14 +26,14 @@ export function useOperationChat(options: UseOperationChatOptions = {}) {
     undefined,
     createInitialOperationChatState,
   );
+  const [artifacts, setArtifacts] = useState<OperationArtifactSummary[]>([]);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
   const activeRunRef = useRef<{ requestId: string; runId: string } | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   const cancelRequestedRef = useRef(false);
   const generationRef = useRef(0);
   const requestControllerRef = useRef<AbortController | null>(null);
   const baseUrl = options.baseUrl ?? defaultBaseUrl();
-  const tenantId = options.tenantId ?? 'tenant-demo';
-  const userId = options.userId ?? 'web-user';
   useEffect(
     () => () => {
       generationRef.current += 1;
@@ -56,49 +60,73 @@ export function useOperationChat(options: UseOperationChatOptions = {}) {
       const generation = ++generationRef.current;
       const isCurrent = () => generationRef.current === generation;
       activeRunRef.current = null;
-      const conversationId = conversationIdRef.current ?? crypto.randomUUID();
-      conversationIdRef.current = conversationId;
+      let conversationId = conversationIdRef.current;
       cancelRequestedRef.current = false;
+      setArtifacts([]);
+      setArtifactError(null);
       dispatch({ type: 'submit_started', requestId, content: message });
       try {
+        if (!conversationId) {
+          const conversation = await createConversation({
+            baseUrl,
+            fetcher: options.fetcher,
+            signal: controller.signal,
+          });
+          conversationId = conversation.conversationId;
+          conversationIdRef.current = conversationId;
+        }
         const submitted = await submitConversationMessage(
-          { conversationId, message, requestId, userId },
-          { baseUrl, tenantId, fetcher: options.fetcher, signal: controller.signal },
+          { conversationId, message, clientRequestId: requestId },
+          { baseUrl, fetcher: options.fetcher, signal: controller.signal },
         );
         if (!isCurrent()) return;
-        activeRunRef.current = { requestId, runId: submitted.run_id };
-        dispatch({ type: 'run_created', runId: submitted.run_id, requestId });
+        activeRunRef.current = { requestId, runId: submitted.runId };
+        dispatch({ type: 'run_created', runId: submitted.runId, requestId });
         if (cancelRequestedRef.current) {
           try {
-            const result = await cancelRun(submitted.run_id, {
+            const result = await cancelRun(submitted.runId, {
               baseUrl,
-              tenantId,
               fetcher: options.fetcher,
             });
             if (!isCurrent()) return;
             if (result.status === 'cancelled') {
-              dispatch({ type: 'cancelled', runId: submitted.run_id, requestId });
+              dispatch({ type: 'cancelled', runId: submitted.runId, requestId });
               return;
             }
           } catch (error) {
             if (isCurrent())
               dispatch({
                 type: 'cancel_failed',
-                runId: submitted.run_id,
+                runId: submitted.runId,
                 requestId,
                 message: error instanceof Error ? error.message : '停止请求失败，请稍后重试。',
               });
           }
         }
-        for await (const event of connectRunStream(submitted.run_id, {
+        for await (const event of connectRunStream(submitted.runId, {
           baseUrl,
-          tenantId,
           fetcher: options.fetcher,
           signal: controller.signal,
         })) {
           if (!isCurrent()) break;
           dispatch({ type: 'sse_event', event });
           if (event.event === 'clarification_required') break;
+          if (
+            event.event === 'stream_done' &&
+            (event.payload.status === 'succeeded' || event.payload.status === 'degraded_succeeded')
+          ) {
+            try {
+              setArtifacts(
+                await listConversationArtifacts(conversationId, {
+                  baseUrl,
+                  fetcher: options.fetcher,
+                  signal: controller.signal,
+                }),
+              );
+            } catch {
+              setArtifactError('成稿已生成，但复制、预览和下载操作加载失败，请稍后重试。');
+            }
+          }
         }
       } catch (error) {
         if (isCurrent())
@@ -120,7 +148,7 @@ export function useOperationChat(options: UseOperationChatOptions = {}) {
         if (requestControllerRef.current === controller) requestControllerRef.current = null;
       }
     },
-    [baseUrl, options.fetcher, state.status, tenantId, userId],
+    [baseUrl, options.fetcher, state.status],
   );
   const cancel = useCallback(async () => {
     cancelRequestedRef.current = true;
@@ -131,7 +159,7 @@ export function useOperationChat(options: UseOperationChatOptions = {}) {
     if (!runId) return;
     const generation = generationRef.current;
     try {
-      const result = await cancelRun(runId, { baseUrl, tenantId, fetcher: options.fetcher });
+      const result = await cancelRun(runId, { baseUrl, fetcher: options.fetcher });
       if (generation !== generationRef.current) return;
       if (result.status === 'cancelled') {
         dispatch({ type: 'cancelled', runId, requestId: requestId ?? undefined });
@@ -146,11 +174,14 @@ export function useOperationChat(options: UseOperationChatOptions = {}) {
           message: error instanceof Error ? error.message : '停止请求失败，请稍后重试。',
         });
     }
-  }, [baseUrl, options.fetcher, state.requestId, state.runId, tenantId]);
+  }, [baseUrl, options.fetcher, state.requestId, state.runId]);
   return {
     state,
     sendMessage,
     cancel,
+    artifacts,
+    artifactError,
+    baseUrl,
     isBusy:
       state.status === 'submitting' ||
       state.status === 'streaming' ||

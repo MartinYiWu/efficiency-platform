@@ -3,7 +3,7 @@ export type DeliverableKindV2 =
 
 export type ConfidenceV2 = 'high' | 'medium' | 'low';
 export type VerificationStatusV2 = 'verified' | 'partially_verified' | 'unverified' | 'conflicted';
-export type RankingBasisV2 = 'importance' | 'recency' | 'heat' | 'mixed';
+export type RankingBasisV2 = 'importance' | 'recency' | 'heat' | 'mixed' | 'evidence_order';
 export type NextActionTypeV2 =
   | 'rewrite_for_platform'
   | 'expand_item'
@@ -58,6 +58,11 @@ export interface CitationV2 {
   verification_status: VerificationStatusV2;
   supports_item_ids: string[];
   independent_source_group: string | null;
+  document_id?: string | null;
+  excerpt?: string | null;
+  content_scope?: 'summary' | 'full' | 'platform_text' | null;
+  content_hash?: string | null;
+  acquisition_method?: 'api' | 'rss' | 'atom' | 'public_page' | 'cache' | null;
 }
 
 export interface RankedItemV2 {

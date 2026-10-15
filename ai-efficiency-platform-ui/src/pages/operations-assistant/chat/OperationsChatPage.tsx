@@ -17,7 +17,8 @@ export function OperationsChatPage() {
   const messageViewportRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLElement>(null);
   const followUpFocusRef = useRef<'awaiting-control' | 'stop-focused' | null>(null);
-  const { state, sendMessage, cancel, isBusy } = useOperationChat();
+  const { state, sendMessage, cancel, isBusy, artifacts, artifactError, baseUrl } =
+    useOperationChat();
   const currentAssistantMessage =
     state.messages.at(-1)?.role === 'assistant' ? state.messages.at(-1) : null;
   const isActivelyStreaming = state.status === 'submitting' || state.status === 'streaming';
@@ -180,6 +181,8 @@ export function OperationsChatPage() {
           )}
           {state.deliverableSets.map((set, setIndex) => (
             <OperationDelivery
+              artifacts={artifacts}
+              baseUrl={baseUrl}
               key={`${set.contract_version}-${setIndex}`}
               onSubmitNextAction={(message) => {
                 followUpFocusRef.current = 'awaiting-control';
@@ -191,6 +194,11 @@ export function OperationsChatPage() {
           {state.error && (
             <Typography.Text type="danger" role="alert">
               {state.error}
+            </Typography.Text>
+          )}
+          {artifactError && (
+            <Typography.Text type="danger" role="alert">
+              {artifactError}
             </Typography.Text>
           )}
           {state.status === 'cancelling' && (

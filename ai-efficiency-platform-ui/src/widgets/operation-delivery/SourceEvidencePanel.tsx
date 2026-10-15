@@ -23,6 +23,7 @@ const rankingBasisLabel = {
   recency: '新近性',
   heat: '热度',
   mixed: '综合排序',
+  evidence_order: '证据顺序',
 } as const;
 
 function safeExternalHref(url: string): string | null {

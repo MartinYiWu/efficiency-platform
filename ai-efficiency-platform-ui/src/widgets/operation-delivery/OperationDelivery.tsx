@@ -10,6 +10,8 @@ import {
   type OperationDeliverableViewModel,
 } from '../../entities/operation-deliverable';
 import { OperationNextActions } from '../../features/operation-next-action';
+import { OperationArtifactActions } from '../../features/operation-artifact';
+import type { OperationArtifactSummary } from '../../features/operation-chat/types';
 import { PlatformContentView } from './PlatformContentView';
 import { RankedDigestView } from './RankedDigestView';
 import { ActionPlanView, DiagnosisView, RetrospectiveView } from './StructuredOperationViews';
@@ -18,6 +20,8 @@ import styles from './OperationDelivery.module.css';
 interface OperationDeliveryProps {
   value: DeliverableSetDto;
   onSubmitNextAction: (message: string) => void;
+  artifacts?: OperationArtifactSummary[];
+  baseUrl?: string;
 }
 
 function safeMarkdownHref(value: string | undefined): string | null {
@@ -157,7 +161,12 @@ function OperationDeliveryView({
   }
 }
 
-export function OperationDelivery({ value, onSubmitNextAction }: OperationDeliveryProps) {
+export function OperationDelivery({
+  value,
+  onSubmitNextAction,
+  artifacts = [],
+  baseUrl = '',
+}: OperationDeliveryProps) {
   const delivery = mapDeliverableSet(value);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState<'success' | 'error' | null>(null);
@@ -203,20 +212,29 @@ export function OperationDelivery({ value, onSubmitNextAction }: OperationDelive
       {delivery.warnings.map((warning) => (
         <Alert key={warning.code} message={warning.message} showIcon type="warning" />
       ))}
-      {delivery.deliverables.map((deliverable) => (
-        <section className={styles.deliveryItem} key={deliverable.id}>
-          <OperationDeliveryView
-            deliverable={deliverable}
-            onCopyItem={(copyText) => void copyItem(copyText)}
-            onSourcesExpandedChange={setSourcesExpanded}
-            provenance={delivery.provenance}
-            sourcesExpanded={sourcesExpanded}
-          />
-          {deliverable.warnings.map((warning) => (
-            <Alert key={warning.code} message={warning.message} showIcon type="warning" />
-          ))}
-        </section>
-      ))}
+      {delivery.deliverables.map((deliverable) => {
+        const artifact = artifacts
+          .filter(
+            (item) =>
+              item.artifactType === deliverable.kind && item.platform === deliverable.platform,
+          )
+          .sort((left, right) => right.version - left.version)[0];
+        return (
+          <section className={styles.deliveryItem} key={deliverable.id}>
+            <OperationDeliveryView
+              deliverable={deliverable}
+              onCopyItem={(copyText) => void copyItem(copyText)}
+              onSourcesExpandedChange={setSourcesExpanded}
+              provenance={delivery.provenance}
+              sourcesExpanded={sourcesExpanded}
+            />
+            {deliverable.warnings.map((warning) => (
+              <Alert key={warning.code} message={warning.message} showIcon type="warning" />
+            ))}
+            {artifact && <OperationArtifactActions artifact={artifact} baseUrl={baseUrl} />}
+          </section>
+        );
+      })}
       {copyFeedback === 'success' && <Typography.Text role="status">已复制</Typography.Text>}
       {copyFeedback === 'error' && (
         <Alert message="复制失败，请手动复制" role="alert" showIcon type="error" />

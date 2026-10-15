@@ -2,7 +2,8 @@ import type { StreamEventName, StreamEventV1 } from './types';
 
 export interface SseClientOptions {
   baseUrl: string;
-  tenantId: string;
+  /** 旧版直连 Agent 参数，仅保留类型兼容，Java API 不读取。 */
+  tenantId?: string;
   lastEventId?: string | null;
   signal?: AbortSignal;
   fetcher?: typeof fetch;
@@ -85,14 +86,10 @@ export async function* connectRunStream(
   const seen = new Set<number>();
   while (!completed && reconnects <= (options.maxReconnects ?? 3)) {
     if (isAborted(options.signal)) return;
-    const headers: Record<string, string> = {
-      Accept: 'text/event-stream',
-      'X-Tenant-ID': options.tenantId,
-    };
-    if (cursor > 0) headers['Last-Event-ID'] = String(cursor);
+    const headers: Record<string, string> = { Accept: 'text/event-stream' };
     try {
       const response = await fetcher(
-        `${options.baseUrl.replace(/\/$/, '')}/v1/runs/${encodeURIComponent(runId)}/events`,
+        `${options.baseUrl.replace(/\/$/, '')}/api/operations/runs/${encodeURIComponent(runId)}/events?afterSequence=${cursor}`,
         { method: 'GET', headers, signal: options.signal },
       );
       if (!response.ok) throw new Error(`SSE 请求失败（${response.status}）`);

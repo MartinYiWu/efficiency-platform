@@ -53,7 +53,7 @@ const verificationStatusSchema = z.enum([
   'unverified',
   'conflicted',
 ]);
-const rankingBasisSchema = z.enum(['importance', 'recency', 'heat', 'mixed']);
+const rankingBasisSchema = z.enum(['importance', 'recency', 'heat', 'mixed', 'evidence_order']);
 const warningV2Schema: z.ZodType<WarningV2> = z
   .object({
     code: z.string().min(1).max(100),
@@ -100,6 +100,11 @@ export const citationV2Schema: z.ZodType<CitationV2> = z
     verification_status: verificationStatusSchema,
     supports_item_ids: z.array(z.string()).max(100),
     independent_source_group: z.string().nullable(),
+    document_id: z.string().max(128).nullable(),
+    excerpt: z.string().max(2_000).nullable(),
+    content_scope: z.enum(['summary', 'full', 'platform_text']).nullable(),
+    content_hash: z.string().min(16).max(128).nullable(),
+    acquisition_method: z.enum(['api', 'rss', 'atom', 'public_page', 'cache']).nullable(),
   })
   .strict();
 const rankedItemV2Schema: z.ZodType<RankedItemV2> = z
