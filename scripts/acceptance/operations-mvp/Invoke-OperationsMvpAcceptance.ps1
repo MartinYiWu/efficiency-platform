@@ -4,6 +4,8 @@ param(
     [string]$OutputRoot,
     [string]$JavaLogPath,
     [string]$AgentLogPath,
+    [string]$JavaMySqlContainer = 'efficiency-platform-java-mysql',
+    [string]$AgentMySqlContainer = 'efficiency-platform-mysql',
     [ValidateSet('Research', 'All')]
     [string]$Scenario = 'All',
     [int]$StreamTimeoutSeconds = 300
@@ -17,6 +19,19 @@ if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
     $OutputRoot = Join-Path $repositoryRoot ".local-acceptance/operations-mvp/$stamp"
 }
 New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
+
+if ([string]::IsNullOrWhiteSpace($JavaLogPath) -or [string]::IsNullOrWhiteSpace($AgentLogPath)) {
+    throw '真实验收必须同时提供 JavaLogPath 和 AgentLogPath'
+}
+foreach ($log in @($JavaLogPath, $AgentLogPath)) {
+    if (-not (Test-Path -LiteralPath $log)) { throw "日志文件不存在：$log" }
+}
+$javaLogStartLine = @(Get-Content -LiteralPath $JavaLogPath).Count
+$agentLogStartLine = @(Get-Content -LiteralPath $AgentLogPath).Count
+
+function Get-LogDelta([string]$Path, [int]$StartLine) {
+    return @(Get-Content -LiteralPath $Path | Select-Object -Skip $StartLine)
+}
 
 function Save-Json([string]$Name, [object]$Value) {
     $Value | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath (Join-Path $OutputRoot $Name) -Encoding UTF8
@@ -72,16 +87,19 @@ function Assert-Artifact([string]$ConversationId, [string]$RunId, [string]$Kind,
     $copy = Invoke-WebRequest -Method GET -Uri "$JavaBaseUrl/api/operations/artifacts/$artifactId/copy" -TimeoutSec 30
     Set-Content -LiteralPath (Join-Path $OutputRoot "$ResultName.copy.md") -Value $copy.Content -Encoding UTF8
     if ([string]::IsNullOrWhiteSpace($copy.Content)) { throw "复制接口返回空正文：artifactId=$artifactId" }
+    if ([string]$copy.Content -cne [string]$detail.bodyMarkdown) { throw '复制正文与制品 Markdown 不一致' }
 
     $download = Invoke-WebRequest -Method GET -Uri "$JavaBaseUrl/api/operations/artifacts/$artifactId/download" -TimeoutSec 30
     Set-Content -LiteralPath (Join-Path $OutputRoot "$ResultName.download.md") -Value $download.Content -Encoding UTF8
     if ($download.Headers.'Content-Disposition' -notmatch 'attachment') { throw '下载接口缺少 attachment 响应头' }
+    if ([string]$download.Content -cne [string]$detail.bodyMarkdown) { throw '下载正文与制品 Markdown 不一致' }
 
     if ($Kind -eq 'Wechat') {
         $html = Invoke-WebRequest -Method GET -Uri "$JavaBaseUrl/api/operations/artifacts/$artifactId/wechat-html" -TimeoutSec 30
         Set-Content -LiteralPath (Join-Path $OutputRoot "$ResultName.preview.html") -Value $html.Content -Encoding UTF8
         if ($html.Content -match '(?i)<script|javascript:|\son\w+\s*=') { throw '微信 HTML 预览包含危险内容' }
         if ($html.Content -notmatch '(?i)<h1|<h2|<p') { throw '微信 HTML 预览缺少文章结构标签' }
+        if ([string]$html.Content -cne [string]$detail.bodyHtml) { throw 'HTML 预览与制品 HTML 不一致' }
     }
     return $artifactId
 }
@@ -94,6 +112,7 @@ function Submit-Message([string]$ConversationId, [string]$TemplateName, [string]
     }
     $submission = Invoke-Json 'POST' "$JavaBaseUrl/api/operations/conversations/$ConversationId/messages" $request $ResultName
     $runId = if ($submission.runId) { [string]$submission.runId } else { [string]$submission.run_id }
+    $agentRunId = if ($submission.agentRunId) { [string]$submission.agentRunId } else { [string]$submission.agent_run_id }
     if ([string]::IsNullOrWhiteSpace($runId)) { throw "提交响应缺少 runId：$ResultName" }
     $ssePath = Join-Path $OutputRoot "$ResultName.sse"
     & curl.exe --silent --show-error --fail-with-body --no-buffer --max-time $StreamTimeoutSeconds `
@@ -101,14 +120,54 @@ function Submit-Message([string]$ConversationId, [string]$TemplateName, [string]
         "$JavaBaseUrl/api/operations/runs/$runId/events?afterSequence=0" `
         --output $ssePath
     if ($LASTEXITCODE -ne 0) { throw "SSE 调用失败：runId=$runId，curlExit=$LASTEXITCODE" }
-    & (Join-Path $scriptRoot 'Assert-OperationsResult.ps1') -Kind $Kind -SsePath $ssePath
+    $modelCalls = -1
+    if ($Kind -eq 'Research') {
+        if ([string]::IsNullOrWhiteSpace($agentRunId)) { throw '研究提交响应缺少 agentRunId' }
+        $modelLines = @(Get-LogDelta $AgentLogPath $agentLogStartLine | Where-Object {
+            $_ -match 'event=research_model_succeeded' -and $_ -match [regex]::Escape("run_id=$agentRunId")
+        })
+        $modelCalls = 0
+        foreach ($line in $modelLines) {
+            if ($line -match 'total_model_calls=(\d+)') {
+                $modelCalls = [Math]::Max($modelCalls, [int]$Matches[1])
+            }
+        }
+    }
+    & (Join-Path $scriptRoot 'Assert-OperationsResult.ps1') -Kind $Kind -SsePath $ssePath -MinimumModelCalls $modelCalls
     if ($LASTEXITCODE -ne 0) { throw "返回语义不满足要求：$ResultName" }
     $run = Invoke-Json 'GET' "$JavaBaseUrl/api/operations/runs/$runId" $null "$ResultName-run"
     if ($run.status -notin @('succeeded', 'degraded_succeeded')) {
         throw "Java 运行记录不是成功终态：runId=$runId，status=$($run.status)，failure=$($run.failureMessage)"
     }
     $artifactId = Assert-Artifact $ConversationId $runId $Kind $ResultName
-    return @{ runId = $runId; ssePath = $ssePath; artifactId = $artifactId }
+    return @{ runId = $runId; agentRunId = $agentRunId; ssePath = $ssePath; artifactId = $artifactId; modelCalls = $modelCalls }
+}
+
+function Export-MySqlEvidence([string]$Container, [string]$Database, [string]$Sql, [string]$Name) {
+    $running = (& docker.exe inspect -f '{{.State.Running}}' $Container 2>$null) -eq 'true'
+    if (-not $running) { throw "MySQL 容器未运行：$Container" }
+    $safeDatabase = $Database -replace '[^a-zA-Z0-9_]', ''
+    if ($safeDatabase -ne $Database) { throw "数据库名不合法：$Database" }
+    $escapedSql = $Sql.Replace('"', '\"')
+    $command = 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --batch --raw -uroot -D ' + $safeDatabase + ' -e "' + $escapedSql + '"'
+    $output = & docker.exe exec $Container sh -lc $command
+    if ($LASTEXITCODE -ne 0) { throw "数据库证据查询失败：$Container/$Database" }
+    $output | Set-Content -LiteralPath (Join-Path $OutputRoot $Name) -Encoding UTF8
+}
+
+function Get-DeliverableSetFromSse([string]$Path) {
+    $latest = $null
+    $raw = Get-Content -Raw -LiteralPath $Path -Encoding UTF8
+    foreach ($block in @($raw -split "(?:`r?`n){2,}")) {
+        $data = @($block -split "`r?`n" | Where-Object { $_ -like 'data:*' })
+        if ($data.Count -eq 0) { continue }
+        $event = (($data | ForEach-Object { $_.Substring(5).TrimStart() }) -join "`n") | ConvertFrom-Json -Depth 100
+        if ($event.event -eq 'deliverable' -and $null -ne $event.payload.deliverable_set) {
+            $latest = $event.payload.deliverable_set
+        }
+    }
+    if ($null -eq $latest) { throw "SSE 缺少 deliverable_set：$Path" }
+    return $latest
 }
 
 $health = Invoke-WebRequest -Method GET -Uri "$JavaBaseUrl/api/platform/ping" -TimeoutSec 10
@@ -121,8 +180,12 @@ if ([string]::IsNullOrWhiteSpace($conversationId)) { throw '创建会话响应�
 $summary = [ordered]@{ conversationId = $conversationId }
 $research = Submit-Message $conversationId 'research' 'research' 'Research'
 $summary.researchRunId = $research.runId
+$summary.researchAgentRunId = $research.agentRunId
 $summary.researchArtifactId = $research.artifactId
+$summary.researchModelCalls = $research.modelCalls
 
+$wechat = $null
+$xiaohongshu = $null
 if ($Scenario -eq 'All') {
     $wechat = Submit-Message $conversationId 'wechat' 'wechat' 'Wechat'
     $summary.wechatRunId = $wechat.runId
@@ -130,18 +193,50 @@ if ($Scenario -eq 'All') {
     $xiaohongshu = Submit-Message $conversationId 'xiaohongshu' 'xiaohongshu' 'Xiaohongshu'
     $summary.xiaohongshuRunId = $xiaohongshu.runId
     $summary.xiaohongshuArtifactId = $xiaohongshu.artifactId
+
+    $researchSet = Get-DeliverableSetFromSse $research.ssePath
+    $xiaohongshuSet = Get-DeliverableSetFromSse $xiaohongshu.ssePath
+    $firstItem = @($researchSet.deliverables | Where-Object { $_.deliverable_kind -eq 'ranked_digest' } | ForEach-Object { $_.content.items } | Where-Object { [int]$_.rank -eq 1 }) | Select-Object -First 1
+    $xiaohongshuDelivery = @($xiaohongshuSet.deliverables | Where-Object { $_.deliverable_kind -eq 'platform_content' -and $_.platform -eq 'xiaohongshu' }) | Select-Object -First 1
+    $expectedRefs = @($firstItem.source_refs | Sort-Object -Unique)
+    $actualRefs = @($xiaohongshuDelivery.citations | ForEach-Object { $_.citation_id } | Sort-Object -Unique)
+    if (($expectedRefs -join ',') -cne ($actualRefs -join ',')) {
+        throw "小红书引用未严格闭合到第 1 条热点：expected=$($expectedRefs -join ',') actual=$($actualRefs -join ',')"
+    }
 }
 
-$logPattern = 'ERROR|Exception|Traceback|Caused by|SQLSyntaxError|Connection refused'
-foreach ($log in @($JavaLogPath, $AgentLogPath)) {
-    if ([string]::IsNullOrWhiteSpace($log)) { continue }
-    if (-not (Test-Path -LiteralPath $log)) { throw "日志文件不存在：$log" }
-    $matches = @(Select-String -Path $log -Pattern $logPattern -Context 2,2)
+$javaSql = "SELECT COUNT(*) AS conversations FROM ai_operation_conversation WHERE id='$conversationId'; SELECT COUNT(*) AS messages FROM ai_operation_message WHERE conversation_id='$conversationId'; SELECT status,COUNT(*) AS runs FROM ai_operation_run WHERE conversation_id='$conversationId' GROUP BY status; SELECT artifact_type,platform,COUNT(*) AS artifacts FROM ai_operation_artifact WHERE conversation_id='$conversationId' GROUP BY artifact_type,platform;"
+$agentRunIds = @($research.agentRunId, $wechat.agentRunId, $xiaohongshu.agentRunId) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+if ($conversationId -notmatch '^[A-Za-z0-9_-]+$' -or @($agentRunIds | Where-Object { $_ -notmatch '^[A-Za-z0-9_-]+$' }).Count -gt 0) {
+    throw '数据库证据查询标识格式不合法'
+}
+$quotedAgentRuns = ($agentRunIds | ForEach-Object { "'$_'" }) -join ','
+$agentSql = "SELECT status,COUNT(*) AS runs FROM agent_run WHERE run_id IN ($quotedAgentRuns) GROUP BY status; SELECT COUNT(*) AS events FROM agent_run_event WHERE run_id IN ($quotedAgentRuns); SELECT source_run_id,content_hash FROM agent_ranked_reference_snapshot WHERE source_run_id IN ($quotedAgentRuns);"
+Export-MySqlEvidence $JavaMySqlContainer 'ai_efficiency_platform' $javaSql 'java-db-evidence.txt'
+Export-MySqlEvidence $AgentMySqlContainer 'ai_efficiency_platform_agent' $agentSql 'agent-db-evidence.txt'
+
+$logPattern = 'ERROR|Traceback|Caused by|SQLSyntaxError|Connection (refused|reset)|DATABASE_UNAVAILABLE|Unhandled'
+$logInputs = @(
+    @{ Path = $JavaLogPath; Start = $javaLogStartLine },
+    @{ Path = $AgentLogPath; Start = $agentLogStartLine }
+)
+$requestBodies = @(@('research', 'wechat', 'xiaohongshu') | ForEach-Object {
+    [string]((Get-Content -Raw -LiteralPath (Join-Path $scriptRoot "requests/$_.json") | ConvertFrom-Json).content)
+})
+foreach ($input in $logInputs) {
+    $delta = @(Get-LogDelta $input.Path $input.Start)
+    $matches = @($delta | Select-String -Pattern $logPattern -Context 2,2)
     if ($matches.Count -gt 0) {
-        $name = [IO.Path]::GetFileName($log)
+        $name = [IO.Path]::GetFileName($input.Path)
         $matches | Out-String | Set-Content -LiteralPath (Join-Path $OutputRoot "$name.errors.txt") -Encoding UTF8
         throw "日志门禁失败：$name 命中 $($matches.Count) 处错误，详情已保存"
     }
+    foreach ($body in $requestBodies) {
+        if (@($delta | Select-String -SimpleMatch $body).Count -gt 0) {
+            throw "日志泄露了用户正文：$([IO.Path]::GetFileName($input.Path))"
+        }
+    }
+    $delta | Set-Content -LiteralPath (Join-Path $OutputRoot "$([IO.Path]::GetFileName($input.Path)).delta.log") -Encoding UTF8
 }
 
 Save-Json 'summary.json' $summary

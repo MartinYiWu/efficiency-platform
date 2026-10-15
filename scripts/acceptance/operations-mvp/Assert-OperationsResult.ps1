@@ -4,7 +4,8 @@ param(
     [ValidateSet('Research', 'Wechat', 'Xiaohongshu', 'Cancelled')]
     [string]$Kind,
     [Parameter(Mandatory = $true)]
-    [string]$SsePath
+    [string]$SsePath,
+    [int]$MinimumModelCalls = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +65,9 @@ if ($null -eq $deliveryEvent -or $null -eq $deliveryEvent.payload.deliverable_se
 $set = $deliveryEvent.payload.deliverable_set
 
 if ($Kind -eq 'Research') {
+    if ($MinimumModelCalls -ge 0 -and $MinimumModelCalls -lt 1) {
+        Fail "真实研究模型调用次数小于 1：$MinimumModelCalls"
+    }
     $delivery = @($set.deliverables | Where-Object { $_.deliverable_kind -eq 'ranked_digest' }) | Select-Object -First 1
     if ($null -eq $delivery) { Fail '研究结果缺少 ranked_digest' }
     $items = @($delivery.content.items)
@@ -82,7 +86,8 @@ if ($Kind -eq 'Research') {
         if (-not [Uri]::TryCreate([string]$citation.url, [UriKind]::Absolute, [ref]$uri)) {
             Fail "来源 URL 不是绝对地址：$($citation.url)"
         }
-        if ($uri.Scheme -notin @('http', 'https')) { Fail "来源 URL 协议不合法：$($citation.url)" }
+        if ($uri.Scheme -ne 'https') { Fail "来源 URL 不是 HTTPS：$($citation.url)" }
+        if (-not [string]::IsNullOrWhiteSpace($uri.UserInfo)) { Fail "来源 URL 含凭证：$($citation.url)" }
         $domains += $uri.Host.ToLowerInvariant()
     }
     foreach ($item in $items) {
@@ -101,17 +106,27 @@ $markdown = [string]$article.content.body_markdown
 if ([string]::IsNullOrWhiteSpace($markdown)) { Fail '成稿 Markdown 为空' }
 
 if ($Kind -eq 'Wechat') {
-    if ($markdown.Length -lt 1000) { Fail "公众号成稿过短：$($markdown.Length) 字符" }
-    if ($markdown -notmatch '(?m)^#\s+.+') { Fail '公众号成稿缺少一级标题' }
-    if ($markdown -notmatch '(?m)^##\s+.+') { Fail '公众号成稿缺少二级标题' }
+    if ($article.platform -ne 'wechat_official_account') { Fail "公众号成稿平台错误：$($article.platform)" }
+    if ($markdown -match '(?i)<[a-z][^>]*>') { Fail '公众号 Markdown 含 HTML 标签' }
+    $hanCount = [regex]::Matches($markdown, '[\p{IsCJKUnifiedIdeographs}]').Count
+    if ($hanCount -lt 3000 -or $hanCount -gt 4000) { Fail "公众号成稿中文字符数不在 3000..4000：$hanCount" }
+    $h1Count = @([regex]::Matches($markdown, '(?m)^#\s+.+$')).Count
+    $h2Count = @([regex]::Matches($markdown, '(?m)^##\s+.+$')).Count
+    if ($h1Count -ne 1) { Fail "公众号成稿一级标题数量不是 1：$h1Count" }
+    if ($h2Count -lt 2) { Fail "公众号成稿二级标题少于 2：$h2Count" }
     if ($markdown -notmatch '(?s)##\s+.+\n.+') { Fail '公众号成稿缺少章节正文' }
-    Write-Output "公众号成稿语义检查通过：$($markdown.Length) 字符"
+    Write-Output "公众号成稿语义检查通过：$hanCount 个中文字符"
     exit 0
 }
 
+if ($article.platform -ne 'xiaohongshu') { Fail "小红书成稿平台错误：$($article.platform)" }
+if ($markdown -match '(?i)<[a-z][^>]*>') { Fail '小红书 Markdown 含 HTML 标签' }
 if ($markdown.Length -gt 5000) { Fail "小红书成稿过长：$($markdown.Length) 字符" }
-if (@($article.content.hashtags).Count -lt 1) { Fail '小红书成稿缺少话题标签' }
-if (($markdown -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -lt 3) {
+$hashtags = @($article.content.hashtags)
+if ($hashtags.Count -lt 5 -or $hashtags.Count -gt 10) { Fail "小红书标签数不在 5..10：$($hashtags.Count)" }
+if (@($hashtags | Where-Object { [string]$_ -notmatch '^#[^#\s].+' }).Count -gt 0) { Fail '小红书存在非标准话题标签' }
+$paragraphs = @($markdown -split "(?:`r?`n){2,}" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+if ($paragraphs.Count -lt 3) {
     Fail '小红书成稿缺少分段'
 }
-Write-Output "小红书成稿语义检查通过：$($markdown.Length) 字符，$(@($article.content.hashtags).Count) 个标签"
+Write-Output "小红书成稿语义检查通过：$($markdown.Length) 字符，$($hashtags.Count) 个标签"
