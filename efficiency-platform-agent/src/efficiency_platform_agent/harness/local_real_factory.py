@@ -247,7 +247,13 @@ def build_local_agent_application(
         )
         run_repository = MySqlRunRepository(runtime_database.engine)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
-    resolved_research_v2 = research_v2_settings or ResearchPipelineSettings()
+    resolved_research_v2 = research_v2_settings or (
+        ResearchPipelineSettings()
+        if test_mode
+        else ResearchPipelineSettings.load(
+            Path(__file__).resolve().parents[3] / "config/research_pipeline.toml"
+        )
+    )
     auto_local_live = (
         resolved_research_v2.local_live_ready and intent_v2_delegate is None
     )

@@ -43,7 +43,10 @@ class _SemanticText:
 _SEMANTIC_TEXT: dict[str, _SemanticText] = {
     OperationSpecialistCapabilityId.RESEARCH_INSIGHT.value: _SemanticText(
         "基于受治理公开来源收集、整理并形成可追溯研究洞察。",
-        ("收集上周 AI 行业动态并给出来源",),
+        (
+            "收集上周 AI 行业动态并给出来源",
+            "收集今天最热的十条 AI 相关话题并按热度排序",
+        ),
         ("直接写一条无需事实核验的欢迎语",),
     ),
     OperationSpecialistCapabilityId.QUALITY_REVIEW.value: _SemanticText(
@@ -73,7 +76,11 @@ _SEMANTIC_TEXT: dict[str, _SemanticText] = {
     ),
     OperationSpecialistCapabilityId.CHANNEL_CONTENT.value: _SemanticText(
         "将已确定材料适配为指定渠道的独立成品。",
-        ("把研究结果分别写成公众号和小红书稿",),
+        (
+            "把研究结果分别写成公众号和小红书稿",
+            "把这十条热点写成公众号周更推文",
+            "把排名第一的热点写成小红书推文",
+        ),
         ("把目标平台当作新闻来源",),
     ),
     OperationSpecialistCapabilityId.CAMPAIGN_PLAN.value: _SemanticText(
