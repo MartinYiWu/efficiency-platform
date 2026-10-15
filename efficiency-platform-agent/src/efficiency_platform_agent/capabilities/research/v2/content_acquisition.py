@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import time
 from dataclasses import replace
 from datetime import datetime
@@ -39,8 +40,6 @@ def validate_content_endpoint(descriptor: SourceDescriptorV2, url: str) -> None:
     不支持通配符、路径前缀或动态查询参数；无查询、查询值、顺序、重复键
     与编码方式均不能由发现内容扩大。重定向每一跳重新执行同一检查。
     """
-    if url not in descriptor.content_endpoints:
-        raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
     try:
         shape = UrlPolicy().validate_shape(
             url, ResearchUrlSourcePolicyV2(allowed_hosts=descriptor.allowed_hosts)
@@ -48,6 +47,17 @@ def validate_content_endpoint(descriptor: SourceDescriptorV2, url: str) -> None:
     except ValueError:
         raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED") from None
     if shape.url != url:
+        raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
+    split = urlsplit(shape.url)
+    if descriptor.adapter_id == "hacker_news":
+        if (
+            split.hostname != "hacker-news.firebaseio.com"
+            or split.query
+            or re.fullmatch(r"/v0/item/[0-9]+\.json", split.path) is None
+        ):
+            raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
+        return
+    if url not in descriptor.content_endpoints:
         raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
 
 
@@ -78,6 +88,24 @@ class ResearchContentAcquirer:
             raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
         if descriptor.content_policy.storage_mode == "metadata_only":
             raise ValueError("CONTENT_NOT_APPROVED")
+        if candidate.content_scope == "summary":
+            if (
+                descriptor.content_policy.storage_mode != "excerpt_only"
+                or "feed_excerpt" not in descriptor.admission.intended_uses
+                or candidate.inline_content is None
+            ):
+                raise ValueError("CONTENT_NOT_APPROVED")
+            text = candidate.inline_content.strip()
+            if not text:
+                raise ValueError("CONTENT_UNAVAILABLE")
+            return ExtractedDocumentV2(
+                candidate_id=candidate.candidate_id,
+                canonical_url=candidate.url,
+                title=candidate.title,
+                text=text,
+                content_hash=hashlib.sha256(text.encode()).hexdigest(),
+                extractor_version="research-content/2:feed_excerpt",
+            )
         platform = candidate.content_scope == "platform_text"
         required_use = "platform_text" if platform else "article_body"
         if required_use not in descriptor.admission.intended_uses:
@@ -95,6 +123,17 @@ class ResearchContentAcquirer:
             )
             if candidate.url != canonical:
                 raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
+            text = (candidate.inline_content or "").strip()
+            if not text:
+                raise ValueError("CONTENT_UNAVAILABLE")
+            return ExtractedDocumentV2(
+                candidate_id=candidate.candidate_id,
+                canonical_url=canonical,
+                title=candidate.title,
+                text=text,
+                content_hash=hashlib.sha256(text.encode()).hexdigest(),
+                extractor_version="research-content/2:platform_text",
+            )
         else:
             url = candidate.url
         validate_content_endpoint(descriptor, url)
@@ -179,7 +218,10 @@ class ResearchContentAcquirer:
                 or value.get("dead")
             ):
                 raise ValueError("SOURCE_SCHEMA_INVALID")
-            text = clean_fragment(value.get("text"))
+            api_title = clean_fragment(value.get("title"))
+            if api_title != candidate.title:
+                raise ValueError("SOURCE_SCHEMA_INVALID")
+            text = clean_fragment(value.get("text")) or api_title
             if not text:
                 raise ValueError("CONTENT_UNAVAILABLE")
             return ExtractedDocumentV2(

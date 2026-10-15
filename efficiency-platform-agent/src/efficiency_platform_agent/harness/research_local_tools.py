@@ -184,9 +184,11 @@ class _ContentGovernedProvider:
         item = self.descriptor
         candidates = []
         for candidate in batch.candidates:
-            required = {"full": "article_body", "platform_text": "platform_text"}.get(
-                candidate.content_scope
-            )
+            required = {
+                "full": "article_body",
+                "platform_text": "platform_text",
+                "summary": "feed_excerpt",
+            }.get(candidate.content_scope)
             if item.content_policy.storage_mode == "metadata_only" or (
                 required is not None and required not in item.admission.intended_uses
             ):
@@ -451,7 +453,12 @@ def build_local_research_tools(
             )
         elif item.adapter_id == "hacker_news":
             providers[item.source_id] = HackerNewsProvider(
-                HackerNewsConfig(item.source_id, max_concurrency=1, max_items=30),
+                HackerNewsConfig(
+                    item.source_id,
+                    list_name="topstories",
+                    max_concurrency=4,
+                    max_items=30,
+                ),
                 fetcher,
             )
         elif item.adapter_id == "arxiv":

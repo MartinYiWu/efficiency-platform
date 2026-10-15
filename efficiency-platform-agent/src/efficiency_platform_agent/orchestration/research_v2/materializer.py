@@ -195,7 +195,8 @@ class LocalLiveResearchOutcomeMaterializer:
             if (
                 any(ref.document_id not in members for ref in selected)
                 or not any(
-                    docs[ref.document_id].content_scope in {"full", "platform_text"}
+                    docs[ref.document_id].content_scope
+                    in {"summary", "full", "platform_text"}
                     for ref in selected
                 )
                 or claim.subject.casefold() not in excerpts.casefold()
@@ -296,9 +297,7 @@ class LocalLiveResearchOutcomeMaterializer:
             event.model_copy(
                 update={
                     # 文档标题是未核验元数据，不能继承正文的 verified 标签。
-                    "title": event.claim_texts[0]
-                    if len(event.claim_texts[0]) <= 500
-                    else "已核验事件详情",
+                    "title": event.claim_texts[0][:200].strip(),
                     "citations": tuple(
                         citation.model_copy(
                             update={
@@ -327,7 +326,7 @@ class LocalLiveResearchOutcomeMaterializer:
             )
             for event in pack.events
         )
-        ordering_limitation = "条目顺序沿用上游已核验事件顺序；未生成重要性或热度评分。"
+        ordering_limitation = "条目按公开来源的发现顺序排列。"
         pack = pack.model_copy(
             update={
                 "events": events,

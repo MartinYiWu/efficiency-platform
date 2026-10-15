@@ -147,11 +147,14 @@ class ActionValidator:
         accepted: list[CollectionActionV2] = []
         rejected: list[RejectedActionV2] = []
         completed = set(history.completed_action_ids)
+        source_priority = {
+            item.source_id: index for index, item in enumerate(registry.sources)
+        }
         ordered_actions = sorted(
             plan.actions,
             key=lambda item: (
                 _GAP_PRIORITY.get(item.gap_code, 99),
-                item.source_id,
+                source_priority.get(item.source_id, len(source_priority)),
                 item.action_id,
             ),
         )

@@ -107,6 +107,12 @@ class LocalExecutionLogger:
     @staticmethod
     def _terminal_level(view: RunViewV1) -> int:
         """按终态结果选择日志级别，不读取错误正文。"""
+        if (
+            view.status is RunStatus.FAILED
+            and view.error is not None
+            and view.error.category == "request"
+        ):
+            return logging.WARNING
         if view.status in {RunStatus.FAILED, RunStatus.TIMED_OUT}:
             return logging.ERROR
         if view.degraded:

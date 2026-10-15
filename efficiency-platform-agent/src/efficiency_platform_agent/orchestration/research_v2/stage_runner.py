@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -100,6 +101,8 @@ from .planner import (
     action_fingerprint,
 )
 from .state import ResearchGraphState
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -218,11 +221,17 @@ class LocalLiveResearchStageRunner:
                     "RESEARCH_MODEL_BUDGET_EXHAUSTED",
                     "RESEARCH_MODEL_CONTEXT_TOO_LARGE",
                 }:
+                    logger.warning(
+                        "研究 V2 阶段停止 stage=%s reason=%s", stage, str(exc)
+                    )
                     update = self._budget_stop(facts)
                 elif str(exc) in {
                     "RESEARCH_MODEL_UNAVAILABLE",
                     "RESEARCH_MODEL_DECISION_INVALID",
                 }:
+                    logger.warning(
+                        "研究 V2 阶段失败 stage=%s reason=%s", stage, str(exc)
+                    )
                     update = ResearchStageUpdateV2(fatal_error=True)
                 else:
                     raise
@@ -409,10 +418,16 @@ class LocalLiveResearchStageRunner:
 
     def _sources(self):
         context = self.source_context.model_copy(update={"now": self.now()})
-        return tuple(
+        available = tuple(
             item
             for item in self.registry.list_available(context, self.brief)
             if item.source_id in self.context.allowed_source_ids
+        )
+        return tuple(
+            sorted(
+                available,
+                key=lambda item: ("heat" not in item.roles, item.source_id),
+            )
         )
 
     async def _plan(
@@ -575,6 +590,19 @@ class LocalLiveResearchStageRunner:
                 self.context,
             )
             batch = result.batch
+            logger.warning(
+                "研究 V2 发现结果 source=%s batch=%s candidates=%s result_code=%s attempts=%s",
+                action.source_id,
+                batch is not None,
+                len(batch.candidates) if batch is not None else 0,
+                result.error_code,
+                tuple(
+                    (attempt.status, attempt.error_code, attempt.returned_count)
+                    for attempt in batch.attempts
+                )
+                if batch is not None
+                else (),
+            )
             if batch is not None:
                 for item in batch.candidates:
                     if item.source_id != action.source_id:
@@ -623,6 +651,7 @@ class LocalLiveResearchStageRunner:
         platform = set(facts.stage_artifact_ids.get("acquired_platform_text", ()))
         body_requests = facts.resources.body_requests
         exhausted = False
+        acquisition_errors: dict[str, int] = {}
         for item in candidates:
             if self._control() is not None:
                 break
@@ -648,6 +677,8 @@ class LocalLiveResearchStageRunner:
                     and len(str(exc)) <= 128
                     else "CONTENT_UNAVAILABLE"
                 )
+                key = f"{item.source_id}:{error}"
+                acquisition_errors[key] = acquisition_errors.get(key, 0) + 1
             after_http, after_bytes = self._http_usage()
             body_requests += after_http - before_http
             identifier = f"content-attempt-{facts.version}-{hashlib.sha256(item.candidate_id.encode()).hexdigest()[:24]}"
@@ -672,6 +703,12 @@ class LocalLiveResearchStageRunner:
         ids = tuple(
             item.candidate_id for item in candidates if item.candidate_id in extracted
         )
+        if acquisition_errors:
+            logger.warning(
+                "研究 V2 正文采集拒绝 candidates=%s rejects=%s",
+                len(candidates),
+                tuple(sorted(acquisition_errors.items())),
+            )
         await self._save(
             facts,
             extracted_documents=extracted,
@@ -705,6 +742,8 @@ class LocalLiveResearchStageRunner:
                 "acquired_platform_text", ()
             ):
                 scope = "platform_text"
+            elif candidate.content_scope == "summary":
+                scope = "summary"
             elif content.candidate_id in facts.stage_artifact_ids.get(
                 "acquired_full", ()
             ):
@@ -799,6 +838,16 @@ class LocalLiveResearchStageRunner:
         claims = _select(facts.claims, state.get("claim_ids", []))
         evidence = _select(facts.evidence, state.get("evidence_ids", []))
         accepted = tuple(state.get("filtered_document_ids", []))
+        logger.warning(
+            "研究 V2 质量输入 documents=%s accepted=%s events=%s claims=%s evidence=%s candidates=%s acquired=%s",
+            len(documents),
+            len(accepted),
+            len(events),
+            len(claims),
+            len(evidence),
+            len(state.get("candidate_ids", [])),
+            len(state.get("acquired_document_ids", [])),
+        )
         _select(facts.documents, accepted)
         rejected = tuple(
             DocumentFilterRecordV2(

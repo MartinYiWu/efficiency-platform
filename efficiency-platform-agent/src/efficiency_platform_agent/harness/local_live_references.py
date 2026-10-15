@@ -49,7 +49,7 @@ class LocalLiveRankedReferenceValidator:
             or item.verification_status != "verified"
             or item.confidence != "low"
             or item.why_it_matters
-            != "符合已冻结研究范围；可据所列证据继续评估内容选题。"
+            != "反映了近期 AI 产品或技术方向的公开变化，适合作为后续选题观察点。"
             or item.source_refs != [source.evidence_id for source in event.citations]
         ):
             raise reference_error()

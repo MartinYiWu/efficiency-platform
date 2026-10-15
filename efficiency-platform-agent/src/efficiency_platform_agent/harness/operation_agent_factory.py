@@ -30,6 +30,9 @@ from efficiency_platform_agent.core.run import ExecutionBudget
 from efficiency_platform_agent.harness.research_v2_adapter import (
     ResearchV2ProviderAdapter,
 )
+from efficiency_platform_agent.harness.referenced_content_model import (
+    ReferencedContentModelRuntime,
+)
 from efficiency_platform_agent.orchestration.supervisor import ScenarioSupervisorAdapter
 from efficiency_platform_agent.prompts.contracts import PromptBundleSpec
 from efficiency_platform_agent.prompts.registry import PromptRegistry
@@ -171,10 +174,15 @@ def build_operation_agent(
                         usage,
                         deliverable_contract_version=specialist_version,
                     )
+                specialist_model = (
+                    ReferencedContentModelRuntime(model)
+                    if spec.agent_id == "operation.channel.content"
+                    else model
+                )
                 return ModelBackedOperationSpecialist(
                     spec,
                     prompts,
-                    model,
+                    specialist_model,
                     usage,
                     deliverable_contract_version=specialist_version,
                 )

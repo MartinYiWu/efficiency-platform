@@ -112,8 +112,8 @@ def create_app(
             "dependencies": {"runtime_database": "up"},
         }
 
-    app.get("/health")(readiness)
-    app.get("/health/ready")(readiness)
+    app.get("/health", response_model=None)(readiness)
+    app.get("/health/ready", response_model=None)(readiness)
 
     return app
 

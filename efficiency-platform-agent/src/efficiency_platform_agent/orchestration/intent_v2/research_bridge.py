@@ -299,6 +299,16 @@ def _count_policy(
     count = next(iter(counts))
     if not isinstance(count, int) or isinstance(count, bool) or not 1 <= count <= 1_000:
         raise ResearchBridgeError("RESEARCH_COUNT_INVALID")
+    modes = {
+        parameter.value
+        for goal in goals
+        for parameter in getattr(goal, "parameters", ())
+        if parameter.name == "count_mode"
+    }
+    if modes:
+        if modes != {"best_effort"}:
+            raise ResearchBridgeError("RESEARCH_COUNT_INVALID")
+        return CountPolicy(mode="best_effort", target=count, minimum=1), ()
     return CountPolicy(mode="exact", target=count, minimum=count), ()
 
 

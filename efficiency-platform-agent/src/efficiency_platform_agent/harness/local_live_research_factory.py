@@ -71,6 +71,9 @@ from efficiency_platform_agent.orchestration.intent_v2.binding import (
 from efficiency_platform_agent.orchestration.intent_v2.decision import (
     IntentDecisionPolicyV2,
 )
+from efficiency_platform_agent.orchestration.intent_v2.deterministic import (
+    resolve_explicit_research_patch,
+)
 from efficiency_platform_agent.orchestration.intent_v2.interpreter import (
     ControlledIntentInterpreterV2,
     IntentV2ContextBuildScope,
@@ -496,6 +499,7 @@ def build_local_live_research_components(
                 binding=execution.binding,
                 brief=execution.brief,
                 remaining_budget=available,
+                deterministic_fallback=True,
             ),
             output_stages=output,
         )
@@ -521,6 +525,7 @@ def build_local_live_research_components(
             resolvers,
             resolvers,
             cancellation_signal=resolvers,
+            deterministic_resolver=resolve_explicit_research_patch,
         ),
         validator=IntentPatchValidator(),
         reducer=IntentStateReducer(),

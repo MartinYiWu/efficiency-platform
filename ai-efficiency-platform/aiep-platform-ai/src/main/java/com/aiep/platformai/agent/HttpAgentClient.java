@@ -13,6 +13,8 @@ import com.aiep.platformai.api.dto.OperationAgentCancelResponse;
 import com.aiep.platformai.api.dto.OperationAgentMessageRequest;
 import com.aiep.platformai.api.dto.OperationAgentRunEvent;
 import com.aiep.platformai.api.dto.OperationAgentRunResponse;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.channel.ChannelOption;
 import java.util.Objects;
 import org.springframework.core.ParameterizedTypeReference;
@@ -30,12 +32,14 @@ import reactor.util.retry.Retry;
 @Component
 public class HttpAgentClient implements AgentClient {
     private static final String TENANT_HEADER = "X-Tenant-ID";
-    private static final ParameterizedTypeReference<ServerSentEvent<OperationAgentRunEvent>> EVENT_TYPE =
+    private static final ParameterizedTypeReference<ServerSentEvent<String>> EVENT_TYPE =
             new ParameterizedTypeReference<>() { };
 
     private final WebClient webClient;
+    private final ObjectMapper objectMapper;
 
-    public HttpAgentClient(AgentClientProperties properties, WebClient.Builder builder) {
+    public HttpAgentClient(
+            AgentClientProperties properties, WebClient.Builder builder, ObjectMapper objectMapper) {
         HttpClient httpClient = HttpClient.create()
                 .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, Math.toIntExact(properties.getConnectTimeout().toMillis()))
                 .responseTimeout(properties.getResponseTimeout());
@@ -43,6 +47,7 @@ public class HttpAgentClient implements AgentClient {
                 .baseUrl(properties.getBaseUrl())
                 .clientConnector(new ReactorClientHttpConnector(httpClient))
                 .build();
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -74,8 +79,9 @@ public class HttpAgentClient implements AgentClient {
         return request.retrieve()
                 .onStatus(status -> status.isError(), response -> downstreamError(response.statusCode().value()))
                 .bodyToFlux(EVENT_TYPE)
-                .map(ServerSentEvent::data)
-                .filter(Objects::nonNull)
+                .filter(event -> event.data() != null)
+                .map(event -> Objects.requireNonNull(event.data()))
+                .map(this::decodeEvent)
                 .onErrorMap(WebClientRequestException.class,
                         error -> new AgentTransportException(503, "AGENT_UNAVAILABLE", "Agent 服务当前不可用"));
     }
@@ -149,6 +155,14 @@ public class HttpAgentClient implements AgentClient {
 
     private static Mono<? extends Throwable> downstreamError(int statusCode) {
         return Mono.just(new AgentTransportException(statusCode, "AGENT_REQUEST_FAILED", "Agent 请求失败"));
+    }
+
+    private OperationAgentRunEvent decodeEvent(String value) {
+        try {
+            return objectMapper.readValue(value, OperationAgentRunEvent.class);
+        } catch (JsonProcessingException exception) {
+            throw new AgentTransportException(502, "AGENT_EVENT_INVALID", "Agent 事件格式无效");
+        }
     }
 
     private static <T> T requireBody(Mono<T> publisher) {

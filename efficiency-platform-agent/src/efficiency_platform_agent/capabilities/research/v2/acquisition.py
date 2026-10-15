@@ -186,7 +186,7 @@ class AcquisitionExecutor:
                 "2",
                 "research.discover.v2",
                 _freeze_object(arguments.model_dump(mode="json")),
-                min(10_000, remaining_ms),
+                min(60_000, remaining_ms),
                 None,
                 f"{action.action_id}:{attempt_number}",
                 False,

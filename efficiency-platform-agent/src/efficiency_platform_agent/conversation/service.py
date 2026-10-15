@@ -71,8 +71,10 @@ from efficiency_platform_agent.harness.intent_v2_delegate import (
 from efficiency_platform_agent.harness.referenced_inputs import (
     reference_error,
     requested_rank,
+    requested_ranked_set_size,
     rewrite_intent,
     select_ranked_reference,
+    select_ranked_references,
 )
 from efficiency_platform_agent.harness.service import (
     AgentRuntimeService,
@@ -546,6 +548,7 @@ class _ContextEntry:
     pending_intent: IntentEnvelopeV1 | None = None
     pending_v2: bool = False
     latest_run: tuple[str, str] | None = None
+    latest_ranked_run: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -712,7 +715,7 @@ class ConversationService:
                 status="queued",
             )
             async with self._lock:
-                previous_run = context_entry.latest_run
+                previous_run = context_entry.latest_ranked_run
                 context_entry.latest_run = (run.run_id, message.user_id)
                 expires_at = self.monotonic() + self.ttl_seconds
                 self._requests[request_key] = _IdempotencyEntry(
@@ -762,8 +765,9 @@ class ConversationService:
         async with entry.turn_lock:
             referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
             rank = requested_rank(message.message)
+            ranked_set_size = requested_ranked_set_size(message.message)
             reference_intent = None
-            if rank is not None:
+            if rank is not None or ranked_set_size is not None:
                 if previous_run is None or previous_run[1] != message.user_id:
                     raise reference_error()
                 try:
@@ -773,16 +777,27 @@ class ConversationService:
                 except HarnessError as error:
                     raise reference_error() from error
                 referenced_inputs = (
-                    select_ranked_reference(
+                    (
+                        select_ranked_reference(
+                            previous_view,
+                            rank,
+                            tenant_id=tenant_id,
+                            user_id=message.user_id,
+                            conversation_id=conversation_id,
+                        ),
+                    )
+                    if rank is not None
+                    else select_ranked_references(
                         previous_view,
-                        rank,
+                        ranked_set_size or 1,
                         tenant_id=tenant_id,
                         user_id=message.user_id,
                         conversation_id=conversation_id,
-                    ),
+                    )
                 )
                 if self.ranked_reference_validator is not None:
-                    await self.ranked_reference_validator(referenced_inputs[0])
+                    for reference in referenced_inputs:
+                        await self.ranked_reference_validator(reference)
                 reference_intent = rewrite_intent(message.message)
             async with self._lock:
                 context = ConversationContext()
@@ -841,17 +856,20 @@ class ConversationService:
                     entry.pending_intent = None
                     entry.pending_v2 = False
                     return v2_preparation
+            fast_path_intent = (
+                self.fast_path_detector(message.message, context)
+                if reference_intent is None
+                and v2_decision is None
+                and self.fast_path_detector is not None
+                else None
+            )
             usage = v2_decision.usage if v2_decision else UsageSnapshot()
             degraded = False
             charge = v2_decision.charge if v2_decision else BudgetCharge()
             intent = (
                 reference_intent
+                or fast_path_intent
                 or (v2_decision.intent if v2_decision else None)
-                or (
-                    self.fast_path_detector(message.message, context)
-                    if self.fast_path_detector is not None
-                    else None
-                )
             )
             if intent is None:
                 execute = getattr(self.interpreter, "execute", None)
@@ -1455,6 +1473,20 @@ class ConversationService:
             self._active_runs.pop(view.run_id, None)
             entry.waiting_runs.discard(view.run_id)
             if status == "succeeded" and isinstance(view.output, dict):
+                deliverable_set = view.output.get("deliverable_set")
+                deliverables = (
+                    deliverable_set.get("deliverables", [])
+                    if isinstance(deliverable_set, dict)
+                    else []
+                )
+                if any(
+                    isinstance(item, dict)
+                    and item.get("deliverable_kind") == "ranked_digest"
+                    for item in deliverables
+                ):
+                    owner = entry.latest_run
+                    if owner is not None and owner[0] == view.run_id:
+                        entry.latest_ranked_run = owner
                 content = view.output.get("content")
                 if isinstance(content, str) and content:
                     entry.context.append(ConversationTurn("assistant", content))

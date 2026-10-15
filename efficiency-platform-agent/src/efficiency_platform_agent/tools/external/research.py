@@ -305,7 +305,7 @@ def _spec(tool: Tool, arguments: type[BaseModel], result: type[BaseModel]) -> To
         required_permissions=descriptor.permissions,
         has_side_effects=False,
         max_attempts=1,
-        timeout_ms=10_000,
+        timeout_ms=60_000 if descriptor.name == "research.discover.v2" else 10_000,
         max_output_bytes=2 * 1024 * 1024,
     )
 

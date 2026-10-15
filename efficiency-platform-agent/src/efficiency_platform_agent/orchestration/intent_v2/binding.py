@@ -173,6 +173,7 @@ def build_operation_parameter_schema_registry() -> CapabilityParameterSchemaRegi
     }
     common_rules = (
         ParameterRuleV2("count", "integer"),
+        ParameterRuleV2("count_mode", "string"),
         ParameterRuleV2("objective", "string"),
     )
     return CapabilityParameterSchemaRegistry(

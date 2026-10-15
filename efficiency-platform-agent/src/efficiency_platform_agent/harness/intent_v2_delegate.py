@@ -105,7 +105,7 @@ class InMemoryIntentV2TrustedInputFactory:
         allowed_default_policy_ids: frozenset[str] = frozenset(),
         allowed_normalizer_versions: frozenset[str] = frozenset(),
         allowed_intent_parameter_names: frozenset[str] = frozenset(
-            {"count", "objective"}
+            {"count", "count_mode", "objective"}
         ),
     ) -> None:
         self.catalog = catalog

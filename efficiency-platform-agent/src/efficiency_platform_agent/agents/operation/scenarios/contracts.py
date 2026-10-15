@@ -104,7 +104,7 @@ class ScenarioSupervisorRequest:
 
 def _validate_references(references, request: OperationRequest) -> None:
     """场景边界重新检查身份，拒绝通过其他提交入口混入引用。"""
-    if not isinstance(references, tuple) or len(references) > 1:
+    if not isinstance(references, tuple) or len(references) > 20:
         raise ValueError("SCENARIO_REFERENCE_INVALID")
     for reference in references:
         if not isinstance(reference, ReferencedRankedInput):
@@ -114,6 +114,18 @@ def _validate_references(references, request: OperationRequest) -> None:
             or reference.user_id != request.request.user_id
         ):
             raise ValueError("SCENARIO_IDENTITY_MISMATCH")
+    if references:
+        scope = {
+            (
+                item.conversation_id,
+                item.source_run_id,
+                item.source_deliverable_id,
+            )
+            for item in references
+        }
+        item_ids = [item.item.item_id for item in references]
+        if len(scope) != 1 or len(item_ids) != len(set(item_ids)):
+            raise ValueError("SCENARIO_REFERENCE_INVALID")
 
 
 @dataclass(frozen=True, slots=True)

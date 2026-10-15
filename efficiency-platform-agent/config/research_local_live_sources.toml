@@ -38,7 +38,7 @@ admission_record_id = "local-google-blog-rss-20260917"
 status = "VERIFIED"
 last_verified_at = 2026-10-15T03:55:00Z
 approved_by = "user-approved-operations-mvp"
-intended_uses = ["research"]
+intended_uses = ["research", "feed_excerpt"]
 schema_verified = true
 history_verified = true
 permission_verified = true
@@ -81,7 +81,7 @@ admission_record_id = "local-langgraph-releases-20260917"
 status = "VERIFIED"
 last_verified_at = 2026-10-15T03:55:00Z
 approved_by = "user-approved-operations-mvp"
-intended_uses = ["research"]
+intended_uses = ["research", "feed_excerpt"]
 schema_verified = true
 history_verified = true
 permission_verified = true
@@ -105,14 +105,14 @@ pagination = false
 freshness_sla = "P2D"
 enabled = true
 [sources.rate_policy]
-requests = 1
+requests = 5
 period_seconds = 1
-concurrency = 1
+concurrency = 4
 [sources.content_policy]
-storage_mode = "metadata_only"
+storage_mode = "excerpt_only"
 retention_days = 1
 citation_allowed = true
-access_restriction = "仅条目 ID、时间、热度、标题和规范 URL；用户正文/评论及第三方文章正文未准入；热度不证明事实。"
+access_restriction = "仅条目 ID、时间、热度、标题和规范 URL；标题按平台 API 文本形成短摘录，评论及第三方文章正文未准入；热度不证明事实。"
 [sources.cost_policy]
 mode = "free"
 evidence_url = "https://github.com/HackerNews/API"
@@ -124,11 +124,11 @@ admission_record_id = "local-hacker-news-api-20260917"
 status = "VERIFIED"
 last_verified_at = 2026-10-15T03:55:00Z
 approved_by = "user-approved-operations-mvp"
-intended_uses = ["research"]
+intended_uses = ["research", "platform_text"]
 schema_verified = true
 history_verified = true
 permission_verified = true
-reason_codes = ["METADATA_ONLY", "PLATFORM_TEXT_NOT_APPROVED", "LATEST_TWO_DAYS_ONLY"]
+reason_codes = ["TITLE_EXCERPT_ONLY", "COMMENTS_NOT_APPROVED", "THIRD_PARTY_BODY_NOT_APPROVED", "LATEST_TWO_DAYS_ONLY"]
 
 [[sources]]
 source_id = "arxiv_api"

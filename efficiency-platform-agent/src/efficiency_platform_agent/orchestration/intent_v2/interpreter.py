@@ -45,6 +45,10 @@ from efficiency_platform_agent.prompts.contracts import RenderedPrompt
 from efficiency_platform_agent.prompts.runtime import PromptRuntime
 
 type ReviewPolicy = Callable[[IntentPatchV2, IntentFrameV2 | None], bool]
+type DeterministicPatchResolver = Callable[
+    [str, IntentContextV2, IntentFrameV2 | None, CapabilityCatalogSnapshot],
+    IntentPatchV2 | None,
+]
 
 _MAX_MODEL_OUTPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 8_000
@@ -174,6 +178,7 @@ class ControlledIntentInterpreterV2:
         *,
         cancellation_signal: CancellationSignal | None = None,
         review_policy: ReviewPolicy | None = None,
+        deterministic_resolver: DeterministicPatchResolver | None = None,
         timeout_ms: int = 30_000,
         clock: Callable[[], float] | None = None,
     ) -> None:
@@ -194,6 +199,10 @@ class ControlledIntentInterpreterV2:
             raise TypeError("cancellation_signal 接口不完整")
         if review_policy is not None and not callable(review_policy):
             raise TypeError("review_policy 必须可调用")
+        if deterministic_resolver is not None and not callable(
+            deterministic_resolver
+        ):
+            raise TypeError("deterministic_resolver 必须可调用")
         if (
             not isinstance(timeout_ms, int)
             or isinstance(timeout_ms, bool)
@@ -209,6 +218,7 @@ class ControlledIntentInterpreterV2:
         self.budget_resolver = budget_resolver
         self.cancellation_signal = cancellation_signal
         self.review_policy = review_policy or (lambda patch, previous: False)
+        self.deterministic_resolver = deterministic_resolver
         self.timeout_ms = timeout_ms
         self.clock = clock or time.monotonic
         self._field_schema = json.dumps(
@@ -237,6 +247,24 @@ class ControlledIntentInterpreterV2:
         lease: BudgetLeaseReferenceV2,
     ) -> IntentInterpretationV2Execution:
         self._validate_inputs(text, context, previous, catalog, lease)
+        if self.deterministic_resolver is not None:
+            patch = self.deterministic_resolver(text, context, previous, catalog)
+            if patch is not None:
+                return IntentInterpretationV2Execution(
+                    patch=patch,
+                    usage=UsageSnapshot(),
+                    degraded=False,
+                    attempts=(),
+                    provider_calls=0,
+                    repair_attempted=False,
+                    review_attempted=False,
+                    review_applied=False,
+                    prompt_versions=("intent.v2.deterministic/1",),
+                    catalog_version=catalog.catalog_version,
+                    context_version=context.context_version,
+                    lease_id=lease.lease_id,
+                    lease_version=lease.version,
+                )
         built = await self._build_context(text, context, lease)
         catalog_json = catalog.model_dump_json()
         context_manifest = self._context_manifest(context, built)

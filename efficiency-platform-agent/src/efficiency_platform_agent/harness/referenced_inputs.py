@@ -17,6 +17,7 @@ from efficiency_platform_agent.core.enums import RunStatus
 from efficiency_platform_agent.harness.errors import HarnessError
 
 _RANK = re.compile(r"第\s*([+-]?[0-9]+)\s*条")
+_RANKED_SET = re.compile(r"(?:这|前)\s*(\d{1,2})\s*条")
 _REWRITE = ("改写", "改成", "写成")
 _PLATFORMS = (
     ("小红书", "xiaohongshu"),
@@ -38,6 +39,14 @@ def requested_rank(message: str) -> int | None:
     return int(matches[0])
 
 
+def requested_ranked_set_size(message: str) -> int | None:
+    """识别“把这 N 条写成……”这类明确的整组改写指令。"""
+    match = _RANKED_SET.search(message)
+    if match is None or not any(word in message for word in _REWRITE):
+        return None
+    return max(1, min(int(match.group(1)), 20))
+
+
 def reference_error() -> HarnessError:
     return HarnessError(
         "CONVERSATION_REFERENCE_UNAVAILABLE",
@@ -55,6 +64,48 @@ def select_ranked_reference(
     conversation_id: str,
 ) -> ReferencedRankedInput:
     """严格读取 V2 与来源闭包，任何失败均拒绝而不搜索更早的 Run。"""
+    digest = _validated_ranked_digest(view)
+    try:
+        selected = next(i for i in digest.content.items if i.rank == rank)
+        return _build_reference(
+            view,
+            digest,
+            selected,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+    except (ValueError, StopIteration, KeyError, TypeError, AttributeError) as error:
+        raise reference_error() from error
+
+
+def select_ranked_references(
+    view: RunViewV1,
+    count: int,
+    *,
+    tenant_id: str,
+    user_id: str,
+    conversation_id: str,
+) -> tuple[ReferencedRankedInput, ...]:
+    """按排名选择最多 N 条；来源不足时只返回真实存在的有效条目。"""
+    digest = _validated_ranked_digest(view)
+    selected = tuple(digest.content.items[:count])
+    if not selected:
+        raise reference_error()
+    return tuple(
+        _build_reference(
+            view,
+            digest,
+            item,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        for item in selected
+    )
+
+
+def _validated_ranked_digest(view: RunViewV1):
     if view.status is not RunStatus.SUCCEEDED or not isinstance(view.output, dict):
         raise reference_error()
     try:
@@ -76,36 +127,47 @@ def select_ranked_reference(
         ids = [c.citation_id for c in digest.citations]
         if len(ids) != len(set(ids)):
             raise ValueError("REFERENCE_CITATION_DUPLICATED")
-        selected = next(i for i in items if i.rank == rank)
-        by_id = {c.citation_id: c for c in digest.citations}
-        source_refs = selected.source_refs
-        if len(source_refs) != len(set(source_refs)):
-            raise ValueError("REFERENCE_CITATION_DUPLICATED")
-        if not set(source_refs).issubset(by_id):
-            raise ValueError("REFERENCE_CITATION_CLOSURE_INVALID")
-        original_citations = tuple(by_id[ref] for ref in source_refs)
-        if any(
-            selected.item_id not in citation.supports_item_ids
-            for citation in original_citations
-        ):
-            raise ValueError("REFERENCE_ITEM_CLOSURE_INVALID")
-        citations = tuple(
-            citation.model_copy(
-                deep=True, update={"supports_item_ids": [selected.item_id]}
-            )
-            for citation in original_citations
-        )
-        return ReferencedRankedInput(
-            tenant_id=tenant_id,
-            user_id=user_id,
-            conversation_id=conversation_id,
-            source_run_id=view.run_id,
-            source_deliverable_id=digest.deliverable_id,
-            item=selected.model_copy(deep=True),
-            citations=citations,
-        )
-    except (ValueError, StopIteration, KeyError, TypeError, AttributeError) as error:
+        return digest
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
         raise reference_error() from error
+
+
+def _build_reference(
+    view: RunViewV1,
+    digest,
+    selected,
+    *,
+    tenant_id: str,
+    user_id: str,
+    conversation_id: str,
+) -> ReferencedRankedInput:
+    by_id = {c.citation_id: c for c in digest.citations}
+    source_refs = selected.source_refs
+    if len(source_refs) != len(set(source_refs)):
+        raise ValueError("REFERENCE_CITATION_DUPLICATED")
+    if not set(source_refs).issubset(by_id):
+        raise ValueError("REFERENCE_CITATION_CLOSURE_INVALID")
+    original_citations = tuple(by_id[ref] for ref in source_refs)
+    if any(
+        selected.item_id not in citation.supports_item_ids
+        for citation in original_citations
+    ):
+        raise ValueError("REFERENCE_ITEM_CLOSURE_INVALID")
+    citations = tuple(
+        citation.model_copy(
+            deep=True, update={"supports_item_ids": [selected.item_id]}
+        )
+        for citation in original_citations
+    )
+    return ReferencedRankedInput(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conversation_id=conversation_id,
+        source_run_id=view.run_id,
+        source_deliverable_id=digest.deliverable_id,
+        item=selected.model_copy(deep=True),
+        citations=citations,
+    )
 
 
 def rewrite_intent(message: str) -> IntentEnvelopeV1:

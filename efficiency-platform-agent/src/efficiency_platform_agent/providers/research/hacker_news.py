@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
 
 from efficiency_platform_agent.contracts.research_sources_v2 import (
     CandidateRecordV2,
@@ -292,15 +291,19 @@ def _item_candidate(
     title = as_nonblank(mapping.get("title"))
     if not title:
         return None
-    external_url = _safe_external_url(as_nonblank(mapping.get("url")))
-    url = external_url or f"https://news.ycombinator.com/item?id={expected_item_id}"
+    # 证据来自 HN 官方 API 返回的标题/正文，因此引用必须指向对应 HN 讨论页，
+    # 不能把平台标题伪装成第三方外链正文。
+    url = f"https://news.ycombinator.com/item?id={expected_item_id}"
     raw_time = mapping.get("time")
     posted_at = (
         datetime.fromtimestamp(raw_time, tz=UTC).isoformat()
         if isinstance(raw_time, int) and not isinstance(raw_time, bool) and raw_time >= 0
         else None
     )
-    text = clean_fragment(mapping.get("text"))
+    # HN story title 本身是平台 API 返回的可引用文本；没有 self-text 时只保留标题，
+    # 不读取评论，也不把第三方链接正文伪装成平台内容。
+    body = clean_fragment(mapping.get("text"))
+    text = f"{title}\n{body}" if body and body != title else title
     score = mapping.get("score")
     descendants = mapping.get("descendants")
     heat_parts = []
@@ -322,7 +325,7 @@ def _item_candidate(
         timestamp_semantics="platform_posted" if posted_at else "unknown",
         discovered_via="api",
         heat_observation=";".join(heat_parts) or None,
-        content_scope="platform_text" if text else "none",
+        content_scope="platform_text",
         inline_content=text,
     )
 
@@ -336,20 +339,6 @@ def _parse_offset(cursor: str | None) -> int:
     if offset < 0 or offset > 1_000_000:
         raise AdapterDataError("SOURCE_SCHEMA_INVALID")
     return offset
-
-
-def _safe_external_url(value: str | None) -> str | None:
-    if value is None:
-        return None
-    split = urlsplit(value)
-    if (
-        split.scheme != "https"
-        or not split.hostname
-        or split.username is not None
-        or split.password is not None
-    ):
-        return None
-    return value
 
 
 def _child_request_id(request_id: str, suffix: str) -> str:

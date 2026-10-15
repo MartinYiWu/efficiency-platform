@@ -19,6 +19,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -370,8 +371,9 @@ public class OperationAssistantService {
     }
 
     private static Map<String, Object> stringKeyMap(Map<?, ?> value) {
-        return value.entrySet().stream().collect(java.util.stream.Collectors.toMap(
-                entry -> String.valueOf(entry.getKey()), Map.Entry::getValue));
+        Map<String, Object> result = new LinkedHashMap<>();
+        value.forEach((key, item) -> result.put(String.valueOf(key), item));
+        return result;
     }
 
     private static String firstNonBlank(Map<String, Object> value, String first, String second, String fallback) {

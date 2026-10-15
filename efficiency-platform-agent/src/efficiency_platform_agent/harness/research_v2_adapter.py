@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
@@ -24,6 +25,8 @@ from efficiency_platform_agent.contracts.research_v2 import (
     ResearchOutcomeV2,
     ResearchRuntimeContextV2,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -115,14 +118,22 @@ class ResearchV2ProviderAdapter:
                     request.tenant_id, request.task_id, self.run_id
                 )
         except Exception:  # noqa: BLE001 -- 旧边界不得泄漏存储故障或敏感正文。
+            logger.exception("研究 V2 Brief 读取失败")
             return _failed(request, "RESEARCH_UNAVAILABLE")
         if brief is None:
+            logger.warning(
+                "研究 V2 Brief 不存在 tenant=%s task=%s run=%s",
+                request.tenant_id,
+                request.task_id,
+                self.run_id,
+            )
             return _failed(request, "RESEARCH_UNAVAILABLE")
         if (
             brief.trusted_context.tenant_id != request.tenant_id
             or brief.trusted_context.task_id != request.task_id
             or (self.run_id is not None and brief.trusted_context.run_id != self.run_id)
         ):
+            logger.warning("研究 V2 Brief 身份不匹配")
             return _failed(request, "EVIDENCE_INVALID")
         started = self.now()
         try:
@@ -135,6 +146,7 @@ class ResearchV2ProviderAdapter:
                 ),
             )
         except Exception:  # noqa: BLE001 -- Provider 失败只能投影为稳定错误码。
+            logger.exception("研究 V2 执行失败")
             return _failed(request, "RESEARCH_UNAVAILABLE")
         if outcome.delivery is not None and (
             outcome.delivery.brief_digest != brief.canonical_digest()
@@ -143,6 +155,17 @@ class ResearchV2ProviderAdapter:
             return _failed(request, "EVIDENCE_INVALID")
         if self.result_observer is not None:
             self.result_observer(request.request_id, brief, outcome)
+        logger.warning(
+            "研究 V2 完成 outcome=%s stop_reason=%s usable_events=%s delivery=%s gaps=%s source_requests=%s model_calls=%s downloaded_bytes=%s",
+            outcome.outcome,
+            outcome.stop_reason,
+            len(outcome.usable_event_ids),
+            outcome.delivery is not None,
+            tuple(gap.code for gap in outcome.gaps),
+            outcome.usage.source_requests,
+            outcome.usage.model_calls,
+            outcome.usage.downloaded_bytes,
+        )
         if outcome.outcome == "FAILED" or outcome.delivery is None:
             return _failed(request, "RESEARCH_INSUFFICIENT")
         if outcome.outcome == "NO_MATCHES":

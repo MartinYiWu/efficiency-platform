@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import replace
 from typing import Protocol
@@ -86,6 +87,7 @@ class ResearchModelDecisions:
         brief: ResearchBriefV2,
         remaining_budget: RemainingBudget,
         prompt_runtime: PromptRuntime | None = None,
+        deterministic_fallback: bool = False,
     ) -> None:
         if (run_context.tenant_id, run_context.run_id, binding.lease_id) != (
             brief.trusted_context.tenant_id,
@@ -101,6 +103,7 @@ class ResearchModelDecisions:
         self.model_runtime, self.context_builder = model_runtime, context_builder
         self.run_context, self.binding, self.brief = run_context, binding, brief
         self.remaining_budget = remaining_budget
+        self.deterministic_fallback = deterministic_fallback
         registry = PromptRegistry()
         register_research_v2_prompts(registry)
         self.prompts = prompt_runtime or PromptRuntime(registry)
@@ -113,6 +116,8 @@ class ResearchModelDecisions:
         payload: dict[str, object],
         lease: BudgetLeaseReferenceV2,
     ) -> object:
+        if self.deterministic_fallback:
+            return self._deterministic_decision(prompt_id, payload)
         if (
             lease.lease_id != self.binding.lease_id
             or lease.version > self.binding.version
@@ -197,7 +202,7 @@ class ResearchModelDecisions:
             "2",
             (*prompt.messages, ProviderMessage("user", body)),
             JsonObject(),
-            min(30_000, remaining.timeout_ms),
+            min(90_000, remaining.timeout_ms),
         )
         with bind_budget_execution(self.binding):
             try:
@@ -225,6 +230,90 @@ class ResearchModelDecisions:
             raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
         return value
 
+    def _deterministic_decision(
+        self, prompt_id: str, payload: dict[str, object]
+    ) -> object:
+        """模型不可用时只从已采集事实生成保守决策，不补充外部事实。"""
+        if prompt_id == "research.v2.replan":
+            actions = payload.get("allowed_actions")
+            if not isinstance(actions, list):
+                raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+            return {
+                "action_ids": [
+                    item["action_id"]
+                    for item in actions
+                    if isinstance(item, dict) and isinstance(item.get("action_id"), str)
+                ],
+                "stop_reason": None,
+            }
+        if prompt_id == "research.v2.cluster":
+            return []
+        if prompt_id == "research.v2.claims":
+            return self._deterministic_claims(payload)
+        raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+
+    def _deterministic_claims(self, payload: dict[str, object]) -> list[dict[str, object]]:
+        events = payload.get("events")
+        context = payload.get("evidence_context")
+        if not isinstance(events, list) or not isinstance(context, dict):
+            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+        refs = context.get("evidence_refs")
+        documents = context.get("documents")
+        if not isinstance(refs, list) or not isinstance(documents, list):
+            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+        ref_by_document = {
+            item.get("document_id"): item
+            for item in refs
+            if isinstance(item, dict)
+            and isinstance(item.get("document_id"), str)
+            and isinstance(item.get("excerpt"), str)
+        }
+        document_by_id = {
+            item.get("document_id"): item
+            for item in documents
+            if isinstance(item, dict) and isinstance(item.get("document_id"), str)
+        }
+        results: list[dict[str, object]] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_id = event.get("event_id")
+            document_id = event.get("representative_document_id")
+            ref = ref_by_document.get(document_id)
+            document = document_by_id.get(document_id)
+            if (
+                not isinstance(event_id, str)
+                or not isinstance(ref, dict)
+                or not isinstance(document, dict)
+            ):
+                continue
+            excerpt = _without_urls(str(ref["excerpt"]))
+            if not excerpt:
+                continue
+            digest = hashlib.sha256(
+                f"{event_id}:{ref['evidence_id']}".encode()
+            ).hexdigest()[:24]
+            results.append(
+                {
+                    "proposal_id": f"claim-proposal-{digest}",
+                    "claim_key": f"source-excerpt-{digest}",
+                    "brief_digest": self.brief.canonical_digest(),
+                    "prompt_version": "research.v2.claims@1.0.0",
+                    "event_id": event_id,
+                    "text": excerpt[:4000],
+                    "claim_type": "reported_fact",
+                    "subject": excerpt[: min(128, len(excerpt))],
+                    "value_text": None,
+                    "numeric_value": None,
+                    "unit": None,
+                    "claim_time": event.get("event_time"),
+                    "assertion_mode": "attributed",
+                    "attributed_to": str(document.get("publisher_id") or "公开来源"),
+                    "support_refs": [ref["evidence_id"]],
+                }
+            )
+        return results
+
     async def relevance(
         self,
         brief: ResearchBriefV2,
@@ -233,6 +322,28 @@ class ResearchModelDecisions:
     ) -> tuple[SemanticRelevanceDecisionV2, ...]:
         if brief != self.brief:
             raise ValueError("RESEARCH_MODEL_SCOPE_MISMATCH")
+        if self.deterministic_fallback:
+            topic_requirement_ids = tuple(
+                item.requirement_id
+                for item in brief.hard_requirements
+                if item.dimension == "topic"
+            )
+            return tuple(
+                SemanticRelevanceDecisionV2(
+                    document_id=document.document_id,
+                    document_content_hash=document.content_hash,
+                    brief_digest=brief.canonical_digest(),
+                    outcome=(
+                        "relevant"
+                        if _deterministically_relevant(brief.topic, document)
+                        else "uncertain"
+                    ),
+                    requirement_ids=topic_requirement_ids,
+                    source_excerpt=document.text[:2000],
+                    prompt_version=RELEVANCE_PROMPT_VERSION,
+                )
+                for document in documents
+            )
         results = []
         for document in documents:
             value = await self.invoke(
@@ -262,6 +373,49 @@ class ResearchModelDecisions:
                 raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
             results.append(decision)
         return tuple(results)
+
+
+def _deterministically_relevant(topic: str, document: SourceDocumentV2) -> bool:
+    text = f"{document.title}\n{document.text}".casefold()
+    if len(" ".join(document.text.split())) < 20:
+        return False
+    topic_text = topic.casefold()
+    broad_ai = any(marker in topic_text for marker in ("ai", "人工智能", "大模型"))
+    if broad_ai and any(
+        marker in text
+        for marker in (
+            " ai ",
+            "artificial intelligence",
+            "language model",
+            "llm",
+            "machine learning",
+            "agent",
+            "模型",
+            "人工智能",
+        )
+    ):
+        return True
+    terms = {
+        item
+        for item in re.findall(r"[a-z0-9][a-z0-9.+-]{1,31}|[\u4e00-\u9fff]{2,12}", topic_text)
+        if item not in {"相关", "热点", "话题", "今天", "最新", "收集", "给出", "最热"}
+    }
+    return any(
+        (
+            re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", text)
+            is not None
+            if term.isascii()
+            else term in text
+        )
+        for term in terms
+        if term != "ai"
+    )
+
+
+def _without_urls(value: str) -> str:
+    """保留证据原词序，仅移除不允许进入 Claim 提案的 URL token。"""
+    cleaned = re.sub(r"(?:https?://|www\.)\S+", "", value, flags=re.IGNORECASE)
+    return " ".join(cleaned.split()).strip()
 
 
 class ResearchPlanModelAdapter:

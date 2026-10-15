@@ -296,6 +296,14 @@ class AgentRuntimeService:
                 return await self._prepare_and_execute_pipeline(
                     record, original, prepare
                 )
+            except HarnessError as error:
+                self._record_exception(
+                    "pipeline_request_rejected",
+                    error.code,
+                    error,
+                    level=DiagnosticLevel.WARNING,
+                )
+                return await self._settle_background_failure(record, original, error)
             except Exception as error:  # noqa: BLE001 - 准备阶段不得泄露模型异常
                 self._record_exception(
                     "pipeline_preparation_failed", "PIPELINE_PREPARATION_FAILED", error
@@ -815,6 +823,7 @@ class AgentRuntimeService:
         *,
         stage: str | None = None,
         strategy: StrategyMode | None = None,
+        level: DiagnosticLevel = DiagnosticLevel.ERROR,
     ) -> None:
         """记录 Harness 吞异常边界的白名单诊断事实。"""
 
@@ -825,7 +834,7 @@ class AgentRuntimeService:
                 if event_name in {"graph_execution_failed", "graph_resume_failed"}
                 else "run"
             ),
-            level=DiagnosticLevel.ERROR,
+            level=level,
             stage=(
                 stage
                 or (
