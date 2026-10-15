@@ -304,6 +304,7 @@ def build_local_agent_application(
         research_source_allowlist=resolved_research_v2.research_source_allowlist,
         research_policy_version=resolved_research_v2.research_policy_version,
         state_backend=resolved_research_v2.state_backend,
+        research_decision_mode=resolved_research_v2.research_decision_mode,
         runtime_mode=resolved_research_v2.runtime_mode,
         rollout_mode=resolved_research_v2.rollout_mode,
         rollout_tenant_allowlist=resolved_research_v2.rollout_tenant_allowlist,

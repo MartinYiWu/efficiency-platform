@@ -49,6 +49,7 @@ def _snapshot(settings: ResearchPipelineSettings) -> PipelineVersionSnapshotV2:
         research_source_allowlist=settings.research_source_allowlist,
         research_policy_version=settings.research_policy_version,
         state_backend=settings.state_backend,
+        research_decision_mode=settings.research_decision_mode,
         runtime_mode=settings.runtime_mode,
         rollout_mode=settings.rollout_mode,
         rollout_tenant_allowlist=settings.rollout_tenant_allowlist,
@@ -68,8 +69,16 @@ def test_memory_local_live_is_config_ready_but_never_production_ready() -> None:
     settings = _settings()
 
     assert settings.v2_enabled is True
+    assert settings.research_decision_mode == "model"
     assert settings.local_live_ready is True
     assert settings.production_ready is False
+
+
+def test_local_live_can_explicitly_freeze_deterministic_offline_decisions() -> None:
+    settings = _settings(research_decision_mode="deterministic")
+
+    assert settings.research_decision_mode == "deterministic"
+    assert _snapshot(settings).research_decision_mode == "deterministic"
 
 
 @pytest.mark.parametrize(
@@ -82,6 +91,7 @@ def test_memory_local_live_is_config_ready_but_never_production_ready() -> None:
             "RESEARCH_ROLLOUT_TENANT_ALLOWLIST_REQUIRED",
         ),
         ({"runtime_mode": "local-life"}, "literal_error"),
+        ({"research_decision_mode": "fallback"}, "literal_error"),
     ],
 )
 def test_local_live_rejects_invalid_mode_backend_or_empty_allowlists(

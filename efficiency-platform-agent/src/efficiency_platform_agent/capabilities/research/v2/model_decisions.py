@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import logging
 import re
+import time
 from dataclasses import replace
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -55,6 +57,8 @@ from .claims import ClaimProposalV2
 from .clustering import ClusterBucketV2, ClusterProposalV2
 from .evidence import EvidenceContextV2
 from .filtering import RELEVANCE_PROMPT_VERSION, SemanticRelevanceDecisionV2
+
+logger = logging.getLogger(__name__)
 
 
 class ResearchModelRuntime(Protocol):
@@ -117,6 +121,11 @@ class ResearchModelDecisions:
         lease: BudgetLeaseReferenceV2,
     ) -> object:
         if self.deterministic_fallback:
+            logger.info(
+                "event=research_model_deterministic_mode run_id=%s prompt_id=%s",
+                self.run_context.run_id,
+                prompt_id,
+            )
             return self._deterministic_decision(prompt_id, payload)
         if (
             lease.lease_id != self.binding.lease_id
@@ -204,11 +213,27 @@ class ResearchModelDecisions:
             JsonObject(),
             min(90_000, remaining.timeout_ms),
         )
+        started = time.monotonic()
+        logger.info(
+            "event=research_model_started run_id=%s prompt_id=%s payload_fields=%s",
+            self.run_context.run_id,
+            prompt_id,
+            len(payload),
+        )
         with bind_budget_execution(self.binding):
             try:
                 execution = await self.model_runtime.complete(
                     demand, request, remaining_budget=remaining, lease_context=context
                 )
+            except Exception as exc:
+                logger.warning(
+                    "event=research_model_failed run_id=%s prompt_id=%s error_type=%s elapsed_ms=%s",
+                    self.run_context.run_id,
+                    prompt_id,
+                    type(exc).__name__,
+                    int((time.monotonic() - started) * 1000),
+                )
+                raise
             finally:
                 self.binding.update_version(context.version)
         self.model_calls += len(execution.attempts)
@@ -216,8 +241,22 @@ class ResearchModelDecisions:
             execution.result.error is not None
             and execution.result.error.code == "BUDGET_EXHAUSTED"
         ):
+            logger.warning(
+                "event=research_model_failed run_id=%s prompt_id=%s reason=BUDGET_EXHAUSTED attempts=%s elapsed_ms=%s",
+                self.run_context.run_id,
+                prompt_id,
+                len(execution.attempts),
+                int((time.monotonic() - started) * 1000),
+            )
             raise ValueError("RESEARCH_MODEL_BUDGET_EXHAUSTED")
         if execution.result.error is not None or execution.result.message is None:
+            logger.warning(
+                "event=research_model_failed run_id=%s prompt_id=%s reason=PROVIDER_UNAVAILABLE attempts=%s elapsed_ms=%s",
+                self.run_context.run_id,
+                prompt_id,
+                len(execution.attempts),
+                int((time.monotonic() - started) * 1000),
+            )
             raise ValueError("RESEARCH_MODEL_UNAVAILABLE")
         content = execution.result.message.content
         value = None
@@ -227,7 +266,23 @@ class ResearchModelDecisions:
             except (ValueError, TypeError):
                 pass
         if value is None:
+            logger.warning(
+                "event=research_model_failed run_id=%s prompt_id=%s reason=DECISION_INVALID attempts=%s elapsed_ms=%s",
+                self.run_context.run_id,
+                prompt_id,
+                len(execution.attempts),
+                int((time.monotonic() - started) * 1000),
+            )
             raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+        logger.info(
+            "event=research_model_succeeded run_id=%s prompt_id=%s attempts=%s total_model_calls=%s degraded=%s elapsed_ms=%s",
+            self.run_context.run_id,
+            prompt_id,
+            len(execution.attempts),
+            self.model_calls,
+            bool(getattr(execution, "degraded", False)),
+            int((time.monotonic() - started) * 1000),
+        )
         return value
 
     def _deterministic_decision(

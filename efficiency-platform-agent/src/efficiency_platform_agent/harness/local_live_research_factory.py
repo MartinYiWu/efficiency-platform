@@ -499,7 +499,9 @@ def build_local_live_research_components(
                 binding=execution.binding,
                 brief=execution.brief,
                 remaining_budget=available,
-                deterministic_fallback=True,
+                deterministic_fallback=(
+                    settings.research_decision_mode == "deterministic"
+                ),
             ),
             output_stages=output,
         )

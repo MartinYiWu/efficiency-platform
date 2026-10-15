@@ -29,6 +29,7 @@ class PipelineVersionSnapshotV2:
     research_source_allowlist: tuple[str, ...]
     research_policy_version: str
     state_backend: Literal["memory", "postgres"]
+    research_decision_mode: Literal["model", "deterministic"] = "model"
     runtime_mode: Literal["local_live", "production"] = "production"
     rollout_mode: Literal["all", "tenant_allowlist"] = "all"
     rollout_tenant_allowlist: tuple[str, ...] = ()
@@ -327,6 +328,7 @@ class IntentV2ConversationAdapter:
             research_source_allowlist=settings.research_source_allowlist,
             research_policy_version=settings.research_policy_version,
             state_backend=settings.state_backend,
+            research_decision_mode=settings.research_decision_mode,
             runtime_mode=settings.runtime_mode,
             rollout_mode=settings.rollout_mode,
             rollout_tenant_allowlist=settings.rollout_tenant_allowlist,
@@ -345,6 +347,7 @@ class IntentV2ConversationAdapter:
             research_source_allowlist=(),
             research_policy_version="research-policy/rollout-not-allowed",
             state_backend=settings.state_backend,
+            research_decision_mode=settings.research_decision_mode,
             runtime_mode=settings.runtime_mode,
             rollout_mode=settings.rollout_mode,
             rollout_tenant_allowlist=settings.rollout_tenant_allowlist,

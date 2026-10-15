@@ -66,6 +66,7 @@ class ResearchPipelineSettings(BaseModel):
     research_pipeline_version: Literal["research-v1", "research-v2"] = "research-v1"
     runtime_mode: Literal["local_live", "production"] = "production"
     research_replan_enabled: bool = False
+    research_decision_mode: Literal["model", "deterministic"] = "model"
     research_source_allowlist: tuple[str, ...] = ()
     research_policy_version: str = Field(
         default="research-policy/disabled", min_length=1, max_length=128
