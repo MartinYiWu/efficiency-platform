@@ -91,8 +91,8 @@ async def setup(*, responses=None, body=True, model_output=None, target=1, three
     descriptor = descriptor.model_copy(
         update={
             "history_mode": "latest_only",
-            "freshness_sla": timedelta(days=7),
-            "max_lookback": timedelta(days=7),
+            "freshness_sla": timedelta(days=60),
+            "max_lookback": timedelta(days=60),
             "admission": descriptor.admission.model_copy(
                 update={"history_verified": True}
             ),
@@ -141,7 +141,15 @@ async def setup(*, responses=None, body=True, model_output=None, target=1, three
                     "run_id": context.run_id,
                     "budget_lease_id": binding.lease_id,
                 }
-            )
+            ),
+            "time_window": brief.time_window.model_copy(
+                update={
+                    "start": NOW - timedelta(days=2),
+                    "end": NOW + timedelta(days=1),
+                    "anchor": NOW,
+                    "original_text": "近两天",
+                }
+            ),
         }
     )
     key = LocalResearchRunKeyV2(
@@ -231,7 +239,7 @@ def candidate(**changes):
         "source_item_id": "1",
         "url": "https://blog.google/article",
         "title": "AI release",
-        "raw_published_at": "2026-09-15T00:00:00Z",
+        "raw_published_at": "2026-10-14T00:00:00Z",
         "discovered_via": "rss",
         "content_scope": "summary",
         "inline_content": "summary is not body",
@@ -239,6 +247,15 @@ def candidate(**changes):
     }
     values.update(changes)
     return CandidateRecordV2(**values)
+
+
+def test_candidate_identity_tolerates_observation_drift_but_not_source_drift():
+    original = candidate(heat_observation="100 points")
+    refreshed = original.model_copy(update={"heat_observation": "101 points"})
+    foreign = original.model_copy(update={"url": "https://other.example/item"})
+
+    assert module()._same_candidate_identity(original, refreshed)
+    assert not module()._same_candidate_identity(original, foreign)
 
 
 async def seed(case, item):
@@ -370,45 +387,52 @@ async def test_partial_exit_renders_three_at_round_limit_without_recollecting():
 def semantic_model(demand, request):
     data = json.loads(request.messages[-1].content)
     if demand.demand_version == "research.v2.relevance":
-        doc = data["document"]
+        documents = data.get("documents") or [data["document"]]
         return {
-            "document_id": doc["document_id"],
-            "document_content_hash": doc["content_hash"],
-            "brief_digest": data["brief"]["digest"]
-            if "digest" in data["brief"]
-            else _brief_digest(data["brief"]),
-            "outcome": "relevant",
-            "requirement_ids": [
-                item["requirement_id"] for item in data["brief"]["hard_requirements"]
-            ],
-            "source_excerpt": doc["text"],
-            "prompt_version": "research.v2.relevance@1.0.0",
+            "decisions": [
+                {
+                    "document_id": doc["document_id"],
+                    "document_content_hash": doc["content_hash"],
+                    "brief_digest": data["brief_digest"],
+                    "outcome": "relevant",
+                    "requirement_ids": [
+                        item["requirement_id"]
+                        for item in data["brief"]["hard_requirements"]
+                    ],
+                    "source_excerpt": doc["text"],
+                    "prompt_version": "research.v2.relevance@1.0.0",
+                }
+                for doc in documents
+            ]
         }
     if demand.demand_version == "research.v2.cluster":
         return []
     if demand.demand_version == "research.v2.replan":
         return {"action_ids": [item["action_id"] for item in data["allowed_actions"]]}
     evidence = data["evidence_context"]
-    return [
-        {
+    proposals = []
+    for event in data["events"]:
+        support_refs = [
+            ref
+            for ref in evidence["evidence_refs"]
+            if ref["document_id"] in event["member_document_ids"]
+        ]
+        proposals.append(
+            {
             "proposal_id": event["event_id"],
             "claim_key": "announcement",
             "brief_digest": evidence["brief_digest"],
             "prompt_version": "research.v2.claims@1.0.0",
             "event_id": event["event_id"],
-            "text": "Acme announced an AI release.",
+            "text": support_refs[0]["excerpt"],
             "claim_type": "announcement",
             "subject": "Acme",
             "assertion_mode": "attributed",
             "attributed_to": "Acme",
-            "support_refs": [
-                ref["evidence_id"]
-                for ref in evidence["evidence_refs"]
-                if ref["document_id"] in event["member_document_ids"]
-            ],
-        }
-        for event in data["events"]
-    ]
+            "support_refs": [ref["evidence_id"] for ref in support_refs],
+            }
+        )
+    return proposals
 
 
 def _brief_digest(data):
@@ -424,7 +448,7 @@ def rss_response():
         200,
         {"content-type": "application/rss+xml"},
         (
-            b'<rss version="2.0"><channel><title>Google</title><link>https://blog.google/</link><description>feed</description><item><title>Acme AI</title><link>https://blog.google/article</link><guid>1</guid><pubDate>Tue, 15 Sep 2026 00:00:00 GMT</pubDate><description>summary only</description></item></channel></rss>',
+            b'<rss version="2.0"><channel><title>Google</title><link>https://blog.google/</link><description>feed</description><item><title>Acme AI</title><link>https://blog.google/article</link><guid>1</guid><pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate><description>summary only</description></item></channel></rss>',
         ),
     )
 
@@ -605,7 +629,7 @@ async def test_old_publication_or_semantically_irrelevant_title_never_pass_filte
     def decide(demand, request):
         result = semantic_model(demand, request)
         if not changes:
-            result["outcome"] = "irrelevant"
+            result["decisions"][0]["outcome"] = "irrelevant"
         return result
 
     case = await setup(responses=[body_response()], model_output=decide)
@@ -719,7 +743,7 @@ async def test_exact_five_with_three_real_component_results_stays_partial():
     from efficiency_platform_agent.providers.research.transport import PinnedResponse
 
     items = "".join(
-        f"<item><title>Acme AI {i}</title><link>https://blog.google/{path}</link><guid>{i}</guid><pubDate>Tue, 15 Sep 2026 00:00:00 GMT</pubDate><description>summary</description></item>"
+        f"<item><title>Acme AI {i}</title><link>https://blog.google/{path}</link><guid>{i}</guid><pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate><description>summary</description></item>"
         for i, path in enumerate(("article", "second", "third"))
     )
     feed = PinnedResponse(

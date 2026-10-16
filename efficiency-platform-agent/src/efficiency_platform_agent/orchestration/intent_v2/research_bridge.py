@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -207,9 +207,27 @@ class ResearchBriefBuilderV2:
             output_requirements=output_requirements,
             quality_policy_id=policy_snapshot.quality_policy_id,
             policy_version=policy_snapshot.policy_version,
+            ranking_mode=_ranking_mode(research_goals),
             hard_requirements=hard_requirements,
             diagnostics=_diagnostics(frame, count_diagnostics),
         )
+
+
+def _ranking_mode(goals: tuple[GoalNodeV2, ...]) -> Literal["importance", "heat", "recency"]:
+    for goal in goals:
+        for parameter in goal.parameters:
+            if parameter.name == "ranking_mode" and parameter.value in {
+                "importance",
+                "heat",
+                "recency",
+            }:
+                return cast(Literal["importance", "heat", "recency"], parameter.value)
+    description = " ".join(goal.description for goal in goals)
+    if any(marker in description for marker in ("最热", "热门", "热度")):
+        return "heat"
+    if any(marker in description for marker in ("最新", "最近", "近期")):
+        return "recency"
+    return "importance"
 
 
 class EvidenceReusePolicyV2:

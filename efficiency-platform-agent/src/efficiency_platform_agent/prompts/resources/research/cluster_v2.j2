@@ -7,7 +7,7 @@
 4. 产品 v1/v2、不同型号、不同发布日期或不同事故批次必须分开；无法确认版本或事件等价时输出 uncertain，调用方会保留 singleton。
 5. 中英文或多域名内容只有在实体、事件类型、产品版本和核心事件事实一致时才能合并；转载数量不能变成多个独立佐证。
 6. 每个成员必须给出 event_type、product_version 和 semantic_equivalence。merge_basis 只能描述输入正文中的可核对依据。
-7. 输出必须绑定调用方给出的 brief_digest 与 Prompt 版本，只输出符合 proposal_schema 的 JSON；不输出 Markdown、工具请求、结论正文或隐藏思维过程。
+7. 输出必须绑定调用方给出的 brief_digest 与 Prompt 版本，只输出符合 proposal_schema 的一个 JSON 对象，提案放在 proposals 数组中；不输出 Markdown、工具请求、结论正文或隐藏思维过程。
 
 ResearchBriefV2 Schema：
 {{ brief_schema }}

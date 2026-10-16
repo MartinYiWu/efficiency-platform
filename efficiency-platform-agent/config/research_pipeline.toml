@@ -1,12 +1,12 @@
-# 运营助手 MVP 本地真实模式；只对开发租户 dev 启用。
+# 默认关闭；真实联调由启动环境显式启用。
 [pipeline]
-intent_pipeline_version = "intent-v2"
-research_pipeline_version = "research-v2"
-runtime_mode = "local_live"
-research_replan_enabled = true
+intent_pipeline_version = "intent-v1"
+research_pipeline_version = "research-v1"
+runtime_mode = "production"
+research_replan_enabled = false
 research_decision_mode = "model"
-research_source_allowlist = ["google_blog_rss", "langgraph_releases_atom", "hacker_news_api", "openai_news_rss", "huggingface_blog_rss"]
-research_policy_version = "research-policy/operations-mvp-1"
+research_source_allowlist = []
+research_policy_version = "research-policy/disabled"
 state_backend = "memory"
 rollout_mode = "tenant_allowlist"
-rollout_tenant_allowlist = ["dev"]
+rollout_tenant_allowlist = []

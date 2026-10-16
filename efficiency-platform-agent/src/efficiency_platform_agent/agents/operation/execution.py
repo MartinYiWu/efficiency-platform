@@ -8,6 +8,7 @@ from efficiency_platform_agent.agents.operation.scenarios.contracts import (
 from efficiency_platform_agent.contracts.deliverables import (
     DeliverableSetV1,
     DeliverableSetV2,
+    DeliverableSetV3,
 )
 from efficiency_platform_agent.contracts.research_v2 import (
     ResearchBriefV2,
@@ -63,7 +64,7 @@ class OperationUsage:
 class OperationExecution:
     """图节点消费的结果，保持 S6 契约原样并显式携带用量。"""
 
-    deliverables: DeliverableSetV1 | DeliverableSetV2 | None
+    deliverables: DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3 | None
     status: CompletionStatus
     usage: UsageSnapshot
     error_code: str | None = None

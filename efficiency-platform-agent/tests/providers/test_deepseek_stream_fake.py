@@ -226,6 +226,62 @@ async def test_complete_rejects_content_that_violates_json_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_complete_maps_finished_empty_content_to_stable_error() -> None:
+    response = _FakeResponse(
+        [_data({"choices": [{"delta": {}, "finish_reason": "stop"}]})]
+    )
+    provider = DeepSeekStreamingProvider(
+        _FakeHttp(response), "deepseek-chat", api_key="synthetic"
+    )
+
+    result = await provider.complete(_request())
+
+    assert result.message is None
+    assert result.error is not None
+    assert result.error.code == "PROVIDER_RESPONSE_INVALID"
+    assert result.error.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_complete_retries_finished_empty_content_once() -> None:
+    http = _SequencedFakeHttp(
+        [
+            _FakeResponse(
+                [_data({"choices": [{"delta": {}, "finish_reason": "stop"}]})]
+            ),
+            _FakeResponse(
+                [
+                    _data(
+                        {
+                            "choices": [
+                                {"delta": {"content": "ok"}, "finish_reason": "stop"}
+                            ]
+                        }
+                    )
+                ]
+            ),
+        ]
+    )
+    recorder = _DiagnosticRecorder()
+    provider = DeepSeekStreamingProvider(
+        http,
+        "deepseek-chat",
+        api_key="synthetic",
+        max_retries=1,
+        diagnostic_recorder=recorder,
+    )
+
+    result = await provider.complete(_request())
+
+    assert result.error is None
+    assert result.message is not None and result.message.content == "ok"
+    assert len(http.calls) == 2
+    assert "provider_empty_response_retrying" in {
+        item.event_name for item in recorder.records
+    }
+
+
+@pytest.mark.asyncio
 async def test_unsupported_developer_role_is_deterministically_mapped_to_system() -> None:
     response = _FakeResponse(
         [_data({"choices": [{"delta": {}, "finish_reason": "stop"}]})]

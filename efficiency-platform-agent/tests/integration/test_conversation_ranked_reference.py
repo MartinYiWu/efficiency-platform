@@ -13,6 +13,9 @@ from efficiency_platform_agent.contracts.intent import (
 from efficiency_platform_agent.contracts.responses import RunViewV1, UsageV1
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
 from efficiency_platform_agent.harness.errors import HarnessError
+from efficiency_platform_agent.harness.referenced_inputs import (
+    select_ranked_references,
+)
 from tests.api.test_conversation_routes import (
     RecordingRuntime,
     StubInterpreter,
@@ -217,6 +220,49 @@ async def test_follow_up_restores_latest_ranked_run_after_context_loss():
     assert source.referenced_inputs
     assert source.referenced_inputs[0].source_run_id == "run-1"
     assert second.run_id == "run-2"
+    assert interpreter.context_sizes == [0]
+
+
+@pytest.mark.asyncio
+async def test_follow_up_prefers_verified_snapshot_loader_over_public_output_version():
+    runtime, facade, interpreter, _ = await first_round()
+    persisted = select_ranked_references(
+        runtime.views[("tenant-a", "run-1")],
+        20,
+        tenant_id="tenant-a",
+        user_id="user-a",
+        conversation_id="conversation-a",
+    )
+    facade._contexts.clear()
+
+    async def restore(*_args) -> str:
+        return "run-1"
+
+    async def load(*_args, rank, count):
+        assert rank is None
+        assert count == 20
+        return persisted
+
+    facade.ranked_reference_resolver = restore
+    facade.ranked_reference_loader = load
+    runtime.reads.clear()
+
+    await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="把刚才真实收集到的热点写成公众号周更推文",
+            request_id="rewrite-from-snapshot",
+            user_id="user-a",
+        ),
+    )
+    await runtime.wait()
+
+    source = facade.submissions._entries[
+        ("tenant-a", "rewrite-from-snapshot")
+    ].submission
+    assert source.referenced_inputs == persisted
+    assert runtime.reads == []
     assert interpreter.context_sizes == [0]
 
 

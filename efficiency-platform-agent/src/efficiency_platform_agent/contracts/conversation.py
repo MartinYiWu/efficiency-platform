@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +15,22 @@ RunDisplayStatus = Literal[
     "cancelled",
     "degraded_succeeded",
 ]
+
+
+class ConversationArtifactV1(BaseModel):
+    """由 Java 按当前身份和会话授权的可引用制品。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    artifact_id: str = Field(min_length=1, max_length=128)
+    root_artifact_id: str = Field(min_length=1, max_length=128)
+    version: int = Field(ge=1)
+    artifact_type: str = Field(min_length=1, max_length=128)
+    scenario: str = Field(min_length=1, max_length=128)
+    platform: str | None = Field(default=None, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
+    content: dict[str, Any]
+    body_markdown: str = Field(min_length=1, max_length=100_000)
 
 
 class ConversationMessageV1(BaseModel):
@@ -35,6 +51,7 @@ class ConversationMessageV1(BaseModel):
         max_length=0,
         description="文件输入保留字段，本轮必须为空。",
     )
+    artifacts: tuple[ConversationArtifactV1, ...] = Field(default=(), max_length=8)
 
 
 class ConversationSubmitViewV1(BaseModel):
@@ -53,4 +70,9 @@ class ConversationSubmitViewV1(BaseModel):
     )
 
 
-__all__ = ["ConversationMessageV1", "ConversationSubmitViewV1", "RunDisplayStatus"]
+__all__ = [
+    "ConversationArtifactV1",
+    "ConversationMessageV1",
+    "ConversationSubmitViewV1",
+    "RunDisplayStatus",
+]

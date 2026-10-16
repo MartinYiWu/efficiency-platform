@@ -92,7 +92,7 @@ def _parse_worker(
                 include_links=False,
             )
         elif operation == "feed" and isinstance(payload, bytes):
-            import feedparser  # type: ignore[import-not-found]
+            import feedparser  # type: ignore[import-untyped]
 
             result = _to_plain_value(feedparser.parse(payload))
         else:

@@ -53,7 +53,10 @@ from efficiency_platform_agent.contracts.intent import (
     IntentEnvelopeV1,
     IntentRequirementsV1,
 )
-from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
+from efficiency_platform_agent.contracts.referenced_inputs import (
+    ReferencedInput,
+    ReferencedRankedInput,
+)
 from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
 from efficiency_platform_agent.contracts.research_request_policy import (
     has_explicit_time_window,
@@ -327,6 +330,11 @@ def _requested_deliverables(manifest, intent: IntentEnvelopeV1):
         key = item.strip().lower()
         canonical = _PLATFORM_ALIASES.get(key)
         if canonical is None:
+            matches = {
+                value for alias, value in _PLATFORM_ALIASES.items() if alias in key
+            }
+            canonical = next(iter(matches)) if len(matches) == 1 else None
+        if canonical is None:
             raise HarnessError(
                 "UNSUPPORTED_PLATFORM",
                 "包含暂不支持的平台，请改为小红书、微信公众号或今日头条",
@@ -571,6 +579,21 @@ class IntentV2ConversationCoordinator(Protocol):
     ) -> RunPipelinePreparation | IntentV2ConversationDecision | None: ...
 
 
+class RankedReferenceLoader(Protocol):
+    """从同身份、同会话的内部研究快照恢复有限引用。"""
+
+    async def __call__(
+        self,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+        source_run_id: str,
+        *,
+        rank: int | None,
+        count: int | None,
+    ) -> tuple[ReferencedRankedInput, ...]: ...
+
+
 class ConversationService:
     """把基础会话与运营意图分派到受控 DIRECT 或 MULTI_AGENT Run。"""
 
@@ -594,6 +617,7 @@ class ConversationService:
             [str, str, str], Awaitable[str | None]
         ]
         | None = None,
+        ranked_reference_loader: RankedReferenceLoader | None = None,
         max_contexts: int = 256,
         max_requests: int = 2_048,
         max_active_runs: int = 1_024,
@@ -617,6 +641,7 @@ class ConversationService:
         self.intent_v2_coordinator = intent_v2_coordinator
         self.ranked_reference_validator = ranked_reference_validator
         self.ranked_reference_resolver = ranked_reference_resolver
+        self.ranked_reference_loader = ranked_reference_loader
         self.max_contexts = max_contexts
         self.max_requests = max_requests
         self.max_active_runs = max_active_runs
@@ -768,7 +793,7 @@ class ConversationService:
         """在后台解释意图；全局锁不跨任何模型 I/O。"""
         started = self.monotonic()
         async with entry.turn_lock:
-            referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
+            referenced_inputs: tuple[ReferencedInput, ...] = ()
             rank = requested_rank(message.message)
             ranked_set_size = requested_ranked_set_size(message.message)
             reference_intent = None
@@ -781,31 +806,41 @@ class ConversationService:
                         previous_run = (restored_run_id, message.user_id)
                 if previous_run is None or previous_run[1] != message.user_id:
                     raise reference_error()
-                try:
-                    previous_view = await self.runtime.get_run(
-                        previous_run[0], tenant_id
+                if self.ranked_reference_loader is not None:
+                    referenced_inputs = await self.ranked_reference_loader(
+                        tenant_id,
+                        message.user_id,
+                        conversation_id,
+                        previous_run[0],
+                        rank=rank,
+                        count=ranked_set_size,
                     )
-                except HarnessError as error:
-                    raise reference_error() from error
-                referenced_inputs = (
-                    (
-                        select_ranked_reference(
+                else:
+                    try:
+                        previous_view = await self.runtime.get_run(
+                            previous_run[0], tenant_id
+                        )
+                    except HarnessError as error:
+                        raise reference_error() from error
+                    referenced_inputs = (
+                        (
+                            select_ranked_reference(
+                                previous_view,
+                                rank,
+                                tenant_id=tenant_id,
+                                user_id=message.user_id,
+                                conversation_id=conversation_id,
+                            ),
+                        )
+                        if rank is not None
+                        else select_ranked_references(
                             previous_view,
-                            rank,
+                            ranked_set_size or 1,
                             tenant_id=tenant_id,
                             user_id=message.user_id,
                             conversation_id=conversation_id,
-                        ),
+                        )
                     )
-                    if rank is not None
-                    else select_ranked_references(
-                        previous_view,
-                        ranked_set_size or 1,
-                        tenant_id=tenant_id,
-                        user_id=message.user_id,
-                        conversation_id=conversation_id,
-                    )
-                )
                 if self.ranked_reference_validator is not None:
                     for reference in referenced_inputs:
                         await self.ranked_reference_validator(reference)
@@ -863,6 +898,8 @@ class ConversationService:
                 )
                 if isinstance(v2_preparation, IntentV2ConversationDecision):
                     v2_decision = v2_preparation
+                    if v2_decision.referenced_artifact is not None:
+                        referenced_inputs = (v2_decision.referenced_artifact,)
                 elif v2_preparation is not None:
                     entry.pending_intent = None
                     entry.pending_v2 = False

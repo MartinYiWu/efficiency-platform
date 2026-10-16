@@ -344,6 +344,9 @@ async def test_real_composition_root_registers_local_execution_logger(monkeypatc
         local_real_factory, "LocalExecutionLogger", lambda: execution_logger
     )
     settings = S7IntegrationSettings(
+            runtime_database_url=SecretStr(
+                "mysql+asyncmy://synthetic:synthetic@127.0.0.1:3306/ai_efficiency_platform_agent"
+            ),
         deepseek_base_url=SecretStr("https://synthetic.invalid"),
         deepseek_api_key=SecretStr("synthetic-key"),
         deepseek_fast_model=SecretStr("synthetic-fast"),

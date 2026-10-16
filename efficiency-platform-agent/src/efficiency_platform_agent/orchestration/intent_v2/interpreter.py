@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -59,6 +60,7 @@ type DeterministicPatchResolver = Callable[
 
 _MAX_MODEL_OUTPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 8_000
+logger = logging.getLogger("efficiency_platform_agent.execution")
 
 
 class OperationIntentPlanningError(RuntimeError):
@@ -103,12 +105,14 @@ class OperationIntentPlanningAgent:
         user_text: str,
         visible_history: tuple[str, ...],
         remaining_budget: RemainingBudget,
+        available_artifacts: tuple[dict[str, object], ...] = (),
     ) -> IntentPlanV1:
         return (
             await self.execute(
                 run_id=run_id,
                 user_text=user_text,
                 visible_history=visible_history,
+                available_artifacts=available_artifacts,
                 remaining_budget=remaining_budget,
             )
         ).plan
@@ -120,6 +124,7 @@ class OperationIntentPlanningAgent:
         user_text: str,
         visible_history: tuple[str, ...],
         remaining_budget: RemainingBudget,
+        available_artifacts: tuple[dict[str, object], ...] = (),
     ) -> OperationIntentPlanningExecution:
         if not isinstance(run_id, str) or not run_id.strip():
             raise ValueError("run_id 必须为非空字符串")
@@ -135,6 +140,7 @@ class OperationIntentPlanningAgent:
         bounded_history = tuple(item[-4_000:] for item in visible_history[-12:])
         context_payload = {
             "visible_history": bounded_history,
+            "available_artifacts": available_artifacts,
             "output_contract": "intent-plan/1",
             "allowed_scenarios": [
                 "industry_digest",
@@ -168,6 +174,12 @@ class OperationIntentPlanningAgent:
                 raise OperationIntentPlanningError(
                     "INTENT_PROVIDER_UNAVAILABLE", "意图规划模型当前不可用"
                 ) from first_error
+            first_errors = _intent_validation_errors(first_error)
+            logger.warning(
+                "event=intent_plan_validation_failed run_id=%s attempt=1 errors=%s",
+                run_id,
+                _intent_error_summary(first_errors),
+            )
             invalid_output = (
                 "null"
                 if first.result.message is None
@@ -180,7 +192,7 @@ class OperationIntentPlanningAgent:
                 user_text=user_text,
                 context_payload=context_payload,
                 previous_output=invalid_output,
-                validation_errors={"code": "INTENT_PLAN_INVALID"},
+                validation_errors=first_errors,
             )
             repaired = await self._invoke(repair, repair_budget)
             try:
@@ -190,6 +202,15 @@ class OperationIntentPlanningAgent:
                     repaired=True,
                 )
             except (TypeError, ValueError, ValidationError) as final_error:
+                if repaired.result.error is None:
+                    logger.error(
+                        "event=intent_plan_validation_failed run_id=%s "
+                        "attempt=2 errors=%s",
+                        run_id,
+                        _intent_error_summary(
+                            _intent_validation_errors(final_error)
+                        ),
+                    )
                 code = (
                     "INTENT_PROVIDER_UNAVAILABLE"
                     if repaired.result.error is not None
@@ -255,10 +276,7 @@ class OperationIntentPlanningAgent:
                         "response_format",
                         JsonObject((("type", "json_object"),)),
                     ),
-                    (
-                        "json_schema",
-                        _immutable_json(assembled.output_contract.json_schema),
-                    ),
+                    ("thinking", JsonObject((("type", "disabled"),))),
                 )
             ),
             timeout_ms=max(
@@ -323,6 +341,32 @@ class OperationIntentPlanningAgent:
             provider_calls=len(executions),
             repaired=repaired,
         )
+
+
+def _intent_validation_errors(error: Exception) -> list[dict[str, str]]:
+    if isinstance(error, ValidationError):
+        return [
+            {
+                "location": ".".join(str(part) for part in item["loc"]),
+                "type": item["type"],
+                "message": item["msg"],
+            }
+            for item in error.errors(include_input=False, include_url=False)[:20]
+        ]
+    return [
+        {
+            "location": "root",
+            "type": "intent_plan_invalid",
+            "message": str(error)[:160],
+        }
+    ]
+
+
+def _intent_error_summary(errors: list[dict[str, str]]) -> str:
+    return ";".join(
+        f"{item['location']}:{item['type']}:{item['message'][:160]}"
+        for item in errors
+    )[:2_000]
 
 
 @dataclass(frozen=True, slots=True)
@@ -431,8 +475,13 @@ class _InvocationState:
 
 
 class _PatchInvalid(ValueError):
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        details: tuple[dict[str, str], ...] = (),
+    ) -> None:
         self.reason = reason
+        self.details = details
         super().__init__(reason)
 
 
@@ -569,6 +618,10 @@ class ControlledIntentInterpreterV2:
             patch = self._parse_patch(first_content, previous)
         except _PatchInvalid as error:
             repair_attempted = True
+            logger.warning(
+                "event=intent_v2_patch_validation_failed attempt=1 errors=%s",
+                _patch_error_summary(error),
+            )
             repair_prompt = self._render_prompt(
                 state,
                 "intent.v2.repair",
@@ -588,6 +641,10 @@ class ControlledIntentInterpreterV2:
             try:
                 patch = self._parse_patch(repaired_content, previous)
             except _PatchInvalid as final_error:
+                logger.error(
+                    "event=intent_v2_patch_validation_failed attempt=2 errors=%s",
+                    _patch_error_summary(final_error),
+                )
                 raise self._error(
                     "INTENT_SCHEMA_INVALID",
                     "模型返回的 IntentPatchV2 结构无效",
@@ -883,8 +940,27 @@ class ControlledIntentInterpreterV2:
     ) -> IntentPatchV2:
         try:
             patch = IntentPatchV2.model_validate_json(content)
-        except (TypeError, ValueError, ValidationError) as error:
-            raise _PatchInvalid("INTENT_SCHEMA_INVALID") from error
+        except ValidationError as error:
+            details = tuple(
+                {
+                    "location": ".".join(str(part) for part in item["loc"]),
+                    "type": item["type"],
+                    "message": item["msg"],
+                }
+                for item in error.errors(include_input=False, include_url=False)[:20]
+            )
+            raise _PatchInvalid("INTENT_SCHEMA_INVALID", details) from error
+        except (TypeError, ValueError) as error:
+            raise _PatchInvalid(
+                "INTENT_SCHEMA_INVALID",
+                (
+                    {
+                        "location": "root",
+                        "type": "json_invalid",
+                        "message": str(error)[:160],
+                    },
+                ),
+            ) from error
         expected_revision = (
             0
             if patch.dialog_act == "new_task" or previous is None
@@ -977,6 +1053,7 @@ def _model_options() -> JsonObject:
         (
             ("temperature", 0),
             ("response_format", JsonObject((("type", "json_object"),))),
+            ("thinking", JsonObject((("type", "disabled"),))),
         )
     )
 
@@ -1042,6 +1119,7 @@ def _validation_error_payload(
     return json.dumps(
         {
             "code": error.reason,
+            "details": list(error.details),
             "expected_current_revision": 0 if previous is None else previous.revision,
             "new_task_base_revision": 0,
         },
@@ -1051,24 +1129,21 @@ def _validation_error_payload(
     )
 
 
+def _patch_error_summary(error: _PatchInvalid) -> str:
+    if not error.details:
+        return error.reason
+    return ";".join(
+        f"{item['location']}:{item['type']}:{item['message'][:160]}"
+        for item in error.details
+    )[:2_000]
+
+
 def _plain_json(value: JsonValue) -> object:
     if isinstance(value, JsonObject):
         return {key: _plain_json(item) for key, item in value.items}
     if isinstance(value, tuple):
         return [_plain_json(item) for item in value]
     return value
-
-
-def _immutable_json(value: object) -> JsonValue:
-    if value is None or isinstance(value, (str, bool, int, float)):
-        return value
-    if isinstance(value, Mapping):
-        return JsonObject(
-            tuple((str(key), _immutable_json(item)) for key, item in value.items())
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_immutable_json(item) for item in value)
-    raise TypeError("value 不是 JSON 值")
 
 
 __all__ = [

@@ -169,7 +169,7 @@ async def test_operation_agent_keeps_native_v1_only_when_configured():
 
 def test_unknown_collection_version_is_rejected_at_composition():
     with pytest.raises(ValueError, match="DELIVERABLE_SET_VERSION_UNSUPPORTED"):
-        build_test_agent(deliverable_set_contract_version="deliverable-set/3")
+        build_test_agent(deliverable_set_contract_version="deliverable-set/4")
 
 
 def research_case(outcome_name, run_id="run-research-v2"):

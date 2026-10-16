@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import cast
+from typing import Literal, cast
 
 from efficiency_platform_agent.capabilities.research.v2.claims import (
     _numbers,
@@ -21,6 +22,12 @@ from efficiency_platform_agent.capabilities.research.v2.evidence import (
 from efficiency_platform_agent.capabilities.research.v2.output_verifier import (
     OutputVerificationPolicyV2,
     OutputVerifier,
+)
+from efficiency_platform_agent.capabilities.research.v2.ranking import (
+    EventRankingObservationV2,
+    HeatMetric,
+    RankingMode,
+    rank_events,
 )
 from efficiency_platform_agent.capabilities.research.v2.renderer import render_markdown
 from efficiency_platform_agent.capabilities.research.v2.source_families import (
@@ -55,6 +62,11 @@ from .graph import ResearchStage, ResearchStageUpdateV2, _terminal_patch
 from .state import ResearchGraphState
 
 
+def _claim_title(value: str) -> str:
+    sentence = re.split(r"(?<=[。！？.!?])\s*", value.strip(), maxsplit=1)[0]
+    return sentence[:200].strip()
+
+
 class LocalLiveResearchOutcomeMaterializer:
     """身份、原父预算和取消信号均由组合根注入；默认输出不调用模型。"""
 
@@ -67,6 +79,9 @@ class LocalLiveResearchOutcomeMaterializer:
         binding: BudgetExecutionBinding,
         deadline_monotonic: float,
         cancellation_signal: CancellationPort,
+        ranking_basis: Literal[
+            "importance", "heat", "recency", "evidence_order", "model_event_order"
+        ] = "evidence_order",
         draft_generator: Callable[
             [ResearchBriefV2, DeliveryPackV2], Awaitable[DeliveryDraftV2]
         ]
@@ -88,6 +103,15 @@ class LocalLiveResearchOutcomeMaterializer:
         self.deadline_monotonic = deadline_monotonic
         self.cancellation_signal = cancellation_signal
         self.draft_generator = draft_generator
+        if ranking_basis not in {
+            "importance",
+            "heat",
+            "recency",
+            "evidence_order",
+            "model_event_order",
+        }:
+            raise ValueError("RESEARCH_RANKING_BASIS_INVALID")
+        self.ranking_basis = ranking_basis
 
     def _control(self, state: ResearchGraphState) -> None:
         if state.get("cancelled") or self.cancellation_signal.is_requested():
@@ -195,8 +219,7 @@ class LocalLiveResearchOutcomeMaterializer:
             if (
                 any(ref.document_id not in members for ref in selected)
                 or not any(
-                    docs[ref.document_id].content_scope
-                    in {"summary", "full", "platform_text"}
+                    docs[ref.document_id].content_scope in {"full", "platform_text"}
                     for ref in selected
                 )
                 or claim.subject.casefold() not in excerpts.casefold()
@@ -282,9 +305,14 @@ class LocalLiveResearchOutcomeMaterializer:
         state: ResearchGraphState,
         snapshot: EvidenceSnapshotV2,
     ) -> DeliveryPackV2:
-        pack = DeliveryPackBuilder().build(
-            self.brief, self._outcome(facts, state), snapshot
-        )
+        outcome = self._outcome(facts, state)
+        if self.ranking_basis in {"importance", "heat", "recency"}:
+            outcome = outcome.model_copy(
+                update={
+                    "usable_event_ids": self._ranked_event_ids(facts, snapshot)
+                }
+            )
+        pack = DeliveryPackBuilder().build(self.brief, outcome, snapshot)
         documents = {item.document_id: item for item in snapshot.documents}
         family_by_document = {
             document_id: family.family_id
@@ -297,7 +325,7 @@ class LocalLiveResearchOutcomeMaterializer:
             event.model_copy(
                 update={
                     # 文档标题是未核验元数据，不能继承正文的 verified 标签。
-                    "title": event.claim_texts[0][:200].strip(),
+                    "title": _claim_title(event.claim_texts[0]),
                     "citations": tuple(
                         citation.model_copy(
                             update={
@@ -326,13 +354,29 @@ class LocalLiveResearchOutcomeMaterializer:
             )
             for event in pack.events
         )
-        ordering_limitation = "条目按公开来源的发现顺序排列。"
+        ordering_limitation = (
+            "条目按来源提供的可比较热度指标归一化排序；缺少热度指标的条目按时间排序。"
+            if self.ranking_basis == "heat"
+            else (
+                "条目按事件时间从近到远排序。"
+                if self.ranking_basis == "recency"
+                else (
+                    "条目按可核验的重要性观察排序；缺少观察时按事件时间排序。"
+                    if self.ranking_basis == "importance"
+                    else (
+                        "条目按模型事件顺序排列。"
+                        if self.ranking_basis == "model_event_order"
+                        else "条目顺序沿用上游已核验事件顺序；未生成重要性或热度评分。"
+                    )
+                )
+            )
+        )
         pack = pack.model_copy(
             update={
                 "events": events,
                 "output_verified": True,
                 "quality_report_id": state["quality_report_id"],
-                "ranking_basis": "evidence_order",
+                "ranking_basis": self.ranking_basis,
                 "summary": f"{pack.summary} {ordering_limitation}",
                 "limitations": (
                     *pack.limitations,
@@ -341,6 +385,45 @@ class LocalLiveResearchOutcomeMaterializer:
             }
         )
         return pack.model_copy(update={"content": render_markdown(pack)})
+
+    def _ranked_event_ids(
+        self, facts: LocalResearchRunFactsV2, snapshot: EvidenceSnapshotV2
+    ) -> tuple[str, ...]:
+        observations: list[EventRankingObservationV2] = []
+        for event in snapshot.events:
+            metrics: dict[tuple[str, HeatMetric], float] = {}
+            for document_id in event.member_document_ids:
+                document = facts.documents[document_id]
+                candidate = facts.candidates.get(document.candidate_id)
+                if candidate is None or not candidate.heat_observation:
+                    continue
+                for part in candidate.heat_observation.split(";"):
+                    match = re.fullmatch(r"hn_(score|descendants)=([0-9]+)", part)
+                    if match is None:
+                        continue
+                    metric: HeatMetric = (
+                        "score" if match.group(1) == "score" else "comments"
+                    )
+                    key = (candidate.source_id, metric)
+                    metrics[key] = max(metrics.get(key, 0.0), float(match.group(2)))
+            for (source_id, heat_metric), value in sorted(metrics.items()):
+                observations.append(
+                    EventRankingObservationV2(
+                        event_id=event.event_id,
+                        observation_type="heat",
+                        observed_at=facts.created_at,
+                        snapshot_id=f"{self.key.run_id}:{source_id}:heat",
+                        platform_id=source_id,
+                        metric=heat_metric,
+                        metric_value=value,
+                    )
+                )
+        ranked = rank_events(
+            snapshot.events,
+            cast(RankingMode, self.ranking_basis),
+            tuple(observations),
+        )
+        return tuple(item.event_id for item in ranked.items)
 
     async def _generate(
         self, pack: DeliveryPackV2, state: ResearchGraphState

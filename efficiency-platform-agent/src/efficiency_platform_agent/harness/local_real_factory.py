@@ -8,6 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -36,9 +37,13 @@ from efficiency_platform_agent.conversation.intent_v2_adapter import (
     IntentV2PreparationDelegate,
     PipelineVersionSnapshotV2,
 )
+from efficiency_platform_agent.conversation.operation_intent_coordinator import (
+    OperationIntentPlanningCoordinator,
+)
 from efficiency_platform_agent.conversation.service import (
     ConversationService,
     ConversationSubmissionStore,
+    IntentV2ConversationCoordinator,
 )
 from efficiency_platform_agent.core.budget import BudgetGuard
 from efficiency_platform_agent.core.diagnostics import NoopDiagnosticRecorder
@@ -46,6 +51,7 @@ from efficiency_platform_agent.core.enums import StrategyMode
 from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
 from efficiency_platform_agent.core.ports import ModelProvider
 from efficiency_platform_agent.core.run import ExecutionBudget
+from efficiency_platform_agent.core.runtime_ports import RunEventStore, RunRepository
 from efficiency_platform_agent.harness.operation_agent_factory import (
     build_operation_agent,
 )
@@ -66,6 +72,9 @@ from efficiency_platform_agent.orchestration.cancellation import (
     InMemoryCancellationSignal,
 )
 from efficiency_platform_agent.orchestration.intent_interpreter import IntentInterpreter
+from efficiency_platform_agent.orchestration.intent_v2.interpreter import (
+    OperationIntentPlanningAgent,
+)
 from efficiency_platform_agent.orchestration.registry import GraphRegistry
 from efficiency_platform_agent.orchestration.runtime import GraphRuntime
 from efficiency_platform_agent.orchestration.scenario_resolver import ScenarioResolver
@@ -76,12 +85,15 @@ from efficiency_platform_agent.persistence.in_memory import (
 from efficiency_platform_agent.persistence.mysql_ranked_references import (
     InMemoryRankedReferenceRepository,
     MySqlRankedReferenceRepository,
+    RankedReferenceRepository,
 )
 from efficiency_platform_agent.persistence.mysql_runtime import (
     MySqlRunEventStore,
     MySqlRunRepository,
     MySqlRuntimeDatabase,
 )
+from efficiency_platform_agent.prompts.mysql_repository import MySqlPromptRepository
+from efficiency_platform_agent.prompts.runtime import PromptAssembler
 from efficiency_platform_agent.providers.deepseek_stream import (
     DeepSeekStreamingProvider,
 )
@@ -210,7 +222,9 @@ def build_local_agent_application(
     live_acceptance_service: LiveAcceptanceService | None = None,
     live_acceptance_authorizations: LiveAcceptanceAuthorizationStore | None = None,
     live_acceptance_budget_binder: LiveAcceptanceBudgetBinder | None = None,
-    deliverable_set_contract_version: Literal["deliverable-set/1", "deliverable-set/2"]
+    deliverable_set_contract_version: Literal[
+        "deliverable-set/1", "deliverable-set/2", "deliverable-set/3"
+    ]
     | None = None,
 ) -> LocalAgentApplication:
     """默认装配真实 DeepSeek；Fake Provider 必须显式开启测试模式。"""
@@ -242,6 +256,9 @@ def build_local_agent_application(
         raise RuntimeError("LIVE_ACCEPTANCE_PERSISTENCE_NOT_READY")
     resolved = settings or S7IntegrationSettings.from_env_file(env_file)
     runtime_database: MySqlRuntimeDatabase | None = None
+    run_repository: RunRepository
+    run_event_store: RunEventStore
+    ranked_reference_repository: RankedReferenceRepository
     if test_mode:
         run_repository = InMemoryRunRepository()
         run_event_store = InMemoryRunEventStore()
@@ -364,8 +381,8 @@ def build_local_agent_application(
         40,
         60 if local_live_mode else 10,
         64_000,
-        32_000,
-        180_000 if local_live_mode else 300_000,
+        64_000 if local_live_mode else 32_000,
+        240_000 if local_live_mode else 300_000,
         1_000_000,
     )
     if resolved_research_v2.v2_enabled and not auto_local_live:
@@ -448,6 +465,7 @@ def build_local_agent_application(
         research_provider = ResearchV2ProviderAdapter(
             cast(ResearchServiceV2, research_service_v2),
             cast(ResearchBriefStoreV2, research_v2_state_store),
+            timeout=timedelta(minutes=4),
         )
     else:
         if not research_enabled:
@@ -457,10 +475,21 @@ def build_local_agent_application(
             research_provider = FreePublicResearchProvider(recorder=execution_logger)
     if research_provider is None and research_reason_code is None:
         research_reason_code = "RESEARCH_PROVIDER_NOT_CONFIGURED"
+    prompt_assembler = (
+        PromptAssembler(
+            MySqlPromptRepository(runtime_database.engine), environment="dev"
+        )
+        if runtime_database is not None
+        else None
+    )
     resolved_deliverable_set_contract_version = deliverable_set_contract_version or (
-        "deliverable-set/2"
-        if isinstance(research_provider, ResearchV2ProviderAdapter)
-        else "deliverable-set/1"
+        "deliverable-set/3"
+        if not test_mode
+        else (
+            "deliverable-set/2"
+            if isinstance(research_provider, ResearchV2ProviderAdapter)
+            else "deliverable-set/1"
+        )
     )
     if local_execution_logger is not None:
         local_execution_logger.log_capability(
@@ -478,6 +507,7 @@ def build_local_agent_application(
             research_reason_code or "RESEARCH_PROVIDER_NOT_CONFIGURED"
         ),
         deliverable_set_contract_version=resolved_deliverable_set_contract_version,
+        prompt_assembler=prompt_assembler,
     )
     registry.register(
         build_operation_multi_agent_registration(operation_agent, submissions.resolve)
@@ -485,6 +515,19 @@ def build_local_agent_application(
     if local_execution_logger is not None:
         runtime.add_run_event_listener(local_execution_logger.on_run_event)
         runtime.add_run_state_listener(local_execution_logger.on_run_state)
+    ranked_reference_validator = (
+        LocalLiveRankedReferenceValidator(
+            local_live_components.ranked_reference_repository
+        )
+        if local_live_components is not None
+        else None
+    )
+    intent_coordinator: IntentV2ConversationCoordinator = intent_v2_adapter
+    if prompt_assembler is not None:
+        intent_coordinator = OperationIntentPlanningCoordinator(
+            OperationIntentPlanningAgent(model_runtime, prompt_assembler),
+            research_coordinator=intent_v2_adapter,
+        )
     conversation = ConversationService(
         runtime=runtime,
         # 真实模型结构化意图首包存在波动，组合根在 Run 总预算内给意图阶段 60 秒。
@@ -492,12 +535,16 @@ def build_local_agent_application(
         resolver=ScenarioResolver(),
         submissions=submissions,
         direct_submissions=direct_submissions,
-        intent_v2_coordinator=intent_v2_adapter,
-        ranked_reference_validator=(
-            LocalLiveRankedReferenceValidator(
-                local_live_components.ranked_reference_repository
-            )
-            if local_live_components is not None
+        intent_v2_coordinator=intent_coordinator,
+        ranked_reference_validator=ranked_reference_validator,
+        ranked_reference_resolver=(
+            ranked_reference_validator.latest_source_run_id
+            if ranked_reference_validator is not None
+            else None
+        ),
+        ranked_reference_loader=(
+            ranked_reference_validator.resolve
+            if ranked_reference_validator is not None
             else None
         ),
     )

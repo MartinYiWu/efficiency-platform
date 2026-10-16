@@ -24,6 +24,7 @@ const rankingBasisLabel = {
   heat: '热度',
   mixed: '综合排序',
   evidence_order: '证据顺序',
+  model_event_order: '模型事件顺序',
 } as const;
 
 function safeExternalHref(url: string): string | null {

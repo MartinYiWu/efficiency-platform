@@ -10,6 +10,7 @@ import type {
   DeliverableSetDto,
   DeliverableSetV1,
   DeliverableSetV2,
+  DeliverableSetV3,
   DeliverableV1,
   DiagnosisContentV2,
   DiagnosisDeliverableV2,
@@ -53,7 +54,14 @@ const verificationStatusSchema = z.enum([
   'unverified',
   'conflicted',
 ]);
-const rankingBasisSchema = z.enum(['importance', 'recency', 'heat', 'mixed', 'evidence_order']);
+const rankingBasisSchema = z.enum([
+  'importance',
+  'recency',
+  'heat',
+  'mixed',
+  'evidence_order',
+  'model_event_order',
+]);
 const warningV2Schema: z.ZodType<WarningV2> = z
   .object({
     code: z.string().min(1).max(100),
@@ -314,6 +322,244 @@ export const deliverableSetV2Schema: z.ZodType<DeliverableSetV2> = z
   })
   .strict();
 
+const nonEmptyString = z.string().min(1);
+const objectList = z.array(z.record(z.string(), jsonValueSchema)).min(1);
+const metricDefinitionV3Schema = z
+  .object({
+    name: nonEmptyString,
+    definition: nonEmptyString,
+    observation_period: nonEmptyString,
+    purpose: nonEmptyString,
+  })
+  .strict();
+const rankedDigestContentV3Schema = z
+  .object({
+    kind: z.literal('ranked_digest'),
+    topic: nonEmptyString,
+    time_window: nonEmptyString,
+    items: z
+      .array(
+        z
+          .object({
+            rank: z.number().int().min(1),
+            title: nonEmptyString,
+            event_summary: nonEmptyString,
+            why_it_matters: nonEmptyString,
+            operator_insight: nonEmptyString,
+            occurred_at: z.string().nullable(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+    actual_count: z.number().int().min(1).max(100),
+  })
+  .strict()
+  .refine((value) => value.actual_count === value.items.length, '热点实际数量不一致');
+const platformContentV3Schema = z
+  .object({
+    kind: z.literal('platform_content'),
+    platform: z.enum(['wechat_official_account', 'xiaohongshu', 'toutiao']),
+    title: nonEmptyString,
+    introduction: nonEmptyString,
+    sections: z
+      .array(
+        z
+          .object({
+            heading: nonEmptyString,
+            facts: z.array(z.string()),
+            analysis: z.array(z.string()),
+            operator_takeaway: nonEmptyString,
+          })
+          .strict(),
+      )
+      .min(1),
+    closing: nonEmptyString,
+    hashtags: z.array(z.string()),
+  })
+  .strict();
+const brandPlanV3Schema = z
+  .object({
+    kind: z.literal('brand_plan'),
+    current_context: z.array(nonEmptyString).min(1),
+    objectives: z.array(nonEmptyString).min(1),
+    positioning: nonEmptyString,
+    audience_segments: objectList,
+    value_proposition: z.array(nonEmptyString).min(1),
+    content_pillars: objectList,
+    channel_strategy: objectList,
+    roadmap: objectList,
+    metric_framework: z.array(metricDefinitionV3Schema).min(1),
+    risks: z.array(z.string()),
+    next_actions: z.array(nonEmptyString).min(1),
+  })
+  .strict();
+const ipPlanV3Schema = z
+  .object({
+    kind: z.literal('ip_plan'),
+    ip_profile: z.array(nonEmptyString).min(1),
+    positioning: nonEmptyString,
+    audience: objectList,
+    differentiators: z.array(nonEmptyString).min(1),
+    persona_rules: z.array(nonEmptyString).min(1),
+    content_columns: objectList,
+    voice_style: z.array(nonEmptyString).min(1),
+    interaction_mechanism: z.array(nonEmptyString).min(1),
+    growth_phases: objectList,
+    metrics: z.array(metricDefinitionV3Schema).min(1),
+    risks: z.array(z.string()),
+  })
+  .strict();
+const campaignPlanV3Schema = z
+  .object({
+    kind: z.literal('campaign_plan'),
+    objective: nonEmptyString,
+    theme: nonEmptyString,
+    value_proposition: nonEmptyString,
+    audience: objectList,
+    mechanics: z.array(nonEmptyString).min(1),
+    participant_journey: objectList,
+    timeline: objectList,
+    channel_plan: objectList,
+    asset_checklist: objectList,
+    metric_framework: z.array(metricDefinitionV3Schema).min(1),
+    risks: z.array(z.string()),
+    contingencies: z.array(z.string()),
+  })
+  .strict();
+const contentCalendarV3Schema = z
+  .object({
+    kind: z.literal('content_calendar'),
+    period: z
+      .object({ start_date: nonEmptyString, end_date: nonEmptyString, timezone: nonEmptyString })
+      .strict(),
+    cadence: objectList,
+    entries: z
+      .array(
+        z
+          .object({
+            publish_at: nonEmptyString,
+            platform: nonEmptyString,
+            topic: nonEmptyString,
+            format: nonEmptyString,
+            objective: nonEmptyString,
+            angle: nonEmptyString,
+            cta: nonEmptyString,
+            dependencies: z.array(z.string()),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+const growthExperimentV3Schema = z
+  .object({
+    kind: z.literal('growth_experiment'),
+    business_goal: nonEmptyString,
+    funnel_stage: nonEmptyString,
+    current_problem: nonEmptyString,
+    experiments: z
+      .array(
+        z
+          .object({
+            hypothesis: nonEmptyString,
+            target_segment: nonEmptyString,
+            design: z.array(nonEmptyString).min(1),
+            variants: z.array(nonEmptyString).min(2),
+            primary_metric: metricDefinitionV3Schema,
+            guardrail_metrics: z.array(metricDefinitionV3Schema).min(1),
+            data_requirements: z.array(nonEmptyString).min(1),
+            duration: nonEmptyString,
+            stopping_rule: nonEmptyString,
+            decision_rule: nonEmptyString,
+            cost_and_risk: z.array(nonEmptyString).min(1),
+          })
+          .strict(),
+      )
+      .min(1),
+  })
+  .strict();
+const operationReviewV3Schema = z
+  .object({
+    kind: z.literal('operation_review'),
+    review_period: nonEmptyString,
+    comparison_period: nonEmptyString,
+    metric_table: z
+      .array(
+        z
+          .object({
+            name: nonEmptyString,
+            definition: nonEmptyString,
+            current_value: nonEmptyString,
+            comparison_value: z.string().nullable(),
+            change: z.string().nullable(),
+            data_source: nonEmptyString,
+          })
+          .strict(),
+      )
+      .min(1),
+    verified_changes: z.array(z.string()),
+    confirmed_causes: z.array(
+      z.object({ cause: nonEmptyString, evidence_refs: z.array(nonEmptyString).min(1) }).strict(),
+    ),
+    hypotheses: z.array(
+      z
+        .object({
+          explanation: nonEmptyString,
+          validation_method: nonEmptyString,
+          required_data: z.array(nonEmptyString).min(1),
+        })
+        .strict(),
+    ),
+    wins: z.array(z.string()),
+    issues: z.array(z.string()),
+    data_gaps: z.array(z.string()),
+    next_actions: objectList,
+  })
+  .strict();
+export const operationContentV3Schema = z.discriminatedUnion('kind', [
+  rankedDigestContentV3Schema,
+  platformContentV3Schema,
+  brandPlanV3Schema,
+  ipPlanV3Schema,
+  campaignPlanV3Schema,
+  contentCalendarV3Schema,
+  growthExperimentV3Schema,
+  operationReviewV3Schema,
+]);
+const operationDeliverableV3Schema = z
+  .object({
+    contract_version: z.literal('deliverable/3'),
+    deliverable_id: nonEmptyString,
+    scenario: z.enum([
+      'industry_digest',
+      'multi_platform_content',
+      'brand_operation_plan',
+      'ip_operation_plan',
+      'campaign_plan',
+      'content_calendar',
+      'growth_experiment',
+      'operation_review',
+    ]),
+    platform: z.string().nullable(),
+    title: nonEmptyString,
+    copy_text: nonEmptyString,
+    content: operationContentV3Schema,
+    warnings: z.array(warningV2Schema).max(100),
+  })
+  .strict();
+export const deliverableSetV3Schema: z.ZodType<DeliverableSetV3> = z
+  .object({
+    contract_version: z.literal('deliverable-set/3'),
+    run_id: nonEmptyString,
+    intent_revision: z.number().int().min(0),
+    summary: deliverySummaryV2Schema,
+    deliverables: z.array(operationDeliverableV3Schema).max(20),
+    degraded: z.boolean(),
+    warnings: z.array(warningV2Schema).max(100),
+  })
+  .strict();
+
 export function parseDeliverableSet(value: unknown): DeliverableSetDto | null {
   if (!value || typeof value !== 'object' || !('contract_version' in value)) return null;
   const version = (value as { contract_version?: unknown }).contract_version;
@@ -322,6 +568,8 @@ export function parseDeliverableSet(value: unknown): DeliverableSetDto | null {
       ? deliverableSetV1Schema.safeParse(value)
       : version === 'deliverable-set/2'
         ? deliverableSetV2Schema.safeParse(value)
-        : null;
+        : version === 'deliverable-set/3'
+          ? deliverableSetV3Schema.safeParse(value)
+          : null;
   return result?.success ? result.data : null;
 }

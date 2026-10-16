@@ -88,7 +88,11 @@ class ResearchContentAcquirer:
             raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
         if descriptor.content_policy.storage_mode == "metadata_only":
             raise ValueError("CONTENT_NOT_APPROVED")
-        if candidate.content_scope == "summary":
+        use_feed_excerpt = (
+            candidate.content_scope == "summary"
+            and "article_body" not in descriptor.admission.intended_uses
+        )
+        if use_feed_excerpt:
             if (
                 descriptor.content_policy.storage_mode != "excerpt_only"
                 or "feed_excerpt" not in descriptor.admission.intended_uses
@@ -123,17 +127,6 @@ class ResearchContentAcquirer:
             )
             if candidate.url != canonical:
                 raise ValueError("SOURCE_NOT_RUNTIME_ALLOWED")
-            text = (candidate.inline_content or "").strip()
-            if not text:
-                raise ValueError("CONTENT_UNAVAILABLE")
-            return ExtractedDocumentV2(
-                candidate_id=candidate.candidate_id,
-                canonical_url=canonical,
-                title=candidate.title,
-                text=text,
-                content_hash=hashlib.sha256(text.encode()).hexdigest(),
-                extractor_version="research-content/2:platform_text",
-            )
         else:
             url = candidate.url
         validate_content_endpoint(descriptor, url)
@@ -218,16 +211,14 @@ class ResearchContentAcquirer:
                 or value.get("dead")
             ):
                 raise ValueError("SOURCE_SCHEMA_INVALID")
-            api_title = clean_fragment(value.get("title"))
-            if api_title != candidate.title:
-                raise ValueError("SOURCE_SCHEMA_INVALID")
+            api_title = clean_fragment(value.get("title")) or candidate.title
             text = clean_fragment(value.get("text")) or api_title
             if not text:
                 raise ValueError("CONTENT_UNAVAILABLE")
             return ExtractedDocumentV2(
                 candidate_id=candidate.candidate_id,
                 canonical_url=candidate.url,
-                title=candidate.title,
+                title=api_title,
                 text=text,
                 content_hash=hashlib.sha256(body).hexdigest(),
                 extractor_version="research-content/2:platform_text",

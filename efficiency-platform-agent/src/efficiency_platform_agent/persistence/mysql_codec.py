@@ -7,7 +7,12 @@ from typing import Any
 
 from efficiency_platform_agent.core.budget import BudgetCharge, BudgetState
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
-from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunRequest
+from efficiency_platform_agent.core.run import (
+    ExecutionBudget,
+    JsonObject,
+    JsonValue,
+    RunRequest,
+)
 from efficiency_platform_agent.core.runtime import (
     RunEventRecord,
     RunFailure,
@@ -24,12 +29,23 @@ def _plain(value: object) -> object:
     return value
 
 
-def _immutable(value: object) -> object:
+def _immutable(value: object) -> JsonValue:
     if isinstance(value, dict):
-        return JsonObject(tuple((str(key), _immutable(child)) for key, child in value.items()))
+        return JsonObject(
+            tuple((str(key), _immutable(child)) for key, child in value.items())
+        )
     if isinstance(value, list):
         return tuple(_immutable(child) for child in value)
-    return value
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError("持久化 JSON 包含非法值")
+
+
+def _immutable_object(value: object) -> JsonObject:
+    converted = _immutable(value)
+    if not isinstance(converted, JsonObject):
+        raise TypeError("持久化 JSON 字段必须是对象")
+    return converted
 
 
 def _loads(value: str | dict[str, Any]) -> dict[str, Any]:
@@ -108,7 +124,7 @@ def decode_run(value: str | dict[str, Any]) -> RunRecord:
             tenant_id=request["tenant_id"],
             user_id=request["user_id"],
             input_text=request["input_text"],
-            metadata=_immutable(request["metadata"]),
+            metadata=_immutable_object(request["metadata"]),
         ),
         status=RunStatus(raw["status"]),
         strategy=None if raw["strategy"] is None else StrategyMode(raw["strategy"]),
@@ -151,7 +167,7 @@ def decode_event(value: str | dict[str, Any]) -> RunEventRecord:
         sequence=raw["sequence"],
         occurred_at_epoch_ms=raw["occurred_at_epoch_ms"],
         status=RunStatus(raw["status"]),
-        payload=_immutable(raw["payload"]),
+        payload=_immutable_object(raw["payload"]),
     )
 
 

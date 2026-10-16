@@ -87,7 +87,7 @@ def _proposal(
         "brief_digest": context.brief_digest,
         "prompt_version": CLAIMS_PROMPT_VERSION,
         "event_id": "event-1",
-        "text": "Acme 表示准确率为 9%。",
+        "text": "Acme 表示测试准确率为 9%。",
         "claim_type": "announcement",
         "subject": "Acme",
         "value_text": "9",
@@ -163,6 +163,26 @@ async def test_value_text_cannot_disagree_with_bound_numeric_value() -> None:
     )
 
     assert result.rejected[0].reason_codes == ("CLAIM_VALUE_INCONSISTENT",)
+
+
+@pytest.mark.asyncio
+async def test_claim_text_must_be_a_verbatim_evidence_span() -> None:
+    context = _context((_document(),))
+    unsupported = _proposal(
+        context,
+        text="Acme 表示已经登陆火星。",
+        value_text=None,
+        numeric_value=None,
+        unit=None,
+        claim_time=None,
+    )
+
+    result = await ClaimExtractor(_Port((unsupported,))).extract(
+        (_event(),), context, BudgetLeaseReferenceV2(lease_id="lease-1", version=0)
+    )
+
+    assert result.accepted == ()
+    assert result.rejected[0].reason_codes == ("CLAIM_TEXT_UNSUPPORTED",)
 
 
 @pytest.mark.asyncio

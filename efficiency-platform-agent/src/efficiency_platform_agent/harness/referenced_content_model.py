@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import replace
 from typing import Any
 
-from efficiency_platform_agent.core.run import ProviderMessage
+from efficiency_platform_agent.core.run import JsonObject, ProviderMessage
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,9 @@ class ReferencedContentModelRuntime:
         )
         started = time.monotonic()
         if referenced:
+            options = dict(request.options.items)
+            options["thinking"] = JsonObject((("type", "disabled"),))
+            request = replace(request, options=JsonObject(tuple(options.items())))
             logger.info(
                 "event=referenced_content_model_started platform=%s input_count=%s",
                 raw.get("platform"),
@@ -57,16 +61,17 @@ class ReferencedContentModelRuntime:
 
 
 def _request_payload(messages: tuple[ProviderMessage, ...]) -> dict[str, Any] | None:
-    if not messages:
-        return None
-    content = messages[-1].content
-    if not isinstance(content, str):
-        return None
-    try:
-        value = json.loads(content)
-    except json.JSONDecodeError:
-        return None
-    return value if isinstance(value, dict) else None
+    for message in reversed(messages):
+        content = message.content
+        if not isinstance(content, str):
+            continue
+        try:
+            value = json.loads(content)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict) and "input_deliverables" in value:
+            return value
+    return None
 
 
 __all__ = ["ReferencedContentModelRuntime"]

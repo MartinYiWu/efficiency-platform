@@ -60,6 +60,8 @@ from ...providers.llm.registry import ModelProviderRegistry
 _RETRYABLE_PROVIDER_ERRORS = frozenset(
     {
         ("PROVIDER_TIMEOUT", "timeout"),
+        ("PROVIDER_CONNECT_TIMEOUT", "timeout"),
+        ("PROVIDER_READ_TIMEOUT", "timeout"),
         ("PROVIDER_CONNECTION", "connection"),
         ("PROVIDER_RATE_LIMIT", "rate_limit"),
         ("PROVIDER_SERVER_ERROR", "server_error"),

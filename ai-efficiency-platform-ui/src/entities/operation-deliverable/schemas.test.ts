@@ -92,14 +92,68 @@ const deliverableSetV2 = () => ({
   warnings: [],
 });
 
+const deliverableSetV3 = () => ({
+  contract_version: 'deliverable-set/3',
+  run_id: 'run-3',
+  intent_revision: 2,
+  summary: { message: '已生成 1 份独立交付物。', result_count: 1, complete: true },
+  deliverables: [
+    {
+      contract_version: 'deliverable/3',
+      deliverable_id: 'brand-1',
+      scenario: 'brand_operation_plan',
+      platform: null,
+      title: '品牌运营方案',
+      copy_text: '# 品牌运营方案',
+      content: {
+        kind: 'brand_plan',
+        current_context: ['冷启动'],
+        objectives: ['建立认知'],
+        positioning: '效率助手',
+        audience_segments: [{ name: '运营负责人' }],
+        value_proposition: ['减少重复劳动'],
+        content_pillars: [{ name: '实战' }],
+        channel_strategy: [{ channel: '公众号' }],
+        roadmap: [{ phase: '验证' }],
+        metric_framework: [
+          {
+            name: '互动率',
+            definition: '互动/曝光',
+            observation_period: '每周',
+            purpose: '评估内容',
+          },
+        ],
+        risks: [],
+        next_actions: ['访谈用户'],
+      },
+      warnings: [],
+    },
+  ],
+  degraded: false,
+  warnings: [],
+});
+
 describe('parseDeliverableSet', () => {
-  it('按 contract_version 解析 V1 与 V2，不根据字段猜版本', () => {
+  it('按 contract_version 解析 V1、V2 与 V3，不根据字段猜版本', () => {
     expect(parseDeliverableSet(deliverableSetV1())?.contract_version).toBe('deliverable-set/1');
     expect(parseDeliverableSet(deliverableSetV2())?.contract_version).toBe('deliverable-set/2');
+    expect(parseDeliverableSet(deliverableSetV3())?.contract_version).toBe('deliverable-set/3');
 
     const withoutVersion = deliverableSetV2();
     delete (withoutVersion as { contract_version?: string }).contract_version;
     expect(parseDeliverableSet(withoutVersion)).toBeNull();
+  });
+
+  it('映射 V3 八场景公开结果且不要求内部来源闭包字段', () => {
+    const dto = parseDeliverableSet(deliverableSetV3());
+    if (!dto) throw new Error('fixture must satisfy the V3 contract');
+
+    const viewModel = mapDeliverableSet(dto);
+    expect(viewModel.kind).toBe('v3');
+    if (viewModel.kind !== 'v3') throw new Error('fixture must map to V3');
+    expect(viewModel.deliverables[0]?.content.kind).toBe('brand_plan');
+    expect(JSON.stringify(viewModel)).not.toContain('prompt_version');
+    expect(JSON.stringify(viewModel)).not.toContain('evidence_pack_id');
   });
 
   it('拒绝 V2 未知字段、未知 content.kind 和非 HTTPS 来源', () => {

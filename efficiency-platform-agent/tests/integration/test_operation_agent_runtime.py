@@ -28,6 +28,12 @@ from efficiency_platform_agent.core.run import (
     ProviderUsage,
 )
 from efficiency_platform_agent.core.runtime import UsageSnapshot
+from efficiency_platform_agent.prompts.contracts import (
+    AssembledPrompt,
+    ModelPolicy,
+    OutputContract,
+    PromptMessage,
+)
 from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
 from tests.support.s6_scenario_samples import sample_by_id, submission_from_sample
 
@@ -157,6 +163,116 @@ def build_research_agent(provider):
     )
     agent._test_research_provider = research
     return agent
+
+
+@pytest.mark.asyncio
+async def test_v3_brand_scenario_reaches_dedicated_prompt_and_returns_v3_set() -> None:
+    class PromptAssembler:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def assemble(self, **kwargs):
+            self.calls.append(kwargs)
+            return AssembledPrompt(
+                kwargs["prompt_key"],
+                "1.0.0",
+                (
+                    PromptMessage("system", "system"),
+                    PromptMessage("developer", "developer"),
+                    PromptMessage("user", "user"),
+                ),
+                ModelPolicy(
+                    1,
+                    "policy",
+                    "1.0.0",
+                    "offline",
+                    "offline",
+                    0.2,
+                    None,
+                    8_000,
+                    4_000,
+                    1_000,
+                    60_000,
+                    0,
+                    0,
+                    "a" * 64,
+                ),
+                OutputContract(
+                    1, "brand-plan", "1.0.0", {"type": "object"}, "fields", "b" * 64
+                ),
+                "c" * 64,
+                "d" * 64,
+            )
+
+    class BrandProvider:
+        descriptor = None
+
+        async def complete(self, request):
+            result = {
+                "kind": "brand_plan",
+                "current_context": ["冷启动"],
+                "objectives": ["建立认知"],
+                "positioning": "效率助手",
+                "audience_segments": [{"name": "运营负责人"}],
+                "value_proposition": ["减少重复劳动"],
+                "content_pillars": [{"name": "实战"}],
+                "channel_strategy": [{"channel": "公众号"}],
+                "roadmap": [{"phase": "验证"}],
+                "metric_framework": [
+                    {
+                        "name": "互动率",
+                        "definition": "互动/曝光",
+                        "observation_period": "每周",
+                        "purpose": "评估内容",
+                    }
+                ],
+                "risks": [],
+                "next_actions": ["访谈用户"],
+            }
+            return ProviderResult(
+                request.contract_version,
+                ProviderMessage("assistant", json.dumps(result, ensure_ascii=False)),
+                ProviderUsage(10, 20, 0, 0, 1),
+            )
+
+    from efficiency_platform_agent.harness.operation_agent_factory import (
+        build_operation_agent,
+    )
+
+    registry = ModelProviderRegistry()
+    registry.register("offline", BrandProvider())
+    assembler = PromptAssembler()
+    records = []
+
+    class Recorder:
+        def record(self, record):
+            records.append(record)
+
+    agent = build_operation_agent(
+        ModelRuntime(Selector(), registry),
+        deliverable_set_contract_version="deliverable-set/3",
+        prompt_assembler=assembler,
+        diagnostic_recorder=Recorder(),
+    )
+
+    execution = await agent.execute(
+        submission_from_sample(sample_by_id("brand_operation_plan.complete/1"))
+    )
+    assert execution.deliverables is not None, (
+        execution.scenario_result,
+        [
+            (record.error_type, record.error_location, record.error_code)
+            for record in records
+        ],
+    )
+    result = execution.deliverables
+
+    assert result.contract_version == "deliverable-set/3"
+    assert assembler.calls[0]["prompt_key"] == "brand.plan"
+    assert result.deliverables[0].content.kind == "brand_plan"
+    assert execution.usage.input_tokens == 10
+    assert execution.usage.output_tokens == 20
+    assert execution.usage.cost_microunits == 1
 
 
 def operation_progress_binding(events):

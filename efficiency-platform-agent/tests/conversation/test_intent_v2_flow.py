@@ -905,3 +905,145 @@ async def test_operation_intent_coordinator_preserves_model_clarification_questi
     assert decision.intent.needs_clarification is True
     assert decision.clarification_question == "你说的第 3 条是本轮热点列表中的第 3 条吗？"
     assert decision.charge.input_tokens == 12
+
+
+@pytest.mark.asyncio
+async def test_operation_intent_coordinator_binds_java_authorized_artifact() -> None:
+    from efficiency_platform_agent.contracts.conversation import ConversationArtifactV1
+    from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
+    from efficiency_platform_agent.conversation.operation_intent_coordinator import (
+        OperationIntentPlanningCoordinator,
+    )
+    from efficiency_platform_agent.core.budget import RemainingBudget
+    from efficiency_platform_agent.harness.service import RunPipelineContext
+    from efficiency_platform_agent.orchestration.intent_v2.interpreter import (
+        OperationIntentPlanningExecution,
+    )
+
+    class _Planner:
+        async def execute(self, **kwargs):
+            assert kwargs["available_artifacts"][0]["artifact_id"] == "artifact-1"
+            return OperationIntentPlanningExecution(
+                plan=IntentPlanV1.model_validate(
+                    {
+                        "route_kind": "operation",
+                        "primary_scenario": "brand_operation_plan",
+                        "action_mode": "revise",
+                        "user_goal": "优化上一版结构",
+                        "requirements": {},
+                        "artifact_reference": {
+                            "artifact_id": "artifact-1",
+                            "version": 1,
+                        },
+                        "next_step": "execute",
+                        "planned_capabilities": [
+                            {
+                                "capability_id": "artifact_revise",
+                                "purpose": "修改已有品牌方案",
+                            }
+                        ],
+                        "confidence": 0.95,
+                    }
+                ),
+                usage=UsageSnapshot(12, 6, 1, False),
+                attempts=(),
+                provider_calls=1,
+                repaired=False,
+            )
+
+    async def _false() -> bool:
+        return False
+
+    async def _wait() -> None:
+        return None
+
+    artifact = ConversationArtifactV1(
+        artifact_id="artifact-1",
+        root_artifact_id="artifact-1",
+        version=1,
+        artifact_type="brand_plan",
+        scenario="brand_operation_plan",
+        title="品牌运营方案",
+        content={"kind": "brand_plan"},
+        body_markdown="# 品牌运营方案",
+    )
+    coordinator = OperationIntentPlanningCoordinator(_Planner())
+    decision = await coordinator.prepare(
+        RunPipelineContext(
+            "run-artifact",
+            RemainingBudget(3, 0, 100_000, 8_000, 1_000_000, 30_000),
+            _false,
+            _wait,
+        ),
+        "tenant-1",
+        "conversation-1",
+        ConversationMessageV1(
+            message="优化上一版结构",
+            request_id="request-artifact",
+            user_id="user-1",
+            artifacts=(artifact,),
+        ),
+    )
+
+    assert decision.referenced_artifact is not None
+    assert decision.referenced_artifact.artifact.artifact_id == "artifact-1"
+    assert decision.intent.needs_clarification is False
+    assert decision.intent.requirements.brand == "沿用制品 artifact-1 v1"
+
+
+def test_research_artifact_does_not_override_requested_content_platform() -> None:
+    from efficiency_platform_agent.contracts.conversation import ConversationArtifactV1
+    from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
+    from efficiency_platform_agent.contracts.referenced_inputs import (
+        ReferencedArtifactInput,
+    )
+    from efficiency_platform_agent.conversation.operation_intent_coordinator import (
+        _inherit_artifact_requirements,
+        _project_intent,
+    )
+
+    plan = IntentPlanV1.model_validate(
+        {
+            "route_kind": "operation",
+            "primary_scenario": "multi_platform_content",
+            "action_mode": "create",
+            "user_goal": "把第 1 条写成今日头条文章",
+            "requirements": {
+                "topic": "第 1 条",
+                "platforms": ["toutiao"],
+            },
+            "artifact_reference": {
+                "artifact_id": "research-1",
+                "version": 1,
+            },
+            "next_step": "execute",
+            "planned_capabilities": [
+                {
+                    "capability_id": "scenario_execute",
+                    "purpose": "生成今日头条文章",
+                }
+            ],
+            "confidence": 0.95,
+        }
+    )
+    artifact = ConversationArtifactV1(
+        artifact_id="research-1",
+        root_artifact_id="research-1",
+        version=1,
+        artifact_type="ranked_digest",
+        scenario="industry_digest",
+        platform="research",
+        title="行业热点",
+        content={"kind": "ranked_digest"},
+        body_markdown="# 行业热点",
+    )
+    reference = ReferencedArtifactInput(
+        tenant_id="tenant-1",
+        user_id="user-1",
+        conversation_id="conversation-1",
+        artifact=artifact,
+    )
+
+    inherited = _inherit_artifact_requirements(_project_intent(plan), plan, reference)
+
+    assert inherited.requirements.platforms == ("toutiao",)

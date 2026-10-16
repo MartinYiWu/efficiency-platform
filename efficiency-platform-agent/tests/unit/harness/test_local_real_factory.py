@@ -254,6 +254,9 @@ async def test_direct_model_cancellation_scope_does_not_cancel_other_run() -> No
 def synthetic_settings() -> S7IntegrationSettings:
     """使用合成值构造配置，测试不读取真实 env 或网络。"""
     return S7IntegrationSettings(
+        runtime_database_url=SecretStr(
+            "mysql+asyncmy://synthetic:synthetic@127.0.0.1:3306/ai_efficiency_platform_agent"
+        ),
         deepseek_base_url=SecretStr("https://synthetic.invalid"),
         deepseek_api_key=SecretStr("synthetic-key"),
         deepseek_fast_model=SecretStr("synthetic-fast"),
@@ -306,7 +309,10 @@ def test_factory_creates_one_logger_and_reports_research_capability_state(
     settings = synthetic_settings().model_copy(
         update={"gates": {"deepseek_web_search": research_enabled}}
     )
-    bundle = local_real_factory.build_local_agent_application(settings)
+    bundle = local_real_factory.build_local_agent_application(
+        settings,
+        research_v2_settings=ResearchPipelineSettings(),
+    )
     try:
         assert len(instances) == 1
         assert instances[0].capabilities == [
@@ -434,7 +440,10 @@ def test_factory_injects_one_logger_into_all_diagnostic_boundaries(monkeypatch) 
     settings = synthetic_settings().model_copy(
         update={"gates": {"deepseek_web_search": True}}
     )
-    bundle = local_real_factory.build_local_agent_application(settings)
+    bundle = local_real_factory.build_local_agent_application(
+        settings,
+        research_v2_settings=ResearchPipelineSettings(),
+    )
     try:
         assert len(logger_instances) == 1
         assert len(research_provider_instances) == 1
@@ -577,6 +586,7 @@ def test_factory_local_live_snapshot_uses_authoritative_runtime_mode_gate() -> N
             IntentV2ConversationAdapter, bundle.conversation.intent_v2_coordinator
         )
         assert adapter.settings.runtime_mode == "local_live"
+        assert bundle.runtime.budget.max_output_tokens == 64_000
         with pytest.raises(
             RuntimeError, match="RESEARCH_LOCAL_LIVE_LEGACY_BYPASS_FORBIDDEN"
         ):

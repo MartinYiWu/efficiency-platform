@@ -15,6 +15,15 @@ async def test_wait_resume_and_running_cancel_reuse_run_checkpoint() -> None:
     waiting = await service.create_and_execute(request)
     assert waiting.status.value == "waiting_input"
     checkpoint_id = waiting.checkpoint_id
+    stream_events = await service.event_hub.replay(waiting.run_id, 0)
+    assert [event.event for event in stream_events][-2:] == [
+        "clarification_required",
+        "stream_done",
+    ]
+    assert stream_events[-1].payload == {
+        "status": "waiting_input",
+        "degraded": False,
+    }
 
     resumed = await service.resume_run(
         waiting.run_id,

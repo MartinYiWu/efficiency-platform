@@ -43,7 +43,6 @@ from ._process_isolation import (
 from ._xml_safety import UnsafeXmlError, parse_safe_xml
 from .extraction import DocumentExtractionError
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -227,7 +226,7 @@ class SafeFeedParser:
         *,
         parser: Callable[[bytes], Mapping[str, Any]] | None = None,
         allow_in_process_test_parser: bool = False,
-        parse_timeout_seconds: float = 3.0,
+        parse_timeout_seconds: float = 10.0,
         max_body_bytes: int = 2 * 1024 * 1024,
         max_depth: int = 32,
         max_nodes: int = 20_000,

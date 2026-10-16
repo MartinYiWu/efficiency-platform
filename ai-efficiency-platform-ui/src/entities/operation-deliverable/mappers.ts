@@ -3,6 +3,7 @@ import type {
   CitationV2,
   DeliverableSetDto,
   DeliverySetV2ViewModel,
+  DeliverySetV3ViewModel,
   OperationDeliverableV2,
   OperationDeliverableViewModel,
   OperationDeliveryViewModel,
@@ -81,6 +82,20 @@ function mapV2(
   };
 }
 
+function mapV3(
+  dto: Extract<DeliverableSetDto, { contract_version: 'deliverable-set/3' }>,
+): DeliverySetV3ViewModel {
+  return {
+    kind: 'v3',
+    runId: dto.run_id,
+    intentRevision: dto.intent_revision,
+    summary: dto.summary,
+    deliverables: dto.deliverables,
+    degraded: dto.degraded,
+    warnings: dto.warnings,
+  };
+}
+
 export function mapDeliverableSet(dto: DeliverableSetDto): OperationDeliveryViewModel {
   if (dto.contract_version === 'deliverable-set/1') {
     return {
@@ -93,5 +108,5 @@ export function mapDeliverableSet(dto: DeliverableSetDto): OperationDeliveryView
       })),
     };
   }
-  return mapV2(dto);
+  return dto.contract_version === 'deliverable-set/2' ? mapV2(dto) : mapV3(dto);
 }

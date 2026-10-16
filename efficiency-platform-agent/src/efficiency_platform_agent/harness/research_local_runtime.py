@@ -171,7 +171,7 @@ class RunScopedResearchServiceV2:
             binding=binding,
             deadline=self.now()
             + timedelta(
-                milliseconds=min(180_000, pipeline.remaining_budget.timeout_ms)
+                milliseconds=min(240_000, pipeline.remaining_budget.timeout_ms)
             ),
             is_cancelled=pipeline.is_cancelled,
             wait_cancelled=pipeline.wait_cancelled,

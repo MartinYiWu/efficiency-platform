@@ -8,6 +8,7 @@ from .contracts import (
     PromptMessage,
     PromptValue,
 )
+from .installer import install_prompt_seed
 from .mysql_repository import MySqlPromptRepository
 from .repository import PromptConfigurationError, PromptRepository
 from .runtime import PromptAssembler
@@ -25,4 +26,5 @@ __all__ = [
     "PromptRepository",
     "PromptValue",
     "build_operation_prompt_seed",
+    "install_prompt_seed",
 ]

@@ -223,6 +223,12 @@ def _validate_proposal(
         return ("CLAIM_EVIDENCE_INVALID",)
     if any(ref.document_id not in event.member_document_ids for ref in selected_refs):
         return ("CLAIM_EVIDENCE_OUTSIDE_EVENT",)
+    if not any(
+        documents[ref.document_id].content_scope
+        in {"summary", "full", "platform_text"}
+        for ref in selected_refs
+    ):
+        return ("CLAIM_DOCUMENT_SCOPE_UNSUPPORTED",)
     evidence_text = "\n".join(ref.excerpt for ref in selected_refs)
     if proposal.subject.casefold() not in evidence_text.casefold():
         return ("CLAIM_SUBJECT_UNSUPPORTED",)
@@ -240,12 +246,29 @@ def _validate_proposal(
             proposal.unit, evidence_text
         ) or not _unit_supported(proposal.unit, proposal.text):
             return ("CLAIM_UNIT_UNSUPPORTED",)
+    if not _numbers(proposal.text).issubset(_numbers(evidence_text)):
+        return ("CLAIM_NUMBER_UNSUPPORTED",)
+    if not any(
+        _is_verbatim_evidence_span(proposal.text, ref.excerpt) for ref in selected_refs
+    ):
+        return ("CLAIM_TEXT_UNSUPPORTED",)
     attribution_error = _attribution_error(
         proposal,
         tuple(documents[ref.document_id] for ref in selected_refs),
         context,
     )
     return (attribution_error,) if attribution_error is not None else ()
+
+
+def _is_verbatim_evidence_span(claim_text: str, excerpt: str) -> bool:
+    """Claim 正文必须可逐字回查到单一证据摘录，防止拼接或扩写。"""
+    normalized_claim = _normalize_verbatim_span(claim_text)
+    normalized_excerpt = _normalize_verbatim_span(excerpt)
+    return bool(normalized_claim) and normalized_claim in normalized_excerpt
+
+
+def _normalize_verbatim_span(value: str) -> str:
+    return re.sub(r"\s+", " ", value.casefold()).strip(" \t\r\n'\"“”‘’。.!！?？")
 
 
 def _attribution_error(

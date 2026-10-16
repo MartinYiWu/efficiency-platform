@@ -12,6 +12,9 @@ from efficiency_platform_agent.agents.operation.specialists.model_backed import 
 from efficiency_platform_agent.agents.operation.specialists.model_backed_research import (
     ModelBackedResearchSpecialist,
 )
+from efficiency_platform_agent.agents.operation.specialists.scenario_model_executor import (
+    ScenarioModelExecutor,
+)
 from efficiency_platform_agent.agents.registry import AgentRegistry
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
 from efficiency_platform_agent.capabilities.research.contracts import (
@@ -27,16 +30,16 @@ from efficiency_platform_agent.core.diagnostics import (
     NoopDiagnosticRecorder,
 )
 from efficiency_platform_agent.core.run import ExecutionBudget
-from efficiency_platform_agent.harness.research_v2_adapter import (
-    ResearchV2ProviderAdapter,
-)
 from efficiency_platform_agent.harness.referenced_content_model import (
     ReferencedContentModelRuntime,
+)
+from efficiency_platform_agent.harness.research_v2_adapter import (
+    ResearchV2ProviderAdapter,
 )
 from efficiency_platform_agent.orchestration.supervisor import ScenarioSupervisorAdapter
 from efficiency_platform_agent.prompts.contracts import PromptBundleSpec
 from efficiency_platform_agent.prompts.registry import PromptRegistry
-from efficiency_platform_agent.prompts.runtime import PromptRuntime
+from efficiency_platform_agent.prompts.runtime import PromptAssembler, PromptRuntime
 
 
 class _UnavailableResearchProvider:
@@ -127,20 +130,28 @@ def build_operation_agent(
     diagnostic_recorder: DiagnosticRecorderPort | None = None,
     research_unavailable_code: str = "RESEARCH_PROVIDER_NOT_CONFIGURED",
     deliverable_set_contract_version: Literal[
-        "deliverable-set/1", "deliverable-set/2"
+        "deliverable-set/1", "deliverable-set/2", "deliverable-set/3"
     ] = "deliverable-set/2",
+    prompt_assembler: PromptAssembler | None = None,
 ) -> OperationAgent:
     """显式注册模型专家，再把 Supervisor 窄端口注入业务 Agent。"""
     if deliverable_set_contract_version not in {
         "deliverable-set/1",
         "deliverable-set/2",
+        "deliverable-set/3",
     }:
         raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
     specialist_version = (
-        "deliverable/2"
-        if deliverable_set_contract_version == "deliverable-set/2"
-        else "deliverable/1"
+        "deliverable/3"
+        if deliverable_set_contract_version == "deliverable-set/3"
+        else (
+            "deliverable/2"
+            if deliverable_set_contract_version == "deliverable-set/2"
+            else "deliverable/1"
+        )
     )
+    if specialist_version == "deliverable/3" and prompt_assembler is None:
+        raise ValueError("PROMPT_ASSEMBLER_REQUIRED")
     prompts = PromptRuntime(build_operation_prompt_registry())
     resolved_budget = budget or ExecutionBudget(40, 10, 64000, 32000, 180000, 1000000)
     recorder = diagnostic_recorder or NoopDiagnosticRecorder()
@@ -165,6 +176,13 @@ def build_operation_agent(
             spec = replace(definition, model_policy_id="operation-runtime-model/1")
 
             def builder(spec=spec):
+                scenario_executor = (
+                    ScenarioModelExecutor(
+                        model, prompt_assembler, budget=resolved_budget
+                    )
+                    if prompt_assembler is not None
+                    else None
+                )
                 if spec.agent_id == "operation.research.insight":
                     return ModelBackedResearchSpecialist(
                         spec,
@@ -173,6 +191,7 @@ def build_operation_agent(
                         run_research,
                         usage,
                         deliverable_contract_version=specialist_version,
+                        scenario_executor=scenario_executor,
                     )
                 specialist_model = (
                     ReferencedContentModelRuntime(model)
@@ -185,6 +204,7 @@ def build_operation_agent(
                     specialist_model,
                     usage,
                     deliverable_contract_version=specialist_version,
+                    scenario_executor=scenario_executor,
                 )
 
             registry.register(spec, builder)

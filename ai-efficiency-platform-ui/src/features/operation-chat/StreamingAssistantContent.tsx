@@ -22,7 +22,7 @@ export function StreamingAssistantContent({ content, mode }: StreamingAssistantC
   const graphemes = useMemo(() => splitGraphemes(content), [content]);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(getReducedMotionPreference);
   const [visibleCount, setVisibleCount] = useState(() =>
-    getReducedMotionPreference() ? graphemes.length : 0,
+    getReducedMotionPreference() || mode === 'frozen' ? graphemes.length : 0,
   );
 
   useEffect(() => {

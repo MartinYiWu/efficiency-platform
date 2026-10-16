@@ -117,7 +117,7 @@ class ResearchV2ProviderAdapter:
                 brief = await self.brief_store.get_brief(
                     request.tenant_id, request.task_id, self.run_id
                 )
-        except Exception:  # noqa: BLE001 -- 旧边界不得泄漏存储故障或敏感正文。
+        except Exception:
             logger.exception("研究 V2 Brief 读取失败")
             return _failed(request, "RESEARCH_UNAVAILABLE")
         if brief is None:
@@ -145,7 +145,7 @@ class ResearchV2ProviderAdapter:
                     deadline=started + self.timeout,
                 ),
             )
-        except Exception:  # noqa: BLE001 -- Provider 失败只能投影为稳定错误码。
+        except Exception:
             logger.exception("研究 V2 执行失败")
             return _failed(request, "RESEARCH_UNAVAILABLE")
         if outcome.delivery is not None and (

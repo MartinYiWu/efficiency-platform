@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import logging
 import re
 import time
@@ -11,7 +11,7 @@ from dataclasses import replace
 from typing import Protocol
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from efficiency_platform_agent.capabilities.model.runtime import ModelLeaseContext
 from efficiency_platform_agent.context.builder import ContextBuilder, ContextBuildError
@@ -53,12 +53,16 @@ from efficiency_platform_agent.prompts.registry import (
 )
 from efficiency_platform_agent.prompts.runtime import PromptRuntime
 
-from .claims import ClaimProposalV2
+from .claims import ClaimProposalV2, _validate_proposal
 from .clustering import ClusterBucketV2, ClusterProposalV2
-from .evidence import EvidenceContextV2
-from .filtering import RELEVANCE_PROMPT_VERSION, SemanticRelevanceDecisionV2
+from .evidence import EvidenceContextV2, EvidenceValidator
+from .filtering import (
+    RELEVANCE_PROMPT_VERSION,
+    SemanticRelevanceDecisionV2,
+)
 
 logger = logging.getLogger(__name__)
+stage_logger = logging.getLogger("efficiency_platform_agent.execution")
 
 
 class ResearchModelRuntime(Protocol):
@@ -78,6 +82,25 @@ class PlanSelectionV2(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     action_ids: tuple[str, ...] = Field(default=(), max_length=128)
     stop_reason: str | None = Field(default=None, max_length=128)
+
+
+class RelevanceDecisionBatchV2(BaseModel):
+    """一次模型调用内返回有界的相关性判定，避免重复发送相同简报。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    decisions: tuple[SemanticRelevanceDecisionV2, ...] = Field(
+        default=(), max_length=10
+    )
+
+
+class ClusterProposalBatchV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    proposals: tuple[ClusterProposalV2, ...] = Field(default=(), max_length=128)
+
+
+class ClaimProposalBatchV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    proposals: tuple[ClaimProposalV2, ...] = Field(default=(), max_length=128)
 
 
 class ResearchModelDecisions:
@@ -210,11 +233,18 @@ class ResearchModelDecisions:
         request = ProviderRequest(
             "2",
             (*prompt.messages, ProviderMessage("user", body)),
-            JsonObject(),
+            JsonObject(
+                (
+                    (
+                        "response_format",
+                        JsonObject((("type", "json_object"),)),
+                    ),
+                )
+            ),
             min(90_000, remaining.timeout_ms),
         )
         started = time.monotonic()
-        logger.info(
+        stage_logger.info(
             "event=research_model_started run_id=%s prompt_id=%s payload_fields=%s",
             self.run_context.run_id,
             prompt_id,
@@ -267,14 +297,16 @@ class ResearchModelDecisions:
                 pass
         if value is None:
             logger.warning(
-                "event=research_model_failed run_id=%s prompt_id=%s reason=DECISION_INVALID attempts=%s elapsed_ms=%s",
+                "event=research_model_failed run_id=%s prompt_id=%s reason=DECISION_INVALID attempts=%s content_type=%s content_chars=%s elapsed_ms=%s",
                 self.run_context.run_id,
                 prompt_id,
                 len(execution.attempts),
+                type(content).__name__,
+                len(content) if isinstance(content, str) else 0,
                 int((time.monotonic() - started) * 1000),
             )
             raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
-        logger.info(
+        stage_logger.info(
             "event=research_model_succeeded run_id=%s prompt_id=%s attempts=%s total_model_calls=%s degraded=%s elapsed_ms=%s",
             self.run_context.run_id,
             prompt_id,
@@ -304,18 +336,21 @@ class ResearchModelDecisions:
         if prompt_id == "research.v2.cluster":
             return []
         if prompt_id == "research.v2.claims":
-            return self._deterministic_claims(payload)
+            return self.evidence_closure_claims(payload)
         raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
 
-    def _deterministic_claims(self, payload: dict[str, object]) -> list[dict[str, object]]:
+    def evidence_closure_claims(
+        self, payload: dict[str, object]
+    ) -> list[dict[str, object]]:
+        """只复制已保存证据，为每个事件保留一条可追溯的最小 Claim。"""
         events = payload.get("events")
         context = payload.get("evidence_context")
         if not isinstance(events, list) or not isinstance(context, dict):
-            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")  # noqa: TRY004
         refs = context.get("evidence_refs")
         documents = context.get("documents")
         if not isinstance(refs, list) or not isinstance(documents, list):
-            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")  # noqa: TRY004
         ref_by_document = {
             item.get("document_id"): item
             for item in refs
@@ -399,35 +434,147 @@ class ResearchModelDecisions:
                 )
                 for document in documents
             )
-        results = []
-        for document in documents:
-            value = await self.invoke(
-                "research.v2.relevance",
-                {
-                    "brief_schema": _schema(ResearchBriefV2),
-                    "decision_schema": _schema(SemanticRelevanceDecisionV2),
-                },
-                {
-                    "brief": brief.model_dump(mode="json"),
-                    "document": document.model_dump(mode="json"),
-                    "prompt_version": RELEVANCE_PROMPT_VERSION,
-                },
-                lease,
+        selected_documents = _select_relevance_candidates(brief, documents)
+        if not selected_documents:
+            return ()
+        value = await self.invoke(
+            "research.v2.relevance",
+            {
+                "brief_schema": _schema(ResearchBriefV2),
+                "decision_schema": _schema(RelevanceDecisionBatchV2),
+            },
+            {
+                "brief": brief.model_dump(mode="json"),
+                "brief_digest": brief.canonical_digest(),
+                "documents": [
+                    document.model_dump(mode="json")
+                    for document in selected_documents
+                ],
+                "prompt_version": RELEVANCE_PROMPT_VERSION,
+            },
+            lease,
+        )
+        batched = isinstance(value, dict) and "decisions" in value
+        if batched:
+            parsed_decisions = _parse(RelevanceDecisionBatchV2, value).decisions
+        else:
+            # 保留旧单文档模型桩兼容性；真实 Prompt 只请求批量对象。
+            parsed_decisions = (_parse(SemanticRelevanceDecisionV2, value),)
+        documents_by_id = {
+            document.document_id: document for document in selected_documents
+        }
+        if len({item.document_id for item in parsed_decisions}) != len(
+            parsed_decisions
+        ) or not {item.document_id for item in parsed_decisions}.issubset(
+            documents_by_id
+        ):
+            logger.warning(
+                "event=research_relevance_rejected run_id=%s invalid_fields=document_set",
+                self.run_context.run_id,
             )
-            decision = _parse(SemanticRelevanceDecisionV2, value)
-            if (
-                decision.document_id != document.document_id
-                or decision.document_content_hash != document.content_hash
-                or decision.brief_digest != brief.canonical_digest()
-                or decision.prompt_version != RELEVANCE_PROMPT_VERSION
-                or decision.source_excerpt not in document.text
-                or not set(decision.requirement_ids).issubset(
-                    item.requirement_id for item in brief.hard_requirements
+            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+        results = []
+        for decision in parsed_decisions:
+            document = documents_by_id[decision.document_id]
+            allowed_requirement_ids = {
+                item.requirement_id for item in brief.hard_requirements
+            }
+            source_text = f"{document.title}\n{document.text}"
+            invalid_fields = tuple(
+                name
+                for name, invalid in (
+                    ("document_id", decision.document_id != document.document_id),
+                    (
+                        "document_content_hash",
+                        decision.document_content_hash != document.content_hash,
+                    ),
+                    ("brief_digest", decision.brief_digest != brief.canonical_digest()),
+                    (
+                        "prompt_version",
+                        decision.prompt_version != RELEVANCE_PROMPT_VERSION,
+                    ),
+                    ("source_excerpt", decision.source_excerpt not in source_text),
+                    (
+                        "requirement_ids",
+                        not set(decision.requirement_ids).issubset(
+                            allowed_requirement_ids
+                        ),
+                    ),
                 )
-            ):
+                if invalid
+            )
+            if invalid_fields:
+                logger.warning(
+                    "event=research_relevance_rejected run_id=%s invalid_fields=%s",
+                    self.run_context.run_id,
+                    ",".join(invalid_fields),
+                )
+                if batched:
+                    continue
                 raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
             results.append(decision)
         return tuple(results)
+
+
+def _select_relevance_candidates(
+    brief: ResearchBriefV2,
+    documents: tuple[SourceDocumentV2, ...],
+    limit: int = 10,
+) -> tuple[SourceDocumentV2, ...]:
+    """先执行确定性门禁，再按来源轮询选择有界的模型复核集合。"""
+
+    eligible = list(documents)
+    by_source: dict[str, list[SourceDocumentV2]] = {}
+    for document in eligible:
+        by_source.setdefault(document.source_id, []).append(document)
+    for values in by_source.values():
+        values.sort(
+            key=lambda item: (
+                _deterministically_relevant(brief.topic, item),
+                *_relevance_candidate_sort_key(item),
+            ),
+            reverse=True,
+        )
+    selected: list[SourceDocumentV2] = []
+    for source_id in sorted(by_source):
+        selected.append(by_source[source_id].pop(0))
+        if len(selected) >= limit:
+            return tuple(selected)
+    for relevant in (True, False):
+        active = {
+            source_id: [
+                item
+                for item in values
+                if _deterministically_relevant(brief.topic, item) is relevant
+            ]
+            for source_id, values in by_source.items()
+        }
+        active = {source_id: values for source_id, values in active.items() if values}
+        while active and len(selected) < limit:
+            for source_id in tuple(sorted(active)):
+                values = active[source_id]
+                item = values.pop(0)
+                selected.append(item)
+                by_source[source_id].remove(item)
+                if not values:
+                    del active[source_id]
+                if len(selected) >= limit:
+                    break
+        if len(selected) >= limit:
+            break
+    return tuple(selected)
+
+
+def _relevance_candidate_sort_key(document: SourceDocumentV2) -> tuple[float, str]:
+    timestamp = (
+        document.event_at
+        or document.first_published_at
+        or document.published_at
+        or document.updated_at
+        or document.first_seen_at
+        or document.fetched_at
+    )
+    return (timestamp.timestamp() if timestamp is not None else float("-inf"), document.document_id)
 
 
 def _deterministically_relevant(topic: str, document: SourceDocumentV2) -> bool:
@@ -532,9 +679,7 @@ class ResearchClusterModelAdapter:
             "research.v2.cluster",
             {
                 "brief_schema": _schema(ResearchBriefV2),
-                "proposal_schema": json.dumps(
-                    TypeAdapter(tuple[ClusterProposalV2, ...]).json_schema()
-                ),
+                "proposal_schema": _schema(ClusterProposalBatchV2),
             },
             {
                 "brief": brief.model_dump(mode="json"),
@@ -543,7 +688,11 @@ class ResearchClusterModelAdapter:
             },
             lease,
         )
-        proposals = _parse_many(ClusterProposalV2, value)
+        proposals = (
+            _parse(ClusterProposalBatchV2, value).proposals
+            if isinstance(value, dict) and "proposals" in value
+            else _parse_many(ClusterProposalV2, value)
+        )
         if any(
             _contains_cluster_url(proposal.model_dump(mode="json"))
             or any(
@@ -595,34 +744,119 @@ class ResearchClaimModelAdapter:
         evidence_context: EvidenceContextV2,
         lease: BudgetLeaseReferenceV2,
     ) -> tuple[ClaimProposalV2, ...]:
-        value = await self.decisions.invoke(
-            "research.v2.claims",
-            {
-                "event_schema": _schema(EventClusterV2),
-                "evidence_schema": _schema(EvidenceRefV2),
-                "claim_schema": json.dumps(
-                    TypeAdapter(tuple[ClaimProposalV2, ...]).json_schema()
-                ),
-            },
-            {
-                "events": [item.model_dump(mode="json") for item in events],
-                "evidence_context": evidence_context.model_dump(mode="json"),
-                "prompt_version": "research.v2.claims@1.0.0",
-            },
-            lease,
-        )
-        proposals = _parse_many(ClaimProposalV2, value)
-        if any(
-            proposal.event_id not in {event.event_id for event in events}
-            or re.search(r"https?://", proposal.model_dump_json(), flags=re.IGNORECASE)
-            is not None
-            or not set(proposal.support_refs).issubset(
-                ref.evidence_id for ref in evidence_context.evidence_refs
-            )
-            for proposal in proposals
-        ):
+        schemas = {
+            "event_schema": _schema(EventClusterV2),
+            "evidence_schema": _schema(EvidenceRefV2),
+            "claim_schema": _schema(ClaimProposalBatchV2),
+        }
+        event_ids = {event.event_id for event in events}
+        evidence_ids = {ref.evidence_id for ref in evidence_context.evidence_refs}
+
+        async def request(selected: tuple[EventClusterV2, ...]) -> tuple[ClaimProposalV2, ...]:
+            payload: dict[str, object] = {
+                    "events": [item.model_dump(mode="json") for item in selected],
+                    "evidence_context": evidence_context.model_dump(mode="json"),
+                    "prompt_version": "research.v2.claims@1.0.0",
+                }
+            allowed_event_ids = {event.event_id for event in selected}
+            for attempt in range(2):
+                value = await self.decisions.invoke(
+                    "research.v2.claims", schemas, payload, lease
+                )
+                parsed = (
+                    _parse(ClaimProposalBatchV2, value).proposals
+                    if isinstance(value, dict) and "proposals" in value
+                    else _parse_many(ClaimProposalV2, value)
+                )
+                unknown_events = sum(
+                    proposal.event_id not in allowed_event_ids for proposal in parsed
+                )
+                urls = sum(
+                    re.search(
+                        r"https?://",
+                        proposal.model_dump_json(),
+                        flags=re.IGNORECASE,
+                    )
+                    is not None
+                    for proposal in parsed
+                )
+                unknown_refs = sum(
+                    not set(proposal.support_refs).issubset(evidence_ids)
+                    for proposal in parsed
+                )
+                if unknown_events == 0 and urls == 0 and unknown_refs == 0:
+                    return parsed
+                logger.warning(
+                    "event=research_claim_policy_rejected run_id=%s attempt=%s unknown_events=%s urls=%s unknown_refs=%s",
+                    self.decisions.run_context.run_id,
+                    attempt + 1,
+                    unknown_events,
+                    urls,
+                    unknown_refs,
+                )
+                payload = {
+                    **payload,
+                    "validation_feedback": (
+                        "上次输出包含未授权事件、URL 或证据引用；"
+                        "请仅使用输入原值重新输出。"
+                    ),
+                }
             raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
-        return proposals
+
+        proposals = await request(events)
+        events_by_id = {event.event_id: event for event in events}
+        documents_by_id = {
+            document.document_id: document for document in evidence_context.documents
+        }
+        evidence_by_id = {
+            ref.evidence_id: ref for ref in evidence_context.evidence_refs
+        }
+        valid_proposals = tuple(
+            proposal
+            for proposal in proposals
+            if not _validate_proposal(
+                proposal,
+                evidence_context,
+                events_by_id,
+                documents_by_id,
+                evidence_by_id,
+                EvidenceValidator(),
+            )
+        )
+        valid_event_ids = {proposal.event_id for proposal in valid_proposals}
+        missing = tuple(event for event in events if event.event_id not in valid_event_ids)
+        if missing:
+            logger.info(
+                "event=research_claim_model_retry_requested run_id=%s missing=%s events=%s",
+                self.decisions.run_context.run_id,
+                len(missing),
+                len(events),
+            )
+            retry = await request(missing)
+            valid_retry = tuple(
+                proposal
+                for proposal in retry
+                if not _validate_proposal(
+                    proposal,
+                    evidence_context,
+                    events_by_id,
+                    documents_by_id,
+                    evidence_by_id,
+                    EvidenceValidator(),
+                )
+            )
+            valid_proposals = (*valid_proposals, *valid_retry)
+            valid_event_ids.update(
+                proposal.event_id for proposal in valid_retry
+            )
+        still_missing = event_ids - valid_event_ids
+        if still_missing:
+            logger.warning(
+                "event=research_claim_model_incomplete run_id=%s missing=%s",
+                self.decisions.run_context.run_id,
+                len(still_missing),
+            )
+        return valid_proposals
 
 
 def _schema(model: type[BaseModel]) -> str:
@@ -633,8 +867,16 @@ def _parse[T: BaseModel](model: type[T], value: object) -> T:
     result = None
     try:
         result = model.model_validate(value)
-    except ValidationError:
-        pass
+    except ValidationError as exc:
+        logger.warning(
+            "event=research_model_schema_rejected model=%s value_type=%s errors=%s",
+            model.__name__,
+            type(value).__name__,
+            ",".join(
+                f"{'.'.join(str(part) for part in item['loc'])}:{item['type']}"
+                for item in exc.errors(include_input=False, include_url=False)[:12]
+            ),
+        )
     if result is None:
         raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
     return result
@@ -642,5 +884,12 @@ def _parse[T: BaseModel](model: type[T], value: object) -> T:
 
 def _parse_many[T: BaseModel](model: type[T], value: object) -> tuple[T, ...]:
     if not isinstance(value, list) or len(value) > 128:
+        keys = ",".join(sorted(value)) if isinstance(value, dict) else ""
+        logger.warning(
+            "event=research_model_batch_rejected model=%s value_type=%s keys=%s",
+            model.__name__,
+            type(value).__name__,
+            keys,
+        )
         raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
     return tuple(_parse(model, item) for item in value)

@@ -3,7 +3,13 @@ export type DeliverableKindV2 =
 
 export type ConfidenceV2 = 'high' | 'medium' | 'low';
 export type VerificationStatusV2 = 'verified' | 'partially_verified' | 'unverified' | 'conflicted';
-export type RankingBasisV2 = 'importance' | 'recency' | 'heat' | 'mixed' | 'evidence_order';
+export type RankingBasisV2 =
+  | 'importance'
+  | 'recency'
+  | 'heat'
+  | 'mixed'
+  | 'evidence_order'
+  | 'model_event_order';
 export type NextActionTypeV2 =
   | 'rewrite_for_platform'
   | 'expand_item'
@@ -227,7 +233,188 @@ export interface DeliverableSetV2 {
   warnings: WarningV2[];
 }
 
-export type DeliverableSetDto = DeliverableSetV1 | DeliverableSetV2;
+export type OperationScenarioV3 =
+  | 'industry_digest'
+  | 'multi_platform_content'
+  | 'brand_operation_plan'
+  | 'ip_operation_plan'
+  | 'campaign_plan'
+  | 'content_calendar'
+  | 'growth_experiment'
+  | 'operation_review';
+
+export interface MetricDefinitionV3 {
+  name: string;
+  definition: string;
+  observation_period: string;
+  purpose: string;
+}
+
+export interface RankedDigestContentV3 {
+  kind: 'ranked_digest';
+  topic: string;
+  time_window: string;
+  actual_count: number;
+  items: Array<{
+    rank: number;
+    title: string;
+    event_summary: string;
+    why_it_matters: string;
+    operator_insight: string;
+    occurred_at: string | null;
+  }>;
+}
+
+export interface PlatformContentV3 {
+  kind: 'platform_content';
+  platform: 'wechat_official_account' | 'xiaohongshu' | 'toutiao';
+  title: string;
+  introduction: string;
+  sections: Array<{
+    heading: string;
+    facts: string[];
+    analysis: string[];
+    operator_takeaway: string;
+  }>;
+  closing: string;
+  hashtags: string[];
+}
+
+export interface BrandPlanV3 {
+  kind: 'brand_plan';
+  current_context: string[];
+  objectives: string[];
+  positioning: string;
+  audience_segments: Record<string, unknown>[];
+  value_proposition: string[];
+  content_pillars: Record<string, unknown>[];
+  channel_strategy: Record<string, unknown>[];
+  roadmap: Record<string, unknown>[];
+  metric_framework: MetricDefinitionV3[];
+  risks: string[];
+  next_actions: string[];
+}
+
+export interface IpPlanV3 {
+  kind: 'ip_plan';
+  ip_profile: string[];
+  positioning: string;
+  audience: Record<string, unknown>[];
+  differentiators: string[];
+  persona_rules: string[];
+  content_columns: Record<string, unknown>[];
+  voice_style: string[];
+  interaction_mechanism: string[];
+  growth_phases: Record<string, unknown>[];
+  metrics: MetricDefinitionV3[];
+  risks: string[];
+}
+
+export interface CampaignPlanV3 {
+  kind: 'campaign_plan';
+  objective: string;
+  theme: string;
+  value_proposition: string;
+  audience: Record<string, unknown>[];
+  mechanics: string[];
+  participant_journey: Record<string, unknown>[];
+  timeline: Record<string, unknown>[];
+  channel_plan: Record<string, unknown>[];
+  asset_checklist: Record<string, unknown>[];
+  metric_framework: MetricDefinitionV3[];
+  risks: string[];
+  contingencies: string[];
+}
+
+export interface ContentCalendarV3 {
+  kind: 'content_calendar';
+  period: { start_date: string; end_date: string; timezone: string };
+  cadence: Record<string, unknown>[];
+  entries: Array<{
+    publish_at: string;
+    platform: string;
+    topic: string;
+    format: string;
+    objective: string;
+    angle: string;
+    cta: string;
+    dependencies: string[];
+  }>;
+}
+
+export interface GrowthExperimentV3 {
+  kind: 'growth_experiment';
+  business_goal: string;
+  funnel_stage: string;
+  current_problem: string;
+  experiments: Array<{
+    hypothesis: string;
+    target_segment: string;
+    design: string[];
+    variants: string[];
+    primary_metric: MetricDefinitionV3;
+    guardrail_metrics: MetricDefinitionV3[];
+    data_requirements: string[];
+    duration: string;
+    stopping_rule: string;
+    decision_rule: string;
+    cost_and_risk: string[];
+  }>;
+}
+
+export interface OperationReviewV3 {
+  kind: 'operation_review';
+  review_period: string;
+  comparison_period: string;
+  metric_table: Array<{
+    name: string;
+    definition: string;
+    current_value: string;
+    comparison_value: string | null;
+    change: string | null;
+    data_source: string;
+  }>;
+  verified_changes: string[];
+  confirmed_causes: Array<{ cause: string; evidence_refs: string[] }>;
+  hypotheses: Array<{ explanation: string; validation_method: string; required_data: string[] }>;
+  wins: string[];
+  issues: string[];
+  data_gaps: string[];
+  next_actions: Record<string, unknown>[];
+}
+
+export type OperationContentV3 =
+  | RankedDigestContentV3
+  | PlatformContentV3
+  | BrandPlanV3
+  | IpPlanV3
+  | CampaignPlanV3
+  | ContentCalendarV3
+  | GrowthExperimentV3
+  | OperationReviewV3;
+
+export interface OperationDeliverableV3 {
+  contract_version: 'deliverable/3';
+  deliverable_id: string;
+  scenario: OperationScenarioV3;
+  platform: string | null;
+  title: string;
+  copy_text: string;
+  content: OperationContentV3;
+  warnings: WarningV2[];
+}
+
+export interface DeliverableSetV3 {
+  contract_version: 'deliverable-set/3';
+  run_id: string;
+  intent_revision: number;
+  summary: DeliverySummaryV2;
+  deliverables: OperationDeliverableV3[];
+  degraded: boolean;
+  warnings: WarningV2[];
+}
+
+export type DeliverableSetDto = DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3;
 
 export interface LegacyDeliveryViewModel {
   kind: 'legacy';
@@ -323,4 +510,17 @@ export interface DeliverySetV2ViewModel {
   citationsById: Record<string, CitationV2>;
 }
 
-export type OperationDeliveryViewModel = LegacyDeliveryViewModel | DeliverySetV2ViewModel;
+export interface DeliverySetV3ViewModel {
+  kind: 'v3';
+  runId: string;
+  intentRevision: number;
+  summary: DeliverySummaryV2;
+  deliverables: OperationDeliverableV3[];
+  degraded: boolean;
+  warnings: WarningV2[];
+}
+
+export type OperationDeliveryViewModel =
+  | LegacyDeliveryViewModel
+  | DeliverySetV2ViewModel
+  | DeliverySetV3ViewModel;

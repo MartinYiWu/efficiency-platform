@@ -10,9 +10,19 @@ public record OperationAgentMessageRequest(
         @JsonProperty("request_id") String requestId,
         @JsonProperty("user_id") String userId,
         List<Object> attachments,
+        List<OperationAgentArtifactContext> artifacts,
         @JsonIgnore String tenantId) {
 
     public OperationAgentMessageRequest(String message, String requestId, String userId, String tenantId) {
-        this("conversation/1", message, requestId, userId, List.of(), tenantId);
+        this("conversation/1", message, requestId, userId, List.of(), List.of(), tenantId);
+    }
+
+    public OperationAgentMessageRequest(
+            String message,
+            String requestId,
+            String userId,
+            List<OperationAgentArtifactContext> artifacts,
+            String tenantId) {
+        this("conversation/1", message, requestId, userId, List.of(), List.copyOf(artifacts), tenantId);
     }
 }

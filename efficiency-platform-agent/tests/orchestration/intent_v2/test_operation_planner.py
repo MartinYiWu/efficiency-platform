@@ -15,6 +15,7 @@ from efficiency_platform_agent.core.model import (
     ModelTier,
 )
 from efficiency_platform_agent.core.run import (
+    JsonObject,
     ProviderMessage,
     ProviderResult,
     ProviderUsage,
@@ -184,6 +185,12 @@ async def test_planner_accepts_all_eight_operation_scenarios(scenario: str) -> N
         "developer",
         "user",
     ]
+    option_names = {name for name, _ in runtime.calls[0][1].options.items}
+    assert "response_format" in option_names
+    assert "json_schema" not in option_names
+    assert dict(runtime.calls[0][1].options.items)["thinking"] == JsonObject(
+        (("type", "disabled"),)
+    )
 
 
 @pytest.mark.asyncio
@@ -204,6 +211,9 @@ async def test_planner_repairs_invalid_output_once_and_uses_repair_prompt() -> N
         "intent.plan",
         "intent.repair",
     ]
+    repair_errors = assembler.calls[1]["variables"]["validation_errors"].value
+    assert repair_errors[0]["location"] == "route_kind"
+    assert repair_errors[0]["type"] == "missing"
     assert len(runtime.calls) == 2
 
 

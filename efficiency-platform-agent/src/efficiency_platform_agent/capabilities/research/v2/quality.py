@@ -247,7 +247,7 @@ def _claims_have_complete_content(
         ]
         if not any(
             item is not None
-            and item.content_scope in {"summary", "full", "platform_text"}
+            and item.content_scope in {"full", "platform_text"}
             for item in supporting_documents
         ):
             return False

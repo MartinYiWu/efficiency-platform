@@ -23,7 +23,7 @@ from efficiency_platform_agent.providers.research.transport import PinnedRespons
 from efficiency_platform_agent.tools.external.research import _freeze, _thaw
 from efficiency_platform_agent.tools.runtime.service import ToolLeaseContext
 
-NOW = datetime(2026, 9, 17, 14, tzinfo=UTC)
+NOW = datetime(2026, 10, 15, 14, tzinfo=UTC)
 ROOT = Path(__file__).resolve().parents[3]
 REMAINING = RemainingBudget(50, 60, 1000, 1000, 1000, 180_000)
 

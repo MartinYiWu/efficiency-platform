@@ -230,8 +230,6 @@ class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
     @model_validator(mode="after")
     def validate_platform_presentation(self) -> PlatformContentDeliverableV2:
         body = self.content.body_markdown.strip()
-        if re.search(r"<[A-Za-z][^>]*>", body):
-            raise ValueError("PLATFORM_CONTENT_HTML_FORBIDDEN")
         if self.platform == "wechat_official_account":
             chinese_count = len(
                 re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", body)
@@ -245,7 +243,7 @@ class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
                 raise ValueError("WECHAT_MARKDOWN_STRUCTURE_INVALID")
             if not has_complete_wechat_hotspot_fields(body):
                 raise ValueError("WECHAT_HOTSPOT_STRUCTURE_INVALID")
-        elif self.platform == "xiaohongshu":
+        elif self.platform == "xiaohongshu" and self.copy_text == "":
             paragraphs = [
                 value.strip()
                 for value in re.split(r"\n\s*\n", body)
@@ -403,12 +401,6 @@ class DeliverableSetV2(_OperationContractV2Model):
     warnings: list[WarningV2] = Field(default_factory=list, max_length=100)
 
 
-DeliverableSet = Annotated[
-    DeliverableSetV1 | DeliverableSetV2,
-    Field(discriminator="contract_version"),
-]
-
-
 class _OperationContractV3Model(BaseModel):
     """八场景对外内容契约；内部来源闭包不进入这些模型。"""
 
@@ -425,7 +417,7 @@ class IndustryDigestItemV1(_OperationContractV3Model):
 
 
 class IndustryDigestV1(_OperationContractV3Model):
-    kind: Literal["industry_digest"] = "industry_digest"
+    kind: Literal["ranked_digest"] = "ranked_digest"
     topic: str = Field(min_length=1)
     time_window: str = Field(min_length=1)
     items: list[IndustryDigestItemV1] = Field(min_length=1, max_length=100)
@@ -448,7 +440,7 @@ class ArticleSectionV1(_OperationContractV3Model):
 
 
 class ArticleDraftV1(_OperationContractV3Model):
-    kind: Literal["article_draft"] = "article_draft"
+    kind: Literal["platform_content"] = "platform_content"
     platform: Literal["wechat_official_account", "xiaohongshu", "toutiao"]
     title: str = Field(min_length=1)
     introduction: str = Field(min_length=1)
@@ -478,7 +470,7 @@ class ArticleDraftV1(_OperationContractV3Model):
             )
             count = len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", visible))
             if not 3_000 <= count <= 4_000:
-                raise ValueError("WECHAT_BODY_CHINESE_LENGTH_INVALID")
+                raise ValueError(f"WECHAT_BODY_CHINESE_LENGTH_INVALID:{count}")
             if self.hashtags:
                 raise ValueError("WECHAT_HASHTAGS_FORBIDDEN")
         return self
@@ -591,7 +583,7 @@ class GrowthExperimentV1(_OperationContractV3Model):
 
 
 class GrowthExperimentBacklogV1(_OperationContractV3Model):
-    kind: Literal["growth_experiment_backlog"] = "growth_experiment_backlog"
+    kind: Literal["growth_experiment"] = "growth_experiment"
     business_goal: str = Field(min_length=1)
     funnel_stage: str = Field(min_length=1)
     current_problem: str = Field(min_length=1)
@@ -648,9 +640,94 @@ OperationContentV3 = Annotated[
 class OperationDeliverableV3(_OperationContractV3Model):
     contract_version: Literal["deliverable/3"] = "deliverable/3"
     deliverable_id: str = Field(min_length=1)
+    scenario: Literal[
+        "industry_digest",
+        "multi_platform_content",
+        "brand_operation_plan",
+        "ip_operation_plan",
+        "campaign_plan",
+        "content_calendar",
+        "growth_experiment",
+        "operation_review",
+    ]
+    platform: str | None = None
     title: str = Field(min_length=1)
+    copy_text: str = Field(min_length=1)
     content: OperationContentV3
     warnings: list[WarningV2] = Field(default_factory=list)
+
+
+class DeliverableSetV3(_OperationContractV3Model):
+    contract_version: Literal["deliverable-set/3"] = "deliverable-set/3"
+    run_id: str = Field(min_length=1)
+    intent_revision: int = Field(ge=0)
+    summary: DeliverySummaryV2
+    deliverables: list[OperationDeliverableV3] = Field(max_length=20)
+    degraded: bool = False
+    warnings: list[WarningV2] = Field(default_factory=list, max_length=100)
+
+
+def render_operation_content_v3(content: OperationContentV3) -> str:
+    """把强类型内容确定性渲染为可复制文本，不让模型控制外层排版。"""
+
+    if isinstance(content, ArticleDraftV1):
+        sections = []
+        for section in content.sections:
+            parts = [f"## {section.heading}"]
+            if section.facts:
+                parts.extend(("### 事实", _markdown_list(section.facts)))
+            if section.analysis:
+                parts.extend(("### 分析", _markdown_list(section.analysis)))
+            parts.extend(("### 运营建议", section.operator_takeaway))
+            sections.append("\n\n".join(parts))
+        parts = [f"# {content.title}", content.introduction, *sections, content.closing]
+        if content.hashtags:
+            parts.append(" ".join(f"#{item.lstrip('#')}" for item in content.hashtags))
+        return "\n\n".join(parts)
+    if isinstance(content, IndustryDigestV1):
+        items = [
+            "\n\n".join(
+                (
+                    f"## {item.rank}. {item.title}",
+                    f"**事实**\n\n{item.event_summary}",
+                    f"**影响**\n\n{item.why_it_matters}",
+                    f"**运营观察**\n\n{item.operator_insight}",
+                )
+            )
+            for item in content.items
+        ]
+        return "\n\n".join((f"# {content.topic}", f"时间范围：{content.time_window}", *items))
+    title = {
+        "brand_plan": "品牌运营方案",
+        "ip_plan": "IP 运营方案",
+        "campaign_plan": "活动运营方案",
+        "content_calendar": "内容日历",
+        "growth_experiment": "增长实验方案",
+        "operation_review": "运营复盘",
+    }[content.kind]
+    return f"# {title}\n\n" + _render_mapping(content.model_dump(mode="json", exclude={"kind"}))
+
+
+def _markdown_list(values: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in values)
+
+
+def _render_mapping(value: object, *, depth: int = 2) -> str:
+    if isinstance(value, dict):
+        parts = []
+        for key, item in value.items():
+            heading = "#" * min(depth, 6)
+            parts.append(f"{heading} {key}\n\n{_render_mapping(item, depth=depth + 1)}")
+        return "\n\n".join(parts)
+    if isinstance(value, list):
+        return "\n".join(f"- {_render_mapping(item, depth=depth + 1)}" for item in value)
+    return str(value)
+
+
+DeliverableSet = Annotated[
+    DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3,
+    Field(discriminator="contract_version"),
+]
 
 
 __all__ = [
@@ -667,6 +744,7 @@ __all__ = [
     "DeliverableSet",
     "DeliverableSetV1",
     "DeliverableSetV2",
+    "DeliverableSetV3",
     "DeliverableV1",
     "DeliveryProvenanceV2",
     "DeliverySummaryV2",
@@ -695,4 +773,5 @@ __all__ = [
     "RetrospectiveDeliverableV2",
     "VerificationStatusV2",
     "WarningV2",
+    "render_operation_content_v3",
 ]

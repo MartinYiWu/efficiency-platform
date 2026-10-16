@@ -63,6 +63,12 @@ describe('StreamingAssistantContent', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('刷新恢复的 frozen 历史消息在首次挂载时直接完整显示', () => {
+    render(<StreamingAssistantContent {...contentProps('已持久化的助手回复', 'frozen')} />);
+
+    expect(screen.getByLabelText('助手回复')).toHaveTextContent('已持久化的助手回复');
+  });
+
   it('取消后冻结已可见部分，不瞬间揭示尚未显示的全文', async () => {
     vi.useFakeTimers();
     const { rerender } = render(

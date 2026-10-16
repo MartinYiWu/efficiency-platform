@@ -18,7 +18,7 @@ from efficiency_platform_agent.contracts.research_local_runtime_v2 import (
 )
 from efficiency_platform_agent.contracts.research_v2 import DeliveryPackV2
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("efficiency_platform_agent.execution")
 
 
 class RankedReferencePersistenceError(ValueError):

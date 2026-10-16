@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from efficiency_platform_agent.contracts.conversation import (
+    ConversationArtifactV1,
     ConversationMessageV1,
     ConversationSubmitViewV1,
     RunDisplayStatus,
@@ -55,6 +56,28 @@ def test_conversation_message_rejects_attachments_in_this_iteration() -> None:
             user_id="user-1",
             attachments=[{"name": "file.txt"}],
         )
+
+
+def test_conversation_message_accepts_bounded_java_authorized_artifact() -> None:
+    message = ConversationMessageV1(
+        message="修改上一版",
+        request_id="request-artifact",
+        user_id="user-1",
+        artifacts=(
+            ConversationArtifactV1(
+                artifact_id="artifact-1",
+                root_artifact_id="artifact-1",
+                version=1,
+                artifact_type="brand_plan",
+                scenario="brand_operation_plan",
+                title="品牌运营方案",
+                content={"kind": "brand_plan"},
+                body_markdown="# 品牌运营方案",
+            ),
+        ),
+    )
+
+    assert message.artifacts[0].artifact_id == "artifact-1"
 
 
 def test_run_display_status_covers_degraded_completion() -> None:

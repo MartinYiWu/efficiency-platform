@@ -100,6 +100,19 @@ async def test_stream_done_closes_history_and_rejects_late_event() -> None:
 
 
 @pytest.mark.asyncio
+async def test_waiting_input_stream_done_keeps_run_resumable() -> None:
+    hub = EventHub()
+    await hub.publish(event(1, name="run_started"))
+    await hub.publish(
+        event(2, name="stream_done", payload={"status": "waiting_input"})
+    )
+
+    assert hub.is_closed("run-1") is False
+    resumed = await hub.publish_next("run-1", "run_started", {"status": "running"})
+    assert resumed.sequence == 3
+
+
+@pytest.mark.asyncio
 async def test_publish_rejects_non_monotonic_sequence() -> None:
     hub = EventHub()
     await hub.publish(event(2, name="run_started"))

@@ -288,7 +288,7 @@ async def graph_case(*, count, target):
     from efficiency_platform_agent.providers.research.transport import PinnedResponse
 
     items = "".join(
-        f"<item><title>Acme AI {i}</title><link>https://blog.google/{path}</link><guid>{i}</guid><pubDate>Tue, 15 Sep 2026 00:00:00 GMT</pubDate><description>summary</description></item>"
+        f"<item><title>Acme AI {i}</title><link>https://blog.google/{path}</link><guid>{i}</guid><pubDate>Wed, 14 Oct 2026 00:00:00 GMT</pubDate><description>summary</description></item>"
         for i, path in enumerate(("article", "second", "third")[:count])
     )
     feed = PinnedResponse(

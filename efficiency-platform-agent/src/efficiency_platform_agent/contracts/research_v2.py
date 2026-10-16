@@ -312,7 +312,9 @@ class DeliveryPackV2(_FrozenContract):
     gap_codes: tuple[str, ...] = Field(default=(), max_length=256)
     content: str = Field(min_length=1, max_length=200_000)
     summary: str | None = Field(default=None, min_length=1, max_length=1_000)
-    ranking_basis: Literal["evidence_order"] | None = None
+    ranking_basis: Literal[
+        "importance", "heat", "recency", "evidence_order", "model_event_order"
+    ] | None = None
     limitations: tuple[str, ...] = Field(default=(), max_length=128)
     renderer_version: str = Field(min_length=1, max_length=128)
     output_verified: bool = False

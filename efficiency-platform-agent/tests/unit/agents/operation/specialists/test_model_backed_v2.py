@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -24,10 +25,15 @@ from efficiency_platform_agent.agents.operation.specialists.model_backed import 
     freeze,
     plain,
 )
+from efficiency_platform_agent.contracts.deliverables import (
+    BrandPlanV1,
+    OperationDeliverableV3,
+)
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
     JsonObject,
     ProviderMessage,
+    ProviderRequest,
     SupervisorTask,
 )
 from efficiency_platform_agent.core.runtime import UsageSnapshot
@@ -105,11 +111,13 @@ class RecordingModel:
     def __init__(self, *outputs: Any) -> None:
         self.outputs = list(outputs)
         self.requests: list[Any] = []
+        self.demands: list[Any] = []
         self.budgets: list[Any] = []
 
     async def complete(
         self, demand: Any, request: Any, *, remaining_budget: Any
     ) -> Any:
+        self.demands.append(demand)
         self.requests.append(request)
         self.budgets.append(remaining_budget)
         output = self.outputs.pop(0)
@@ -119,7 +127,11 @@ class RecordingModel:
                 error=error,
                 message=None
                 if error
-                else ProviderMessage("assistant", json.dumps(output)),
+                else (
+                    output
+                    if isinstance(output, ProviderMessage)
+                    else ProviderMessage("assistant", json.dumps(output))
+                ),
             ),
             usage=UsageSnapshot(input_tokens=10, output_tokens=20, cost_microunits=1),
             attempts=("attempt",),
@@ -183,6 +195,57 @@ def payload(result: Any) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
+async def test_v3_specialist_delegates_to_scenario_executor_without_generic_prompt() -> None:
+    class ScenarioExecutor:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def generate(self, **kwargs):
+            self.calls.append(kwargs)
+            content = BrandPlanV1(
+                current_context=["冷启动"],
+                objectives=["建立认知"],
+                positioning="效率工具",
+                audience_segments=[{"name": "运营负责人"}],
+                value_proposition=["提升效率"],
+                content_pillars=[{"name": "实战"}],
+                channel_strategy=[{"channel": "公众号"}],
+                roadmap=[{"phase": "验证"}],
+                metric_framework=[
+                    {
+                        "name": "互动率",
+                        "definition": "互动/曝光",
+                        "observation_period": "每周",
+                        "purpose": "评估内容",
+                    }
+                ],
+                next_actions=["访谈用户"],
+            )
+            return OperationDeliverableV3(
+                deliverable_id="temporary",
+                scenario="brand_operation_plan",
+                title="品牌方案",
+                copy_text="# 品牌方案",
+                content=content,
+            )
+
+    executor = ScenarioExecutor()
+    model = RecordingModel()
+    result = await specialist(
+        model,
+        "operation.brand.strategy",
+        deliverable_contract_version="deliverable/3",
+        scenario_executor=executor,
+    ).run(task("operation.brand.strategy"))
+
+    result_payload = payload(result)
+    assert model.requests == []
+    assert executor.calls[0]["scenario"] == "brand_operation_plan"
+    assert result_payload["deliverable_id"] == "delivery-1"
+    assert result_payload["content"]["kind"] == "brand_plan"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("capability", "kind"),
     [
@@ -201,6 +264,11 @@ async def test_v2_uses_specific_draft_schema_and_returns_formal_payload(
     schema = plain(model.requests[0].options)["response_format"]["json_schema"]
     assert schema["name"] == "operation_" + kind
     assert schema["schema"]["properties"]["copy_text"]["const"] == ""
+    trusted_schema = json.loads(
+        model.requests[0].messages[-2].content.split("：", 1)[1]
+    )
+    assert trusted_schema["authority_fields"]["deliverable_kind"] == kind
+    assert trusted_schema["output_schema"]["additionalProperties"] is False
     assert result["contract_version"] == "deliverable/2"
     assert result["content"]["kind"] == kind
     assert result["copy_text"]
@@ -212,6 +280,16 @@ async def test_v2_uses_specific_draft_schema_and_returns_formal_payload(
     assert result["citations"][0]["supports_item_ids"] == (
         ["item-1"] if kind == "ranked_digest" else []
     )
+
+
+@pytest.mark.asyncio
+async def test_model_demand_estimates_tokens_instead_of_counting_characters() -> None:
+    model = RecordingModel(draft("action_plan"))
+    await specialist(model, "operation.campaign.plan").run(
+        task("operation.campaign.plan")
+    )
+    request_chars = sum(len(message.content) for message in model.requests[0].messages)
+    assert model.demands[0].estimated_input_tokens <= (request_chars + 3) // 4
 
 
 @pytest.mark.asyncio
@@ -570,31 +648,226 @@ def _wechat_draft(chinese_characters: int) -> dict[str, Any]:
     value["content"]["body_markdown"] = "\n\n".join(
         (
             "# 本周人工智能行业观察",
-            "## 事实与变化",
+            "导语说明本周值得关注的人工智能动态。",
+            "## 一、事实与变化",
+            "**事实**：",
             "这" * (chinese_characters // 2),
-            "## 影响与运营观察",
+            "**影响**：",
             "人" * (chinese_characters - chinese_characters // 2),
-            "## 结语",
+            "**运营观察**：应继续追踪已核验来源。",
+            "## 收束",
+            "以上判断以现有证据为边界。",
         )
     )
     return value
 
 
+def _structured_wechat_rewrite(hotspot_count: int) -> dict[str, Any]:
+    return {
+        "introduction": "导" * 240,
+        "hotspots": [
+            {
+                "fact": "事" * 1_000,
+                "impact": "影" * 1_000,
+                "operation_observation": "运" * 1_000,
+            }
+            for _ in range(hotspot_count)
+        ],
+        "closing": "收" * 240,
+    }
+
+
 @pytest.mark.asyncio
-async def test_wechat_quality_failure_is_repaired_once_with_safe_error_summary() -> None:
-    model = RecordingModel(_wechat_draft(200), _wechat_draft(3200))
+async def test_trailing_model_text_is_removed_before_strict_validation() -> None:
+    raw = json.dumps(_wechat_draft(3200), ensure_ascii=False) + "\n尾随解释不得进入交付物"
+    model = RecordingModel(ProviderMessage("assistant", raw))
+
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task("operation.content.create", platform="wechat_official_account")
+        )
+    )
+
+    assert len(model.requests) == 1
+    assert "尾随解释" not in result["content"]["body_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_quality_failure_is_repaired_once_with_structured_schema() -> None:
+    model = RecordingModel(
+        _wechat_draft(200),
+        {
+            "background_and_impact": ["背" * 220] * 5,
+            "content_strategy": ["策" * 220] * 5,
+            "action_guidance": ["行" * 220] * 5,
+        },
+    )
     result = payload(
         await specialist(model, "operation.content.create").run(
             task(
                 "operation.content.create",
                 platform="wechat_official_account",
+                input_deliverables=[{"item_id": f"item-{index}"} for index in range(3)],
             )
         )
     )
 
     assert len(model.requests) == 2
-    assert "WECHAT_BODY_CHINESE_LENGTH_INVALID" in model.requests[1].messages[-2].content
+    assert "wechat_supplement" in json.dumps(
+        plain(model.requests[1].options), ensure_ascii=False
+    )
+    assert "只补写公众号文章" in model.requests[1].messages[0].content
+    assert "顶层只能包含 background_and_impact、content_strategy、action_guidance" in (
+        model.requests[1].messages[0].content
+    )
+    assert "每个字段固定写 5 个自然段" in model.requests[1].messages[0].content
+    assert '"required"' not in model.requests[1].messages[0].content
+    assert "仅长度不足" in model.requests[1].messages[-1].content
+    assert model.demands[0].requested_tier.value == "balanced"
     assert result["platform"] == "wechat_official_account"
+
+
+@pytest.mark.asyncio
+async def test_wechat_length_failure_uses_one_structured_supplement_repair() -> None:
+    model = RecordingModel(
+        _wechat_draft(2_400),
+        {
+            "background_and_impact": ["背" * 120] * 2,
+            "content_strategy": ["策" * 120] * 2,
+            "action_guidance": ["行" * 120] * 2,
+            "action_guidance_note": "模型额外解释不会进入文章",
+        },
+    )
+    run_task = task(
+        "operation.content.create",
+        platform="wechat_official_account",
+        input_deliverables=[{"item_id": f"item-{index}"} for index in range(3)],
+    )
+    run_task = replace(
+        run_task,
+        budget=ExecutionBudget(4, 0, 24_000, 24_000, 180_000, 30_000),
+    )
+
+    result = payload(await specialist(model, "operation.content.create").run(run_task))
+
+    assert len(model.requests) == 2
+    assert "wechat_supplement" in json.dumps(
+        plain(model.requests[1].options), ensure_ascii=False
+    )
+    assert "每个字段固定写 2 个自然段" in (
+        model.requests[1].messages[0].content
+    )
+    assert "运营背景与影响" in result["content"]["body_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_length_repair_rewrites_when_hotspot_structure_is_missing() -> None:
+    invalid = _wechat_draft(1_200)
+    invalid["content"]["body_markdown"] = "\n\n".join(
+        (
+            "# 本周人工智能行业观察",
+            "## 热点一",
+            "原" * 1_200,
+            "## 结语",
+            "以上为本周观察。",
+        )
+    )
+    model = RecordingModel(invalid, _structured_wechat_rewrite(1))
+
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task("operation.content.create", platform="wechat_official_account")
+        )
+    )
+
+    assert len(model.requests) == 2
+    repair_options = json.dumps(plain(model.requests[1].options), ensure_ascii=False)
+    assert "wechat_structured_rewrite" in repair_options
+    assert "wechat_supplement" not in repair_options
+    assert "只输出 introduction、hotspots、closing 三个字段" in "\n".join(
+        message.content for message in model.requests[1].messages
+    )
+    assert result["platform"] == "wechat_official_account"
+    assert "**事实**" in result["content"]["body_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_structured_repair_retries_with_the_same_json_shape_when_short() -> None:
+    invalid = _wechat_draft(1_200)
+    invalid["content"]["body_markdown"] = "\n\n".join(
+        ("# 本周人工智能行业观察", "## 热点一", "原" * 1_200, "## 结语")
+    )
+    short_rewrite = _structured_wechat_rewrite(1)
+    short_rewrite["introduction"] = "导" * 30
+    short_rewrite["hotspots"][0] = {
+        "fact": "事" * 30,
+        "impact": "影" * 30,
+        "operation_observation": "运" * 30,
+    }
+    short_rewrite["closing"] = "收" * 30
+    model = RecordingModel(invalid, short_rewrite, _structured_wechat_rewrite(1))
+
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task("operation.content.create", platform="wechat_official_account")
+        )
+    )
+
+    assert len(model.requests) == 3
+    assert "上一版结构化改写的内容太短" in model.requests[2].messages[0].content
+    retry_options = json.dumps(plain(model.requests[2].options), ensure_ascii=False)
+    assert "wechat_structured_rewrite" in retry_options
+    body = result["content"]["body_markdown"]
+    assert len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", body)) >= 3_000
+
+
+@pytest.mark.asyncio
+async def test_wechat_supplement_is_the_only_semantic_repair() -> None:
+    model = RecordingModel(
+        _wechat_draft(2_500),
+        {
+            "background_and_impact": ["背" * 100] * 2,
+            "content_strategy": ["策" * 100] * 2,
+            "action_guidance": ["行" * 100] * 2,
+        },
+    )
+    run_task = task(
+        "operation.content.create",
+        platform="wechat_official_account",
+        input_deliverables=[{"item_id": f"item-{index}"} for index in range(3)],
+    )
+    run_task = replace(
+        run_task,
+        budget=ExecutionBudget(4, 0, 24_000, 24_000, 180_000, 30_000),
+    )
+
+    result = payload(await specialist(model, "operation.content.create").run(run_task))
+
+    assert len(model.requests) == 2
+    assert "内容选题方法" in result["content"]["body_markdown"]
+    assert "行动启示" in result["content"]["body_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_near_minimum_length_uses_one_paragraph_without_overshoot() -> None:
+    model = RecordingModel(
+        _wechat_draft(2_900),
+        {
+            "background_and_impact": ["背" * 100],
+            "content_strategy": ["策" * 100],
+            "action_guidance": ["行" * 100],
+        },
+    )
+
+    result = payload(
+        await specialist(model, "operation.content.create").run(
+            task("operation.content.create", platform="wechat_official_account")
+        )
+    )
+
+    assert "每个字段固定写 1 个自然段" in model.requests[1].messages[0].content
+    body = result["content"]["body_markdown"]
+    assert len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", body)) <= 4_000
 
 
 @pytest.mark.asyncio
@@ -625,8 +898,9 @@ async def test_referenced_content_runtime_always_delegates_to_model() -> None:
     output = _wechat_draft(3200)
     delegate = RecordingModel(output)
     runtime = ReferencedContentModelRuntime(delegate)
-    request = SimpleNamespace(
-        messages=(
+    request = ProviderRequest(
+        "operation-model/1",
+        (
             ProviderMessage(
                 "user",
                 json.dumps(
@@ -636,10 +910,37 @@ async def test_referenced_content_runtime_always_delegates_to_model() -> None:
                     }
                 ),
             ),
-        )
+            ProviderMessage(
+                "user",
+                json.dumps({"content": {"body_markdown": "上一版待修草稿"}}),
+            ),
+        ),
+        JsonObject(),
+        30_000,
     )
 
     result = await runtime.complete(None, request, remaining_budget=None)
 
     assert result.result.message is not None
     assert len(delegate.requests) == 1
+    assert plain(delegate.requests[0].options)["thinking"] == {"type": "disabled"}
+
+
+@pytest.mark.asyncio
+async def test_referenced_content_keeps_provider_usage_below_run_output_budget() -> None:
+    output = _wechat_draft(3200)
+    model = RecordingModel(output)
+    referenced_task = replace(
+        task(
+            "operation.channel.content",
+            platform="wechat_official_account",
+            input_deliverables=[{"item": {"item_id": "item-1"}}],
+        ),
+        budget=ExecutionBudget(4, 0, 20_000, 8_000, 90_000, 100_000),
+    )
+
+    await specialist(model, "operation.channel.content").run(referenced_task)
+
+    assert plain(model.requests[0].options)["max_tokens"] == 7_500
+    assert model.demands[0].max_output_tokens == 7_500
+    assert model.budgets[0].output_tokens == 8_000

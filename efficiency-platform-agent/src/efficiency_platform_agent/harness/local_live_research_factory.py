@@ -502,6 +502,7 @@ def build_local_live_research_components(
             binding=execution.binding,
             cancellation_signal=cancellation,
             deadline_monotonic=deadline_monotonic,
+            ranking_basis=execution.brief.ranking_mode,
         )
         stages = LocalLiveResearchStageRunner(
             key=key,
@@ -559,6 +560,7 @@ def build_local_live_research_components(
             resolvers,
             cancellation_signal=resolvers,
             deterministic_resolver=resolve_explicit_research_patch,
+            timeout_ms=60_000,
         ),
         validator=IntentPatchValidator(),
         reducer=IntentStateReducer(),

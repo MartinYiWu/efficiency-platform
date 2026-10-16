@@ -22,7 +22,11 @@ from efficiency_platform_agent.agents.operation.contracts.task import (
     OperationRequest,
     OperationTaskSpec,
 )
-from efficiency_platform_agent.contracts.referenced_inputs import ReferencedRankedInput
+from efficiency_platform_agent.contracts.referenced_inputs import (
+    ReferencedArtifactInput,
+    ReferencedInput,
+    ReferencedRankedInput,
+)
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
 
 _ID = re.compile(r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?")
@@ -52,7 +56,7 @@ class ScenarioSubmission:
     task_spec: OperationTaskSpec
     profile_candidates: tuple[object, ...]
     evidence_pack: EvidencePack | None
-    referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
+    referenced_inputs: tuple[ReferencedInput, ...] = ()
 
     def __post_init__(self) -> None:
         if self.contract_version != "scenario-submission/1":
@@ -87,7 +91,7 @@ class ScenarioSupervisorRequest:
     operation_context: OperationContext
     operation_plan: OperationPlan
     evidence_pack: EvidencePack | None
-    referenced_inputs: tuple[ReferencedRankedInput, ...] = ()
+    referenced_inputs: tuple[ReferencedInput, ...] = ()
 
     def __post_init__(self) -> None:
         if self.contract_version != "scenario-supervisor-request/1":
@@ -107,25 +111,35 @@ def _validate_references(references, request: OperationRequest) -> None:
     if not isinstance(references, tuple) or len(references) > 20:
         raise ValueError("SCENARIO_REFERENCE_INVALID")
     for reference in references:
-        if not isinstance(reference, ReferencedRankedInput):
-            raise TypeError("referenced_inputs必须是类型化排名引用")
+        if not isinstance(reference, (ReferencedRankedInput, ReferencedArtifactInput)):
+            raise TypeError("referenced_inputs必须是类型化引用")
         if (
             reference.tenant_id != request.request.tenant_id
             or reference.user_id != request.request.user_id
         ):
             raise ValueError("SCENARIO_IDENTITY_MISMATCH")
-    if references:
+    ranked = tuple(
+        item for item in references if isinstance(item, ReferencedRankedInput)
+    )
+    artifacts = tuple(
+        item for item in references if isinstance(item, ReferencedArtifactInput)
+    )
+    if ranked and artifacts:
+        raise ValueError("SCENARIO_REFERENCE_INVALID")
+    if ranked:
         scope = {
             (
                 item.conversation_id,
                 item.source_run_id,
                 item.source_deliverable_id,
             )
-            for item in references
+            for item in ranked
         }
-        item_ids = [item.item.item_id for item in references]
+        item_ids = [item.item.item_id for item in ranked]
         if len(scope) != 1 or len(item_ids) != len(set(item_ids)):
             raise ValueError("SCENARIO_REFERENCE_INVALID")
+    if artifacts and len(artifacts) != 1:
+        raise ValueError("SCENARIO_REFERENCE_INVALID")
 
 
 @dataclass(frozen=True, slots=True)

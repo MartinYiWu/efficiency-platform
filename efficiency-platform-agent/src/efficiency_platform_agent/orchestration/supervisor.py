@@ -53,6 +53,9 @@ from efficiency_platform_agent.capabilities.research.contracts import (
 from efficiency_platform_agent.capabilities.research.request_policy import (
     requested_source_count,
 )
+from efficiency_platform_agent.contracts.referenced_inputs import (
+    ReferencedRankedInput,
+)
 from efficiency_platform_agent.core.diagnostics import (
     DiagnosticRecorderPort,
     NoopDiagnosticRecorder,
@@ -100,12 +103,23 @@ class _ScenarioDispatch:
                 "source_deliverable_id": reference.source_deliverable_id,
                 "item": reference.item.model_dump(mode="json"),
             }
+            if isinstance(reference, ReferencedRankedInput)
+            else {
+                "source_deliverable_id": reference.artifact.artifact_id,
+                "source_root_artifact_id": reference.artifact.root_artifact_id,
+                "source_version": reference.artifact.version,
+                "scenario": reference.artifact.scenario,
+                "title": reference.artifact.title,
+                "content": reference.artifact.content,
+                "body_markdown": reference.artifact.body_markdown,
+            }
             for reference in request.referenced_inputs
         )
         citations = evidence_citations(request.evidence_pack)
         citations.extend(
             citation.model_dump(mode="json")
             for reference in request.referenced_inputs
+            if isinstance(reference, ReferencedRankedInput)
             for citation in reference.citations
         )
         value = freeze(

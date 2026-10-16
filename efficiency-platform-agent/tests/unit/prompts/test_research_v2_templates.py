@@ -40,7 +40,7 @@ def test_relevance_prompt_keeps_documents_out_of_system_template() -> None:
         "source_excerpt 必须逐字来自",
         "requirement_ids 只能选择",
         "唯一 ContextBuilder",
-        "仅输出符合 decision_schema 的 JSON",
+        "仅输出符合 decision_schema 的一个 JSON 对象",
     ):
         assert expected in content
     assert "BRIEF_SCHEMA" in content
@@ -70,7 +70,7 @@ def test_cluster_prompt_forbids_cross_bucket_and_forced_merge() -> None:
         "产品 v1/v2",
         "无法确认版本或事件等价时输出 uncertain",
         "转载数量不能变成多个独立佐证",
-        "只输出符合 proposal_schema 的 JSON",
+        "只输出符合 proposal_schema 的一个 JSON 对象",
     ):
         assert expected in content
 
@@ -98,6 +98,7 @@ def test_claim_prompt_treats_source_text_as_data_and_forbids_url_generation() ->
         "唯一 ContextBuilder",
         "USER_UNTRUSTED",
         "不得生成、猜测或改写 URL",
+        "subject 必须从某个 support_refs 对应的 excerpt 中逐字复制一个连续片段",
         "不得把 9 改成 90",
         "announcement、reported_fact、measured_result、opinion 或 inference",
         "assertion_mode=attributed",

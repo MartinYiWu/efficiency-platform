@@ -120,7 +120,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Agent 重启后公众号续写失败' }
 $cancelConversation = New-Conversation 'create-cancel-conversation'
 $cancelRun = Submit ([string]$cancelConversation.conversationId) $message ([Guid]::NewGuid().ToString()) 'cancel-submit'
 $cancelled = Invoke-Json 'POST' "$JavaBaseUrl/api/operations/runs/$($cancelRun.runId)/cancel" $null 'cancel-result'
-if ($cancelled.status -ne 'cancelled') { throw "取消接口终态不是 cancelled：$($cancelled.status)" }
+$cancelDeadline = (Get-Date).AddSeconds(20)
+$cancelPoll = 0
+while ($cancelled.status -ne 'cancelled' -and (Get-Date) -lt $cancelDeadline) {
+    if ($cancelled.status -notin @('queued', 'running')) {
+        throw "取消接口返回非预期状态：$($cancelled.status)"
+    }
+    Start-Sleep -Milliseconds 200
+    $cancelPoll++
+    $cancelled = Invoke-Json 'GET' "$JavaBaseUrl/api/operations/runs/$($cancelRun.runId)" $null "cancel-poll-$cancelPoll"
+}
+if ($cancelled.status -ne 'cancelled') { throw "取消接口未在期限内进入 cancelled：$($cancelled.status)" }
 $cancelSse = Complete-Stream ([string]$cancelRun.runId) 'cancel-events'
 & (Join-Path $scriptRoot 'Assert-OperationsResult.ps1') -Kind Cancelled -SsePath $cancelSse
 if ($LASTEXITCODE -ne 0) { throw '取消事件流未形成 cancelled 终态' }
@@ -141,9 +151,11 @@ if ($invalidDone.payload.status -ne 'failed' -or [string]::IsNullOrWhiteSpace([s
 $afterInvalid = Invoke-Json 'GET' "$JavaBaseUrl/api/operations/conversations/$conversationId/artifacts" $null 'invalid-after-artifacts'
 if (@($afterInvalid.artifacts).Count -ne @($beforeInvalid.artifacts).Count) { throw '非法引用错误地产生了制品' }
 
-$pattern = 'ERROR|Traceback|Caused by|SQLSyntaxError|Connection (refused|reset)|DATABASE_UNAVAILABLE|Unhandled'
+$pattern = '(?-i:\bERROR\b)|(?i:Traceback|Caused by|SQLSyntaxError|Connection (refused|reset)|DATABASE_UNAVAILABLE|Unhandled)'
 foreach ($entry in @(@{ Path = $JavaLogPath; Start = $javaLogStart }, @{ Path = $AgentLogPath; Start = $agentLogStart })) {
-    $delta = @(Get-Content -LiteralPath $entry.Path | Select-Object -Skip $entry.Start)
+    $allLines = @(Get-Content -LiteralPath $entry.Path)
+    $effectiveStart = if ($allLines.Count -lt $entry.Start) { 0 } else { $entry.Start }
+    $delta = @($allLines | Select-Object -Skip $effectiveStart)
     $hits = @($delta | Select-String -Pattern $pattern -Context 2,2)
     if ($hits.Count -gt 0) {
         $hits | Out-String | Set-Content -LiteralPath (Join-Path $OutputRoot "$([IO.Path]::GetFileName($entry.Path)).errors.txt") -Encoding UTF8

@@ -10,6 +10,7 @@ import com.aiep.aihub.repository.operation.OperationRunMapper;
 import com.aiep.aihub.repository.operation.OperationRunPO;
 import com.aiep.platformai.api.AiInvokeFacade;
 import com.aiep.platformai.api.dto.OperationAgentCancelResponse;
+import com.aiep.platformai.api.dto.OperationAgentArtifactContext;
 import com.aiep.platformai.api.dto.OperationAgentMessageRequest;
 import com.aiep.platformai.api.dto.OperationAgentRunEvent;
 import com.aiep.platformai.api.dto.OperationAgentRunResponse;
@@ -17,6 +18,7 @@ import com.aiep.platformai.agent.AgentTransportException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -123,7 +125,12 @@ public class OperationAssistantService {
         try {
             OperationAgentRunResponse submitted = aiInvokeFacade.submitOperationMessage(
                     conversationId,
-                    new OperationAgentMessageRequest(message, clientRequestId, actor.userId(), actor.tenantId()));
+                    new OperationAgentMessageRequest(
+                            message,
+                            clientRequestId,
+                            actor.userId(),
+                            availableArtifactContexts(conversationId, actor.tenantId()),
+                            actor.tenantId()));
             run.setAgentRunId(submitted.runId());
             run.setStatus(submitted.status());
             run.setUpdatedAt(LocalDateTime.now());
@@ -192,9 +199,12 @@ public class OperationAssistantService {
             run.setStatus("running");
         } else if ("clarification_required".equals(event.event())) {
             run.setStatus("waiting_input");
+            persistAssistantDelta(run, stringValue(event.payload().get("question")));
         } else if ("stream_error".equals(event.event())) {
             run.setFailureCode(stringValue(event.payload().get("code")));
             run.setFailureMessage(stringValue(event.payload().get("safe_message")));
+        } else if ("assistant_delta".equals(event.event())) {
+            persistAssistantDelta(run, stringValue(event.payload().get("delta")));
         } else if ("deliverable".equals(event.event())) {
             persistDeliverables(run, event.payload());
         } else if ("stream_done".equals(event.event())) {
@@ -207,6 +217,22 @@ public class OperationAssistantService {
             log.info("event=operation_run_terminal runId={} agentRunId={} sequence={} status={}",
                     run.getId(), run.getAgentRunId(), event.sequence(), run.getStatus());
         }
+    }
+
+    @Transactional
+    public void failEventProjection(String runId, OperationAgentRunEvent event, Exception exception) {
+        OperationRunPO run = ownedRunForUpdate(runId);
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            return;
+        }
+        run.setStatus("failed");
+        run.setFailureCode("EVENT_PROJECTION_FAILED");
+        run.setFailureMessage("运行结果持久化失败，请稍后重试");
+        run.setLastEventSequence(Math.max(run.getLastEventSequence(), event.sequence()));
+        run.setUpdatedAt(LocalDateTime.now());
+        runMapper.updateById(run);
+        log.error("event=operation_event_projection_failed runId={} agentRunId={} sequence={} event={} errorType={}",
+                run.getId(), run.getAgentRunId(), event.sequence(), event.event(), exception.getClass().getSimpleName());
     }
 
     @Transactional
@@ -288,7 +314,11 @@ public class OperationAssistantService {
                 continue;
             }
             Map<String, Object> item = stringKeyMap(itemMap);
-            String artifactType = firstNonBlank(item, "deliverable_kind", "kind", "platform_content");
+            String artifactType = firstNonBlank(
+                    item,
+                    "deliverable_kind",
+                    "kind",
+                    contentKind(item, "platform_content"));
             String platform = firstNonBlank(item, "platform", null, "generic");
             String title = firstNonBlank(item, "title", null, "运营成稿");
             String body = extractBody(item);
@@ -300,7 +330,7 @@ public class OperationAssistantService {
             artifact.setArtifactType(artifactType);
             artifact.setScenario(firstNonBlank(item, "scenario", "deliverable_kind", artifactType));
             artifact.setPlatform(platform);
-            OperationArtifactPO previous = latestArtifact(run.getConversationId(), artifactType);
+            OperationArtifactPO previous = latestArtifact(run.getConversationId(), artifactType, platform);
             artifact.setVersionNo(previous == null ? 1 : previous.getVersionNo() + 1);
             artifact.setParentArtifactId(previous == null ? null : previous.getId());
             artifact.setRootArtifactId(previous == null ? artifact.getId() : previous.getRootArtifactId());
@@ -338,23 +368,96 @@ public class OperationAssistantService {
     }
 
     private void persistAssistantMessage(OperationRunPO run, List<OperationArtifactPO> artifacts) {
+        String content = artifacts.stream()
+                .map(OperationArtifactPO::getBodyMarkdown)
+                .reduce((a, b) -> a + "\n\n" + b)
+                .orElse("");
+        OperationMessagePO message = assistantMessage(run);
+        if (message == null) {
+            message = newAssistantMessage(run, content);
+            messageMapper.insert(message);
+        } else {
+            message.setContent(content);
+            messageMapper.updateById(message);
+        }
+    }
+
+    private void persistAssistantDelta(OperationRunPO run, String delta) {
+        if (delta == null || delta.isEmpty()) {
+            return;
+        }
+        OperationMessagePO message = assistantMessage(run);
+        if (message == null) {
+            messageMapper.insert(newAssistantMessage(run, delta));
+        } else {
+            message.setContent(message.getContent() + delta);
+            messageMapper.updateById(message);
+        }
+    }
+
+    private OperationMessagePO assistantMessage(OperationRunPO run) {
+        return messageMapper.selectOne(new LambdaQueryWrapper<OperationMessagePO>()
+                .eq(OperationMessagePO::getTenantId, run.getTenantId())
+                .eq(OperationMessagePO::getRunId, run.getId())
+                .eq(OperationMessagePO::getRole, "assistant")
+                .last("LIMIT 1"));
+    }
+
+    private OperationMessagePO newAssistantMessage(OperationRunPO run, String content) {
         OperationMessagePO message = new OperationMessagePO();
         message.setId(UUID.randomUUID().toString());
         message.setConversationId(run.getConversationId());
         message.setTenantId(run.getTenantId());
         message.setRole("assistant");
-        message.setContent(artifacts.stream().map(OperationArtifactPO::getBodyMarkdown).reduce((a, b) -> a + "\n\n" + b).orElse(""));
+        message.setContent(content);
         message.setRunId(run.getId());
         message.setCreatedAt(LocalDateTime.now());
-        messageMapper.insert(message);
+        return message;
     }
 
-    private OperationArtifactPO latestArtifact(String conversationId, String artifactType) {
+    private OperationArtifactPO latestArtifact(String conversationId, String artifactType, String platform) {
         return artifactMapper.selectOne(new LambdaQueryWrapper<OperationArtifactPO>()
                 .eq(OperationArtifactPO::getConversationId, conversationId)
                 .eq(OperationArtifactPO::getArtifactType, artifactType)
+                .eq(OperationArtifactPO::getPlatform, platform)
                 .orderByDesc(OperationArtifactPO::getVersionNo)
                 .last("LIMIT 1"));
+    }
+
+    private List<OperationAgentArtifactContext> availableArtifactContexts(
+            String conversationId, String tenantId) {
+        List<OperationArtifactPO> rows = artifactMapper.selectList(
+                new LambdaQueryWrapper<OperationArtifactPO>()
+                        .eq(OperationArtifactPO::getConversationId, conversationId)
+                        .eq(OperationArtifactPO::getTenantId, tenantId)
+                        .orderByDesc(OperationArtifactPO::getCreatedAt));
+        Map<String, OperationArtifactPO> latestByRoot = new LinkedHashMap<>();
+        for (OperationArtifactPO row : rows) {
+            latestByRoot.putIfAbsent(row.getRootArtifactId(), row);
+            if (latestByRoot.size() == 8) {
+                break;
+            }
+        }
+        return latestByRoot.values().stream()
+                .map(row -> new OperationAgentArtifactContext(
+                        row.getId(),
+                        row.getRootArtifactId(),
+                        row.getVersionNo(),
+                        row.getArtifactType(),
+                        row.getScenario(),
+                        row.getPlatform(),
+                        row.getTitle(),
+                        parsePublicContent(row.getPublicContent()),
+                        row.getBodyMarkdown()))
+                .toList();
+    }
+
+    private Map<String, Object> parsePublicContent(String value) {
+        try {
+            return objectMapper.readValue(value, new TypeReference<>() { });
+        } catch (JsonProcessingException exception) {
+            throw new OperationAssistantException("ARTIFACT_CONTEXT_INVALID", "历史交付物格式无效");
+        }
     }
 
     private String extractBody(Map<String, Object> item) {
@@ -374,6 +477,17 @@ public class OperationAssistantService {
             return body;
         }
         throw new OperationAssistantException("DELIVERABLE_BODY_EMPTY", "交付正文为空");
+    }
+
+    private static String contentKind(Map<String, Object> item, String fallback) {
+        Object contentValue = item.get("content");
+        if (contentValue instanceof Map<?, ?> contentMap) {
+            Object kind = contentMap.get("kind");
+            if (kind instanceof String text && !text.isBlank()) {
+                return text;
+            }
+        }
+        return fallback;
     }
 
     private OperationConversationPO ownedConversation(String id, OperationActor actor) {

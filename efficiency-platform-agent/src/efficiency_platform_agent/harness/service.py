@@ -11,6 +11,7 @@ from typing import Any, cast
 from efficiency_platform_agent.contracts.deliverables import (
     DeliverableSetV1,
     DeliverableSetV2,
+    DeliverableSetV3,
 )
 from efficiency_platform_agent.contracts.events import EventType, RunEventV1
 from efficiency_platform_agent.contracts.requests import (
@@ -205,6 +206,7 @@ class AgentRuntimeService:
         ] = []
         self._run_state_listeners: list[Callable[[RunViewV1], Awaitable[None]]] = []
         self._pipeline_usage: dict[str, UsageSnapshot] = {}
+        self._pending_clarifications: dict[str, Mapping[str, Any]] = {}
 
     def add_run_event_listener(
         self, listener: Callable[[RunEventRecord], Awaitable[None]]
@@ -375,6 +377,9 @@ class AgentRuntimeService:
             self._pipeline_usage.pop(record.run_id, None)
             return self._view(record)
         for name, payload in prepared.stream_events:
+            if name == "clarification_required":
+                self._pending_clarifications[record.run_id] = dict(payload)
+                continue
             await self.event_hub.publish_next(record.run_id, name, payload)
         return await self._execute_background(record, request)
 
@@ -1222,11 +1227,24 @@ class AgentRuntimeService:
             events.append(("run_started", {"status": record.status.value}))
         elif event_type == "run_waiting_input":
             history = await self.event_hub.replay(record.run_id, 0)
+            payload = self._pending_clarifications.pop(
+                record.run_id, {"status": record.status.value}
+            )
             if not any(item.event == "clarification_required" for item in history):
                 events.append(
-                    ("clarification_required", {"status": record.status.value})
+                    ("clarification_required", dict(payload))
                 )
+            events.append(
+                (
+                    "stream_done",
+                    {
+                        "status": record.status.value,
+                        "degraded": record.degraded,
+                    },
+                )
+            )
         elif event_type in {"run_failed", "run_timed_out"}:
+            self._pending_clarifications.pop(record.run_id, None)
             failure = record.failure
             events.append(
                 (
@@ -1257,6 +1275,7 @@ class AgentRuntimeService:
                 )
             )
         elif event_type in {"run_succeeded", "run_cancelled"}:
+            self._pending_clarifications.pop(record.run_id, None)
             events.append(
                 (
                     "stream_done",
@@ -1320,7 +1339,11 @@ class AgentRuntimeService:
                     "contract_version", "deliverable-set/1"
                 )
             try:
-                if delivery_version == "deliverable-set/2":
+                if delivery_version == "deliverable-set/3":
+                    validated = DeliverableSetV3.model_validate(
+                        dict(deliverable_set)
+                    ).model_dump(mode="json")
+                elif delivery_version == "deliverable-set/2":
                     validated = DeliverableSetV2.model_validate(
                         dict(deliverable_set)
                     ).model_dump(mode="json")

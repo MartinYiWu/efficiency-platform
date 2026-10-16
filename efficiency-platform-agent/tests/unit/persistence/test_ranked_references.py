@@ -10,6 +10,9 @@ from efficiency_platform_agent.capabilities.research.v2.delivery import (
 from efficiency_platform_agent.contracts.research_local_runtime_v2 import (
     LocalResearchRunKeyV2,
 )
+from efficiency_platform_agent.harness.local_live_references import (
+    LocalLiveRankedReferenceValidator,
+)
 from efficiency_platform_agent.persistence.mysql_ranked_references import (
     InMemoryRankedReferenceRepository,
     RankedReferencePersistenceError,
@@ -24,7 +27,23 @@ def _snapshot():
     brief, evidence, *_ = delivery_facts()
     delivery = DeliveryPackBuilder().build(brief, research_outcome(brief), evidence)
     delivery = delivery.model_copy(
-        update={"output_verified": True, "quality_report_id": "quality-1"}
+        update={
+            "output_verified": True,
+            "quality_report_id": "quality-1",
+            "events": tuple(
+                event.model_copy(
+                    update={
+                        "citations": tuple(
+                            citation.model_copy(
+                                update={"verification_status": "verified"}
+                            )
+                            for citation in event.citations
+                        )
+                    }
+                )
+                for event in delivery.events
+            ),
+        }
     )
     key = LocalResearchRunKeyV2(
         tenant_id="tenant-1",
@@ -58,6 +77,42 @@ async def test_verified_snapshot_round_trips_by_full_identity() -> None:
         )
         is None
     )
+    assert (
+        await repository.get_latest_source_run_id(
+            key.tenant_id, key.user_id, key.conversation_id
+        )
+        == key.run_id
+    )
+    assert (
+        await repository.get_latest_source_run_id(
+            key.tenant_id, "another-user", key.conversation_id
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_verified_snapshot_resolves_ranked_inputs_without_public_v2_output() -> None:
+    repository = InMemoryRankedReferenceRepository()
+    key, delivery = _snapshot()
+    await repository.save_verified(key, delivery)
+    resolver = LocalLiveRankedReferenceValidator(repository)
+
+    values = await resolver.resolve(
+        key.tenant_id,
+        key.user_id,
+        key.conversation_id,
+        key.run_id,
+        rank=None,
+        count=20,
+    )
+
+    assert len(values) == len(delivery.events)
+    assert values[0].item.item_id == delivery.events[0].event_id
+    assert {item.citation_id for item in values[0].citations} == {
+        item.evidence_id for item in delivery.events[0].citations
+    }
+    await resolver(values[0])
 
 
 @pytest.mark.asyncio

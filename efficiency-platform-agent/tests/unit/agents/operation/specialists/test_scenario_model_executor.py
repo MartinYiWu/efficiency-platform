@@ -45,10 +45,11 @@ class _Model:
     def __init__(self, outputs: list[str]) -> None:
         self.outputs = outputs
         self.requests = []
+        self.executions = []
 
     async def complete(self, demand, request, *, remaining_budget):
         self.requests.append(request)
-        return ModelExecutionResult(
+        execution = ModelExecutionResult(
             ProviderResult(
                 "model-result/1", ProviderMessage("assistant", self.outputs.pop(0)), ProviderUsage(0, 0, 0, 0, 0)
             ),
@@ -56,6 +57,8 @@ class _Model:
             UsageSnapshot(),
             False,
         )
+        self.executions.append(execution)
+        return execution
 
 
 def _brand_payload() -> dict:
@@ -87,7 +90,7 @@ async def test_scenario_executor_uses_dedicated_database_prompt() -> None:
     model = _Model([json.dumps(_brand_payload(), ensure_ascii=False)])
     executor = ScenarioModelExecutor(model, assembler)
 
-    result = await executor.generate(
+    generation = await executor.generate_with_usage(
         run_id="run-1",
         scenario="brand_operation_plan",
         stage="plan",
@@ -97,9 +100,12 @@ async def test_scenario_executor_uses_dedicated_database_prompt() -> None:
         evidence=None,
     )
 
+    result = generation.deliverable
     assert assembler.calls[0]["prompt_key"] == "brand.plan"
     assert result.contract_version == "deliverable/3"
     assert result.content.kind == "brand_plan"
+    assert result.title == "品牌运营方案"
+    assert generation.executions == tuple(model.executions)
     assert [message.role for message in model.requests[0].messages] == [
         "system",
         "developer",
@@ -131,3 +137,20 @@ async def test_scenario_executor_repairs_once_with_exact_validation_errors() -> 
     assert repair_values["previous_output"].source == "artifact"
     assert repair_values["validation_errors"].source == "system_context"
     assert len(model.requests) == 2
+
+
+@pytest.mark.asyncio
+async def test_industry_digest_ignores_internal_research_platform_for_prompt_route() -> None:
+    assembler = _Assembler()
+    executor = ScenarioModelExecutor(_Model([]), assembler)
+
+    await executor._assemble(
+        run_id="run-research",
+        scenario="industry_digest",
+        stage="compose",
+        platform="research",
+        user_request="收集今天的 AI 热点",
+        context={},
+    )
+
+    assert assembler.calls[0]["prompt_key"] == "industry_digest.compose"

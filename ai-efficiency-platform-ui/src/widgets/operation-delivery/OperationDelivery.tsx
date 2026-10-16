@@ -1,4 +1,4 @@
-import { Alert, Collapse, Typography } from 'antd';
+import { Alert, Button, Collapse, Typography } from 'antd';
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
@@ -8,6 +8,7 @@ import {
   type DeliverableSetDto,
   type LegacyDeliverableViewModel,
   type OperationDeliverableViewModel,
+  type OperationDeliverableV3,
 } from '../../entities/operation-deliverable';
 import { OperationNextActions } from '../../features/operation-next-action';
 import { OperationArtifactActions } from '../../features/operation-artifact';
@@ -161,6 +162,47 @@ function OperationDeliveryView({
   }
 }
 
+function OperationDeliveryV3View({
+  deliverable,
+  onCopy,
+}: {
+  deliverable: OperationDeliverableV3;
+  onCopy: (value: string) => void;
+}) {
+  const titleId = `operation-v3-${deliverable.deliverable_id}`;
+  return (
+    <article aria-labelledby={titleId} className={styles.deliveryDocument}>
+      <Typography.Title id={titleId} level={2}>
+        {deliverable.title}
+      </Typography.Title>
+      <Typography.Paragraph type="secondary">
+        场景：{deliverable.scenario}
+        {deliverable.platform ? ` · 平台：${deliverable.platform}` : ''}
+      </Typography.Paragraph>
+      <Button onClick={() => onCopy(deliverable.copy_text)}>复制结果</Button>
+      <section aria-label="交付正文" className={styles.legacyBody}>
+        <ReactMarkdown
+          components={{
+            a: ({ children, href }) => {
+              const safeHref = safeMarkdownHref(href);
+              return safeHref ? (
+                <a href={safeHref} rel="noopener noreferrer" target="_blank">
+                  {children}
+                </a>
+              ) : (
+                <span>{children}</span>
+              );
+            },
+          }}
+          skipHtml
+        >
+          {deliverable.copy_text}
+        </ReactMarkdown>
+      </section>
+    </article>
+  );
+}
+
 export function OperationDelivery({
   value,
   onSubmitNextAction,
@@ -197,6 +239,47 @@ export function OperationDelivery({
             key={`${deliverable.platform}-${deliverable.title}`}
           />
         ))}
+      </section>
+    );
+  }
+
+  if (delivery.kind === 'v3') {
+    return (
+      <section aria-label="运营交付" className={styles.deliverySet}>
+        <Typography.Paragraph className={styles.deliverySummary}>
+          {delivery.summary.message}
+        </Typography.Paragraph>
+        {delivery.degraded && (
+          <Alert message="部分内容已降级，请确认后使用。" showIcon type="warning" />
+        )}
+        {delivery.warnings.map((warning) => (
+          <Alert key={warning.code} message={warning.message} showIcon type="warning" />
+        ))}
+        {delivery.deliverables.map((deliverable) => {
+          const artifact = artifacts
+            .filter(
+              (item) =>
+                item.artifactType === deliverable.content.kind &&
+                item.platform === (deliverable.platform ?? 'generic'),
+            )
+            .sort((left, right) => right.version - left.version)[0];
+          return (
+            <section className={styles.deliveryItem} key={deliverable.deliverable_id}>
+              <OperationDeliveryV3View
+                deliverable={deliverable}
+                onCopy={(copyText) => void copyItem(copyText)}
+              />
+              {deliverable.warnings.map((warning) => (
+                <Alert key={warning.code} message={warning.message} showIcon type="warning" />
+              ))}
+              {artifact && <OperationArtifactActions artifact={artifact} baseUrl={baseUrl} />}
+            </section>
+          );
+        })}
+        {copyFeedback === 'success' && <Typography.Text role="status">已复制</Typography.Text>}
+        {copyFeedback === 'error' && (
+          <Alert message="复制失败，请手动复制" role="alert" showIcon type="error" />
+        )}
       </section>
     );
   }

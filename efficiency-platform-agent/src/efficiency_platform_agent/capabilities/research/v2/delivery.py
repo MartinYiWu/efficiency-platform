@@ -162,12 +162,16 @@ def _deterministic_summary(
     gaps: tuple[str, ...],
     stop_reason: str,
 ) -> str:
-    del time_label, gaps, stop_reason
-    lines = [f"已整理 {delivered} 条近期 AI 行业有效动态。"]
-    if delivered < requested:
-        lines.append("当前有效条目不足目标数量，未使用未核实内容补足。")
+    lines = [
+        f"研究范围：{time_label}。",
+        f"已核对 {delivered} 条符合条件的不同事件；原要求 {requested} 条。",
+    ]
+    if gaps:
+        lines.append("未满足项：" + "、".join(gaps) + "。")
+    lines.append(f"停止原因：{stop_reason}。")
+    lines.append("以下结论仅代表已检查且通过证据门禁的来源范围。")
     if outcome == "NO_MATCHES":
-        lines.append("当前未发现可交付的有效条目。")
+        lines.append("在已声明的检查范围内未发现符合条件的事件。")
     return "\n".join(lines)
 
 

@@ -221,6 +221,55 @@ async def test_three_platforms_and_safe_summary() -> None:
     assert body["message"] == "private-request-body"
 
 
+async def test_v3_deliverable_event_is_accepted() -> None:
+    value = {
+        "contract_version": "deliverable-set/3",
+        "run_id": "private-run",
+        "intent_revision": 1,
+        "summary": {"message": "done", "result_count": 1, "complete": True},
+        "deliverables": [
+            {
+                "contract_version": "deliverable/3",
+                "deliverable_id": "digest-1",
+                "scenario": "industry_digest",
+                "platform": "research",
+                "title": "AI digest",
+                "copy_text": "rendered digest",
+                "content": {
+                    "kind": "ranked_digest",
+                    "topic": "AI",
+                    "time_window": "today",
+                    "actual_count": 1,
+                    "items": [
+                        {
+                            "rank": 1,
+                            "title": "event",
+                            "event_summary": "fact",
+                            "why_it_matters": "impact",
+                            "operator_insight": "action",
+                            "occurred_at": None,
+                        }
+                    ],
+                },
+                "warnings": [],
+            }
+        ],
+        "degraded": False,
+        "warnings": [],
+    }
+    endpoint = Endpoint(
+        [
+            frame(1, "deliverable", {"deliverable_set": value})
+            + frame(2, "stream_done", {"status": "succeeded", "degraded": False})
+        ]
+    )
+
+    result = await run_acceptance(options(), transport=httpx.MockTransport(endpoint))
+
+    assert result["passed"] is True
+    assert result["deliverable_count"] == 1
+
+
 @pytest.mark.parametrize("stream_status", ["succeeded", "degraded_succeeded"])
 async def test_formal_degraded_success_is_a_confirmed_terminal(
     stream_status: str,

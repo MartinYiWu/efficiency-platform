@@ -44,8 +44,10 @@ from efficiency_platform_agent.capabilities.research.contracts import (
 from efficiency_platform_agent.contracts.deliverables import (
     DeliverableSetV1,
     DeliverableSetV2,
+    DeliverableSetV3,
     DeliveryProvenanceV2,
     DeliverySummaryV2,
+    OperationDeliverableV3,
     WarningV2,
 )
 from efficiency_platform_agent.core.multi_agent import CompletionStatus
@@ -67,6 +69,7 @@ class OperationAgent:
         if deliverable_set_contract_version not in {
             "deliverable-set/1",
             "deliverable-set/2",
+            "deliverable-set/3",
         }:
             raise ValueError("DELIVERABLE_SET_VERSION_UNSUPPORTED")
         self._deliverable_set_contract_version = deliverable_set_contract_version
@@ -76,9 +79,13 @@ class OperationAgent:
         self.scenarios = InMemoryScenarioPackRegistry(build_s6_manifests())
         self.assembler = DeliverableAssembler()
         self.quality_gate = quality_gate or RuntimeScenarioQualityGate(
-            "deliverable/2"
-            if deliverable_set_contract_version == "deliverable-set/2"
-            else "deliverable/1"
+            "deliverable/3"
+            if deliverable_set_contract_version == "deliverable-set/3"
+            else (
+                "deliverable/2"
+                if deliverable_set_contract_version == "deliverable-set/2"
+                else "deliverable/1"
+            )
         )
 
     @property
@@ -88,7 +95,7 @@ class OperationAgent:
 
     async def handle(
         self, submission: ScenarioSubmission, *, run_id: str | None = None
-    ) -> DeliverableSetV1 | DeliverableSetV2:
+    ) -> DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3:
         """兼容仅消费成品集合的调用方，生命周期仍由外层 Graph 管理。"""
         result = await self.execute(submission, run_id=run_id)
         if result.deliverables is None:
@@ -101,7 +108,8 @@ class OperationAgent:
         """执行一次场景，所有暂态依赖和用量均按当前 Run 隔离。"""
         usage = OperationUsage()
         if (
-            self.deliverable_set_contract_version == "deliverable-set/2"
+            self.deliverable_set_contract_version
+            in {"deliverable-set/2", "deliverable-set/3"}
             and (
                 submission.task_spec.requires_research
                 or submission.scenario_id == "industry_digest"
@@ -121,7 +129,8 @@ class OperationAgent:
         facts = usage.research_results.get(research_key)
         # 空结果只可由当前研究请求和 Run 的可信领域终态恢复，warning 没有授权能力。
         no_matches = (
-            self.deliverable_set_contract_version == "deliverable-set/2"
+            self.deliverable_set_contract_version
+            in {"deliverable-set/2", "deliverable-set/3"}
             and self._governed_research_v2
             and result.scenario_id == "industry_digest"
             and result.deliverable_bundle is None
@@ -290,6 +299,55 @@ class OperationAgent:
             )
             return OperationExecution(
                 value,
+                status,
+                usage.snapshot(),
+                scenario_result=result,
+                quality_check_report_ids=mapping,
+            )
+        if self.deliverable_set_contract_version == "deliverable-set/3":
+            status = result.completion_status
+            warnings = []
+            if result.quality_report and result.quality_report.final_status in {
+                QualityStatus.WARNING,
+                QualityStatus.UNKNOWN,
+            }:
+                warnings.append(
+                    WarningV2(
+                        code="QUALITY_REPORT_WARNING",
+                        message="场景质量检查存在待确认项。",
+                    )
+                )
+            payloads = (
+                [
+                    OperationDeliverableV3.model_validate(plain(item.payload))
+                    for item in result.deliverable_bundle.deliverables
+                ]
+                if result.deliverable_bundle
+                else []
+            )
+            revision = facts[0].intent_revision if facts is not None else 0
+            if facts is not None and facts[1].outcome == "PARTIAL":
+                status = CompletionStatus.PARTIAL
+                warnings.append(
+                    WarningV2(
+                        code="RESEARCH_TARGET_NOT_REACHED",
+                        message="研究结果未达到目标数量，已返回实际可验证内容。",
+                    )
+                )
+            value_v3 = DeliverableSetV3(
+                run_id=resolved_run_id,
+                intent_revision=revision,
+                summary=DeliverySummaryV2(
+                    message=f"已生成 {len(payloads)} 份独立交付物。",
+                    result_count=len(payloads),
+                    complete=status is CompletionStatus.COMPLETE,
+                ),
+                deliverables=payloads,
+                degraded=status is CompletionStatus.PARTIAL,
+                warnings=warnings,
+            )
+            return OperationExecution(
+                value_v3,
                 status,
                 usage.snapshot(),
                 scenario_result=result,

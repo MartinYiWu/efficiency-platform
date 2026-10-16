@@ -1,11 +1,11 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react-swc';
 
-export default defineConfig({
+export default defineConfig(() => ({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://127.0.0.1:8080',
+      '/api': process.env.VITE_API_PROXY_TARGET ?? 'http://127.0.0.1:8080',
     },
   },
   test: {
@@ -19,4 +19,4 @@ export default defineConfig({
     css: true,
     exclude: [...configDefaults.exclude, 'e2e/**'],
   },
-});
+}));

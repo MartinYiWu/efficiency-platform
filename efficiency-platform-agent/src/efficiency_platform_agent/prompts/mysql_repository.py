@@ -279,7 +279,7 @@ class MySqlPromptRepository:
                 text(
                     """
                     SELECT id, prompt_message_template_id, variable_name,
-                           value_type, value_source, required, sensitive,
+                           value_type, value_source, is_required, is_sensitive,
                            max_length, allow_untrusted_content
                     FROM agent_prompt_variable
                     WHERE prompt_message_template_id IN :message_ids
@@ -361,8 +361,8 @@ class MySqlPromptRepository:
             str(row["variable_name"]),
             str(row["value_type"]),
             str(row["value_source"]),
-            bool(row["required"]),
-            bool(row["sensitive"]),
+            bool(row["is_required"]),
+            bool(row["is_sensitive"]),
             int(row["max_length"]),
             bool(row["allow_untrusted_content"]),
         )

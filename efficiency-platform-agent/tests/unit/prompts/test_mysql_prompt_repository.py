@@ -330,3 +330,68 @@ def test_operation_prompt_seed_covers_all_agent_stages_and_role_boundaries() -> 
         )
         mysql.validate_prompt_bundle(bundle)
         assert "字段" in bundle.output_contract.field_description
+
+
+def test_operation_prompt_seed_embeds_complete_output_contract_for_the_model() -> None:
+    seeds = importlib.import_module("efficiency_platform_agent.prompts.seeds")
+    package = seeds.build_operation_prompt_seed()
+    definition = next(
+        item for item in package.definitions if item.prompt_key == "intent.plan"
+    )
+    version = next(
+        item
+        for item in package.versions
+        if item.prompt_definition_id == definition.id
+    )
+    developer_message = next(
+        item
+        for item in package.messages
+        if item.prompt_version_id == version.id and item.role == "developer"
+    )
+
+    assert version.semantic_version == "1.5.0"
+    assert '"target_audience"' in developer_message.content_template
+    assert '"capability_id"' in developer_message.content_template
+    assert '"artifact_reference"' in developer_message.content_template
+    assert "字段名不得翻译、缩写或自行创建别名" in developer_message.content_template
+    assert "general_chat" in developer_message.content_template
+    assert "next_step=clarify" in developer_message.content_template
+    assert "只能在句末出现一个中文问号" in developer_message.content_template
+    assert "available_artifacts" in developer_message.content_template
+    assert "visible_history" in developer_message.content_template
+    assert "其他条件沿用上一轮" in developer_message.content_template
+    assert "只规划 scenario_execute" in developer_message.content_template
+    assert "不得重复规划 research" in developer_message.content_template
+    assert "一篇新文章" in developer_message.content_template
+    policy = next(
+        item for item in package.model_policies if item.id == version.model_policy_id
+    )
+    assert policy.semantic_version == "1.1.0"
+    assert policy.max_output_tokens == 8_000
+
+
+def test_wechat_prompt_defines_visible_chinese_length_and_repair_target() -> None:
+    seeds = importlib.import_module("efficiency_platform_agent.prompts.seeds")
+    package = seeds.build_operation_prompt_seed()
+
+    for prompt_key in ("content.wechat.draft", "content.wechat.repair"):
+        definition = next(
+            item for item in package.definitions if item.prompt_key == prompt_key
+        )
+        version = next(
+            item
+            for item in package.versions
+            if item.prompt_definition_id == definition.id
+        )
+        developer_message = next(
+            item
+            for item in package.messages
+            if item.prompt_version_id == version.id and item.role == "developer"
+        )
+
+        assert version.semantic_version == "1.3.0"
+        assert "3000 至 4000" in developer_message.content_template
+        assert "3300 至 3600" in developer_message.content_template
+        assert "title、introduction、sections、closing" in developer_message.content_template
+        assert "facts 是证据转述区" in developer_message.content_template
+        assert "按钮、操作步骤、设备、地区、价格、准确率" in developer_message.content_template

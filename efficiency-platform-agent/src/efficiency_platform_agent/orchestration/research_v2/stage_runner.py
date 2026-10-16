@@ -59,6 +59,7 @@ from efficiency_platform_agent.contracts.research_local_runtime_v2 import (
     LocalResearchRunKeyV2,
 )
 from efficiency_platform_agent.contracts.research_sources_v2 import (
+    CandidateRecordV2,
     SourceAttemptV2,
     SourceRuntimeContextV2,
     SourceUsageV2,
@@ -423,6 +424,20 @@ class LocalLiveResearchStageRunner:
             for item in self.registry.list_available(context, self.brief)
             if item.source_id in self.context.allowed_source_ids
         )
+        if not available:
+            decisions = self.registry.availability(context, self.brief)
+            reason_summary = ",".join(
+                f"{item.source_id}:{'|'.join(item.reason_codes) or 'NOT_RUNTIME_ALLOWED'}"
+                for item in decisions
+            )
+            logger.warning(
+                "研究 V2 无可用来源 run_id=%s window_start=%s window_end=%s "
+                "availability=%s",
+                self.key.run_id,
+                self.brief.time_window.start.isoformat(),
+                self.brief.time_window.end.isoformat(),
+                reason_summary or "NO_REGISTERED_SOURCES",
+            )
         return tuple(
             sorted(
                 available,
@@ -609,10 +624,12 @@ class LocalLiveResearchStageRunner:
                         raise ValueError("LOCAL_RESEARCH_CANDIDATE_SOURCE_MISMATCH")
                     if (
                         item.candidate_id in candidates
-                        and candidates[item.candidate_id] != item
+                        and not _same_candidate_identity(
+                            candidates[item.candidate_id], item
+                        )
                     ):
                         raise ValueError("LOCAL_RESEARCH_CANDIDATE_CONFLICT")
-                    candidates[item.candidate_id] = item
+                    candidates.setdefault(item.candidate_id, item)
             if (
                 batch is None
                 or batch.completeness != "complete"
@@ -742,12 +759,12 @@ class LocalLiveResearchStageRunner:
                 "acquired_platform_text", ()
             ):
                 scope = "platform_text"
-            elif candidate.content_scope == "summary":
-                scope = "summary"
             elif content.candidate_id in facts.stage_artifact_ids.get(
                 "acquired_full", ()
             ):
                 scope = "full"
+            elif candidate.content_scope == "summary":
+                scope = "summary"
             else:
                 raise ValueError("LOCAL_RESEARCH_CONTENT_PROVENANCE_MISSING")
             # 仅本次获准抓取正文决定范围；原候选摘要在事实库内保持原样。
@@ -793,8 +810,19 @@ class LocalLiveResearchStageRunner:
     async def _claims(
         self, state: ResearchGraphState, facts: LocalResearchRunFactsV2
     ) -> ResearchStageUpdateV2:
-        documents = _select(facts.documents, state.get("deduplicated_document_ids", []))
         events = _select(facts.events, state.get("event_ids", []))
+        event_document_ids = {
+            document_id
+            for event in events
+            for document_id in event.member_document_ids
+        }
+        documents = tuple(
+            document
+            for document in _select(
+                facts.documents, state.get("deduplicated_document_ids", [])
+            )
+            if document.document_id in event_document_ids
+        )
         if not documents or not events:
             return ResearchStageUpdateV2(claim_ids=(), evidence_ids=())
         refs = tuple(
@@ -811,6 +839,17 @@ class LocalLiveResearchStageRunner:
         batch = await ClaimExtractor(ResearchClaimModelAdapter(self.decisions)).extract(
             events, context, self._lease()
         )
+        if batch.rejected:
+            reason_counts: dict[str, int] = {}
+            for rejected in batch.rejected:
+                for reason in rejected.reason_codes:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            logger.warning(
+                "研究 V2 Claim 门禁拒绝 proposed=%s accepted=%s rejects=%s",
+                batch.input_count,
+                len(batch.accepted),
+                tuple(sorted(reason_counts.items())),
+            )
         claims = {
             item.claim_id: item
             for item in ConflictResolver().classify(batch.accepted).claims
@@ -958,3 +997,21 @@ def _select[T](mapping: Mapping[str, T], identifiers: Sequence[str]) -> tuple[T,
     ):
         raise ValueError("LOCAL_RESEARCH_STAGE_ID_UNKNOWN")
     return tuple(mapping[item] for item in identifiers)
+
+
+def _same_candidate_identity(
+    existing: CandidateRecordV2, refreshed: CandidateRecordV2
+) -> bool:
+    """同一 Run 内只按稳定来源身份去重，保留首次观测快照。"""
+
+    return (
+        existing.candidate_id,
+        existing.source_id,
+        existing.source_item_id,
+        existing.url,
+    ) == (
+        refreshed.candidate_id,
+        refreshed.source_id,
+        refreshed.source_item_id,
+        refreshed.url,
+    )

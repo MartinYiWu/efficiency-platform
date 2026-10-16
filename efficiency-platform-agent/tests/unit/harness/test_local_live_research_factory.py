@@ -49,7 +49,7 @@ async def test_formal_factory_assembles_disabled_sources_without_bypass():
         assert components.research_service.store is components.state_store
         assert components.delegate.submissions is app.conversation.submissions
         assert app.runtime.budget.max_tool_calls == 60
-        assert app.runtime.budget.timeout_ms == 180_000
+        assert app.runtime.budget.timeout_ms == 240_000
         await app.close()
 
 

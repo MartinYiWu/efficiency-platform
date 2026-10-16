@@ -27,6 +27,7 @@ from efficiency_platform_agent.core.model import (
 )
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
+    JsonObject,
     ProviderError,
     ProviderMessage,
     ProviderRequest,
@@ -228,6 +229,9 @@ async def test_first_valid_patch_uses_context_builder_and_one_model_call() -> No
     assert '"current_message_id":"m-1"' in cast(
         str, request.messages[1].content
     )
+    assert dict(request.options.items)["thinking"] == JsonObject(
+        (("type", "disabled"),)
+    )
 
 
 def test_current_message_id_must_belong_to_unique_visible_scope() -> None:
@@ -260,6 +264,10 @@ async def test_invalid_schema_is_repaired_once_and_each_call_refreshes_budget() 
     assert budget_resolver.calls == 2
     assert runtime.calls[1][0].demand_version == "intent-v2-repair/1"
     assert "{}" in cast(str, runtime.calls[1][1].messages[1].content)
+    repair_system_prompt = cast(str, runtime.calls[1][1].messages[0].content)
+    assert "base_revision" in repair_system_prompt
+    assert "dialog_act" in repair_system_prompt
+    assert "Field required" in repair_system_prompt
     assert runtime.calls[1][2].iterations < runtime.calls[0][2].iterations
 
 

@@ -75,6 +75,8 @@ def test_prompt_asset_change_pack_is_complete_and_symmetric() -> None:
     for table in PROMPT_TABLES:
         assert f"create table {table}" in up
         assert table in verify
+    assert "is_required tinyint" in up
+    assert "is_sensitive tinyint" in up
 
     dropped_tables = set(
         re.findall(r"drop\s+table\s+if\s+exists\s+([a-z0-9_]+)", rollback)

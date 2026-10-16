@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 
 from pydantic import BaseModel, ValidationError
 
@@ -19,10 +20,15 @@ from efficiency_platform_agent.contracts.deliverables import (
     IpPlanV1,
     OperationDeliverableV3,
     OperationReviewV1,
+    render_operation_content_v3,
 )
 from efficiency_platform_agent.contracts.operation_intent import OperationScenario
 from efficiency_platform_agent.core.budget import RemainingBudget
-from efficiency_platform_agent.core.model import ModelDemand, ModelTier
+from efficiency_platform_agent.core.model import (
+    ModelDemand,
+    ModelExecutionResult,
+    ModelTier,
+)
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
     JsonObject,
@@ -30,9 +36,11 @@ from efficiency_platform_agent.core.run import (
     ProviderMessage,
     ProviderRequest,
 )
-from efficiency_platform_agent.orchestration.prompt_keys import PromptKeyResolver
 from efficiency_platform_agent.prompts.contracts import AssembledPrompt, PromptValue
+from efficiency_platform_agent.prompts.key_resolver import PromptKeyResolver
 from efficiency_platform_agent.prompts.runtime import PromptAssembler
+
+logger = logging.getLogger(__name__)
 
 
 class ScenarioModelExecutionError(RuntimeError):
@@ -46,6 +54,12 @@ class ScenarioModelExecutionError(RuntimeError):
 class _Route:
     first_stage: str
     model: type[BaseModel]
+
+
+@dataclass(frozen=True, slots=True)
+class ScenarioGenerationResult:
+    deliverable: OperationDeliverableV3
+    executions: tuple[ModelExecutionResult, ...]
 
 
 _ROUTES: dict[OperationScenario, _Route] = {
@@ -87,6 +101,29 @@ class ScenarioModelExecutor:
         input_artifact_ids: tuple[str, ...],
         evidence: object | None,
     ) -> OperationDeliverableV3:
+        return (
+            await self.generate_with_usage(
+                run_id=run_id,
+                scenario=scenario,
+                stage=stage,
+                platform=platform,
+                user_request=user_request,
+                input_artifact_ids=input_artifact_ids,
+                evidence=evidence,
+            )
+        ).deliverable
+
+    async def generate_with_usage(
+        self,
+        *,
+        run_id: str,
+        scenario: OperationScenario,
+        stage: str,
+        platform: str | None,
+        user_request: str,
+        input_artifact_ids: tuple[str, ...],
+        evidence: object | None,
+    ) -> ScenarioGenerationResult:
         route = _ROUTES[scenario]
         if stage != route.first_stage:
             raise ScenarioModelExecutionError(
@@ -104,10 +141,22 @@ class ScenarioModelExecutor:
             user_request=user_request,
             context=context,
         )
-        first_output = await self._complete(first, self._remaining())
+        executions: list[ModelExecutionResult] = []
+        first_execution = await self._complete(first, self._remaining())
+        executions.append(first_execution)
+        first_output = _execution_content(first_execution)
         try:
             content = route.model.model_validate_json(first_output)
         except (ValidationError, ValueError) as error:
+            first_errors = _validation_errors(error)
+            logger.warning(
+                "event=scenario_output_validation_failed run_id=%s scenario=%s "
+                "platform=%s attempt=1 errors=%s",
+                run_id,
+                scenario,
+                platform or "general",
+                _error_summary(first_errors),
+            )
             previous = _json_or_text(first_output)
             repair = await self._assemble(
                 run_id=run_id,
@@ -117,20 +166,38 @@ class ScenarioModelExecutor:
                 user_request=user_request,
                 context=context,
                 previous_output=previous,
-                validation_errors=_validation_errors(error),
+                validation_errors=first_errors,
             )
-            repaired_output = await self._complete(repair, self._remaining(iterations=1))
+            repaired_execution = await self._complete(
+                repair, self._remaining(executions=executions)
+            )
+            executions.append(repaired_execution)
+            repaired_output = _execution_content(repaired_execution)
             try:
                 content = route.model.model_validate_json(repaired_output)
             except (ValidationError, ValueError) as final_error:
+                logger.error(
+                    "event=scenario_output_validation_failed run_id=%s scenario=%s "
+                    "platform=%s attempt=2 errors=%s",
+                    run_id,
+                    scenario,
+                    platform or "general",
+                    _error_summary(_validation_errors(final_error)),
+                )
                 raise ScenarioModelExecutionError(
                     "SCENARIO_OUTPUT_INVALID", "场景模型输出修复后仍不符合契约"
                 ) from final_error
         title = _title(content)
-        return OperationDeliverableV3(
-            deliverable_id=f"{run_id}-{scenario}",
-            title=title,
-            content=content,  # type: ignore[arg-type]
+        return ScenarioGenerationResult(
+            OperationDeliverableV3(
+                deliverable_id=f"{run_id}-{scenario}",
+                scenario=scenario,
+                platform=platform,
+                title=title,
+                copy_text=render_operation_content_v3(content),  # type: ignore[arg-type]
+                content=content,  # type: ignore[arg-type]
+            ),
+            tuple(executions),
         )
 
     async def _assemble(
@@ -159,7 +226,7 @@ class ScenarioModelExecutor:
                 }
             )
         prompt_key = PromptKeyResolver.scenario(
-            scenario, stage, platform=_prompt_platform(platform)
+            scenario, stage, platform=_prompt_platform(scenario, platform)
         )
         return await self._prompts.assemble(
             run_id=run_id,
@@ -170,7 +237,7 @@ class ScenarioModelExecutor:
 
     async def _complete(
         self, prompt: AssembledPrompt, remaining: RemainingBudget
-    ) -> str:
+    ) -> ModelExecutionResult:
         schema = _freeze(prompt.output_contract.json_schema)
         max_tokens = min(prompt.model_policy.max_output_tokens, remaining.output_tokens)
         request = ProviderRequest(
@@ -210,27 +277,45 @@ class ScenarioModelExecutor:
             max(1, sum(len(item.content) for item in prompt.messages) // 4),
             max_tokens,
         )
-        execution = await self._model.complete(
+        return await self._model.complete(
             demand, request, remaining_budget=remaining
         )
-        result = execution.result
-        if result.error is not None:
-            raise ScenarioModelExecutionError(result.error.code, "场景模型调用失败")
-        if result.message is None or not isinstance(result.message.content, str):
-            raise ScenarioModelExecutionError(
-                "SCENARIO_OUTPUT_EMPTY", "场景模型没有返回结构化内容"
-            )
-        return result.message.content
 
-    def _remaining(self, *, iterations: int | None = None) -> RemainingBudget:
+    def _remaining(
+        self, *, executions: list[ModelExecutionResult] | None = None
+    ) -> RemainingBudget:
+        completed = executions or []
         return RemainingBudget(
-            self._budget.max_iterations if iterations is None else iterations,
+            max(0, self._budget.max_iterations - len(completed)),
             self._budget.max_tool_calls,
-            self._budget.max_input_tokens,
-            self._budget.max_output_tokens,
-            self._budget.max_cost_microunits,
+            max(
+                0,
+                self._budget.max_input_tokens
+                - sum(item.usage.input_tokens for item in completed),
+            ),
+            max(
+                0,
+                self._budget.max_output_tokens
+                - sum(item.usage.output_tokens for item in completed),
+            ),
+            max(
+                0,
+                self._budget.max_cost_microunits
+                - sum(item.usage.cost_microunits for item in completed),
+            ),
             self._budget.timeout_ms,
         )
+
+
+def _execution_content(execution: ModelExecutionResult) -> str:
+    result = execution.result
+    if result.error is not None:
+        raise ScenarioModelExecutionError(result.error.code, "场景模型调用失败")
+    if result.message is None or not isinstance(result.message.content, str):
+        raise ScenarioModelExecutionError(
+            "SCENARIO_OUTPUT_EMPTY", "场景模型没有返回结构化内容"
+        )
+    return result.message.content
 
 
 def _validation_errors(error: Exception) -> list[dict[str, object]]:
@@ -246,6 +331,13 @@ def _validation_errors(error: Exception) -> list[dict[str, object]]:
     return [{"location": "root", "type": "json_invalid", "message": str(error)}]
 
 
+def _error_summary(errors: list[dict[str, object]]) -> str:
+    return ";".join(
+        f"{item['location']}:{item['type']}:{str(item['message'])[:160]}"
+        for item in errors
+    )[:2_000]
+
+
 def _json_or_text(value: str) -> object:
     try:
         return json.loads(value)
@@ -253,8 +345,10 @@ def _json_or_text(value: str) -> object:
         return {"invalid_output": value[:20_000]}
 
 
-def _prompt_platform(platform: str | None) -> str | None:
-    if platform is None:
+def _prompt_platform(
+    scenario: OperationScenario, platform: str | None
+) -> str | None:
+    if scenario != "multi_platform_content" or platform is None:
         return None
     aliases: dict[str, str] = {
         "wechat_official_account": "wechat",
@@ -266,7 +360,18 @@ def _prompt_platform(platform: str | None) -> str | None:
 
 
 def _title(content: BaseModel) -> str:
-    for name in ("title", "topic", "positioning", "objective", "business_goal"):
+    fixed_titles: tuple[tuple[type[BaseModel], str], ...] = (
+        (BrandPlanV1, "品牌运营方案"),
+        (IpPlanV1, "IP 运营方案"),
+        (CampaignPlanV1, "活动策划方案"),
+        (ContentCalendarV1, "内容排期日历"),
+        (GrowthExperimentBacklogV1, "增长实验方案"),
+        (OperationReviewV1, "运营复盘"),
+    )
+    for model_type, title in fixed_titles:
+        if isinstance(content, model_type):
+            return title
+    for name in ("title", "topic"):
         value = getattr(content, name, None)
         if isinstance(value, str) and value.strip():
             return value.strip()[:500]
@@ -278,9 +383,11 @@ def _plain(value: object) -> object:
         return value
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
+    if is_dataclass(value):
+        return _plain(asdict(value))  # type: ignore[arg-type]
     if isinstance(value, Mapping):
         return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [_plain(item) for item in value]
     raise TypeError("SCENARIO_CONTEXT_INVALID")
 
@@ -295,4 +402,8 @@ def _freeze(value: object) -> JsonValue:
     raise TypeError("SCENARIO_SCHEMA_INVALID")
 
 
-__all__ = ["ScenarioModelExecutionError", "ScenarioModelExecutor"]
+__all__ = [
+    "ScenarioGenerationResult",
+    "ScenarioModelExecutionError",
+    "ScenarioModelExecutor",
+]

@@ -128,7 +128,12 @@ public class OperationAssistantController {
                     .name(event.event())
                     .data(publicEvent, MediaType.APPLICATION_JSON));
         } catch (Exception exception) {
-            emitter.completeWithError(exception);
+            try {
+                service.failEventProjection(runId, event, exception);
+            } catch (RuntimeException persistenceException) {
+                exception.addSuppressed(persistenceException);
+            }
+            throw new IllegalStateException("RUN_EVENT_PROJECTION_FAILED", exception);
         }
     }
 

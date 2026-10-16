@@ -87,6 +87,7 @@ class ModelBackedResearchSpecialist:
         provider: ResearchProviderPort,
         usage: OperationUsage | None = None,
         deliverable_contract_version: str = "deliverable/1",
+        scenario_executor: Any | None = None,
     ) -> None:
         if not isinstance(provider, ResearchProviderPort):
             raise TypeError("research_provider必须实现ResearchProviderPort")
@@ -96,12 +97,14 @@ class ModelBackedResearchSpecialist:
         self._model = model
         self._usage = usage
         self._deliverable_contract_version = deliverable_contract_version
+        self._scenario_executor = scenario_executor
         self.descriptor = ModelBackedOperationSpecialist(
             spec,
             prompts,
             model,
             usage,
             deliverable_contract_version=deliverable_contract_version,
+            scenario_executor=scenario_executor,
         ).descriptor
 
     async def run(self, task: SupervisorTask) -> RunResult:
@@ -246,6 +249,7 @@ class ModelBackedResearchSpecialist:
             warnings,
             capability_usage,
             deliverable_contract_version=self._deliverable_contract_version,
+            scenario_executor=self._scenario_executor,
         )
         # Responses API 的 web_search 用量包含服务端搜索工具链上下文，不能
         # 直接从下游内容生成预算中扣除；真实用量仍已记录到当前 Run。

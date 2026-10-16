@@ -159,6 +159,21 @@ def test_unknown_source_is_preserved_and_default_count_is_auditable() -> None:
     assert "DEFAULT_COUNT_POLICY:best_effort:5:1" in brief.diagnostics
 
 
+def test_bridge_maps_explicit_hottest_request_to_heat_ranking() -> None:
+    frame = _frame()
+    research, content = frame.goal_nodes
+    frame = frame.model_copy(
+        update={
+            "goal_nodes": (
+                research.model_copy(update={"description": "收集最热的 AI 动态"}),
+                content,
+            )
+        }
+    )
+
+    assert _build(frame).ranking_mode == "heat"
+
+
 @pytest.mark.parametrize(
     ("frame", "context", "error_code"),
     [

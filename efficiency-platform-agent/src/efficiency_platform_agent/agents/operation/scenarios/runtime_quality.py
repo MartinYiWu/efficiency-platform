@@ -18,6 +18,7 @@ from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
 from efficiency_platform_agent.contracts.deliverables import (
     DeliverableSetV2,
     DeliverySummaryV2,
+    OperationDeliverableV3,
 )
 from efficiency_platform_agent.core.run import JsonObject
 
@@ -55,7 +56,10 @@ class RuntimeScenarioQualityGate:
             not item.profile_reference_ids for item in items
         ):
             statuses["q.profile-authority/1"] = QualityStatus.WARNING
-        if manifest.scenario_id == "operation_review":
+        if (
+            manifest.scenario_id == "operation_review"
+            and self.deliverable_contract_version != "deliverable/3"
+        ):
             statuses["q.metrics-definition/1"] = QualityStatus.WARNING
         if result.completion_status.value == "partial" and not (
             result.completed_scope and result.missing_scope
@@ -77,17 +81,26 @@ class RuntimeScenarioQualityGate:
                 item.model_dump(mode="json")
                 for item in project_set_v2_to_v1(view).deliverables
             ]
-        format_report = DeliverableAssembler().assess(
-            payloads,
-            task_id=bundle.task_id if bundle else "scenario-task",
-            report_id=f"scenario-format-{result.scenario_id}",
-            deliverable_ids=tuple(item.deliverable_id for item in items),
-        )
-        for check in format_report.checks:
-            if check.dimension is QualityDimension.EVIDENCE:
-                statuses["q.evidence-linkage/1"] = check.status
-            if check.dimension is QualityDimension.CONSISTENCY:
-                statuses["q.channel-independence/1"] = check.status
+        format_checks: tuple[OperationQualityCheck, ...] = ()
+        if self.deliverable_contract_version == "deliverable/3":
+            try:
+                for payload in payloads:
+                    OperationDeliverableV3.model_validate(payload)
+            except ValueError:
+                statuses["q.required-deliverables/1"] = QualityStatus.FAILED
+        else:
+            format_report = DeliverableAssembler().assess(
+                payloads,
+                task_id=bundle.task_id if bundle else "scenario-task",
+                report_id=f"scenario-format-{result.scenario_id}",
+                deliverable_ids=tuple(item.deliverable_id for item in items),
+            )
+            format_checks = format_report.checks
+            for check in format_checks:
+                if check.dimension is QualityDimension.EVIDENCE:
+                    statuses["q.evidence-linkage/1"] = check.status
+                if check.dimension is QualityDimension.CONSISTENCY:
+                    statuses["q.channel-independence/1"] = check.status
         if not manifest.quality_check_ids.issubset(QUALITY_CHECKS):
             raise ValueError("SCENARIO_QUALITY_CHECK_UNKNOWN")
         checks = tuple(
@@ -99,7 +112,7 @@ class RuntimeScenarioQualityGate:
             )
             for check_id in sorted(manifest.quality_check_ids)
         )
-        checks += format_report.checks
+        checks += format_checks
         if inherited:
             checks += inherited.checks
         final = (

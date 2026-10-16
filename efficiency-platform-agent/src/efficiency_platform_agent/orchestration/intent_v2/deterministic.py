@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from efficiency_platform_agent.agents.operation.definition import (
     OperationSpecialistCapabilityId,
@@ -10,6 +11,7 @@ from efficiency_platform_agent.agents.operation.definition import (
 from efficiency_platform_agent.contracts.intent_v2 import (
     CapabilityCatalogSnapshot,
     FieldOperation,
+    FieldPayload,
     FieldValue,
     GoalNodeV2,
     IntentContextV2,
@@ -20,16 +22,16 @@ from efficiency_platform_agent.contracts.intent_v2 import (
     SourceConstraintsV2,
     SourceSpan,
 )
+from efficiency_platform_agent.contracts.research_request_policy import (
+    has_explicit_source_count,
+    requested_source_count,
+)
 from efficiency_platform_agent.contracts.temporal_v2 import (
     CalendarPeriodExpression,
     RollingDurationExpression,
     TemporalExpression,
 )
 from efficiency_platform_agent.conversation.context import ConversationContext
-from efficiency_platform_agent.contracts.research_request_policy import (
-    has_explicit_source_count,
-    requested_source_count,
-)
 from efficiency_platform_agent.orchestration.intent_fast_path import (
     detect_fast_path_intent,
 )
@@ -115,7 +117,28 @@ def _normalize_topic(topic: str) -> str:
     return value
 
 
-def _set(field_name: str, value: object, span: SourceSpan) -> FieldOperation:
+FieldName = Literal[
+    "topic",
+    "entities",
+    "exclusions",
+    "temporal",
+    "source_constraints",
+    "output_requirements",
+    "source_allowed_ids",
+    "source_excluded_ids",
+    "source_languages",
+    "event_regions",
+    "publisher_regions",
+    "source_primary_only",
+    "output_types",
+    "target_platforms",
+    "output_language",
+    "output_style",
+    "citations_required",
+]
+
+
+def _set(field_name: FieldName, value: FieldPayload, span: SourceSpan) -> FieldOperation:
     return FieldOperation(
         operation="set",
         field_name=field_name,
@@ -125,7 +148,9 @@ def _set(field_name: str, value: object, span: SourceSpan) -> FieldOperation:
 
 def _temporal(value: str | None) -> TemporalExpression:
     if value in {"今天", "明天", "本周", "下周", "本月"}:
-        period = "day" if value in {"今天", "明天"} else "week"
+        period: Literal["day", "week", "month"] = (
+            "day" if value in {"今天", "明天"} else "week"
+        )
         if value == "本月":
             period = "month"
         return CalendarPeriodExpression(

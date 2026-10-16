@@ -27,7 +27,11 @@ from efficiency_platform_agent.contracts.conversation import (
     ConversationMessageV1,
     ConversationSubmitViewV1,
 )
-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV1
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV1,
+    DeliverableSetV2,
+    DeliverableSetV3,
+)
 from efficiency_platform_agent.contracts.requests import CancelRunRequestV1
 from efficiency_platform_agent.contracts.responses import RunViewV1
 from efficiency_platform_agent.contracts.stream_events import RunStreamEventV1
@@ -70,7 +74,9 @@ class _Observation:
     cancelled: bool = False
     stream_error: bool = False
     stream_error_code: str | None = None
-    sets: list[DeliverableSetV1] = field(default_factory=list)
+    sets: list[DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3] = field(
+        default_factory=list
+    )
     digests: dict[int, str] = field(default_factory=dict)
     view: RunViewV1 | None = None
     run_id: str | None = None
@@ -111,6 +117,22 @@ def _model[T: BaseModel](model: type[T], content: bytes | str, version: str) -> 
         return model.model_validate_json(content, strict=True)
     except (ValueError, ValidationError):
         raise AcceptanceFailure("INVALID_CONTRACT") from None
+
+
+def _deliverable_set(value: object) -> DeliverableSetV1 | DeliverableSetV2 | DeliverableSetV3:
+    """按显式版本解析正式交付契约，拒绝未知或缺失版本。"""
+    if not isinstance(value, dict):
+        raise AcceptanceFailure("INVALID_CONTRACT")
+    models = {
+        "deliverable-set/1": DeliverableSetV1,
+        "deliverable-set/2": DeliverableSetV2,
+        "deliverable-set/3": DeliverableSetV3,
+    }
+    version = value.get("contract_version")
+    model = models.get(version)
+    if model is None:
+        raise AcceptanceFailure("INVALID_CONTRACT")
+    return _model(model, json.dumps(value), str(version))
 
 
 async def _events(response: httpx.Response) -> AsyncIterator[RunStreamEventV1]:
@@ -242,9 +264,8 @@ async def _consume(
                     state.digests[event.sequence] = digest
                     state.event_sequence.append(event.event)
                     if event.event == "deliverable":
-                        payload = json.dumps(event.payload.get("deliverable_set"))
                         state.sets.append(
-                            _model(DeliverableSetV1, payload, "deliverable-set/1")
+                            _deliverable_set(event.payload.get("deliverable_set"))
                         )
                     if event.event == "clarification_required":
                         fields = event.payload.get("fields")
@@ -330,7 +351,9 @@ def _summary(
         "event_count": state.cursor,
         "reconnect_count": state.reconnects,
         "deliverable_count": len(items),
-        "citation_count": sum(len(item.citations) for item in items),
+        "citation_count": sum(
+            len(getattr(item, "citations", ())) for item in items
+        ),
         "clarification_observed": state.clarification,
         "cancel_requested": state.cancelled,
         "degraded": view.degraded if view else None,
@@ -383,7 +406,13 @@ async def run_acceptance(
             if (
                 len(items) != 3
                 or {item.platform for item in items} != _THREE_PLATFORMS
-                or len({item.body.strip() for item in items}) != 3
+                or len(
+                    {
+                        str(getattr(item, "body", getattr(item, "copy_text", ""))).strip()
+                        for item in items
+                    }
+                )
+                != 3
             ):
                 raise AcceptanceFailure("THREE_PLATFORM_CHECK_FAILED")
     except AcceptanceFailure as failure:

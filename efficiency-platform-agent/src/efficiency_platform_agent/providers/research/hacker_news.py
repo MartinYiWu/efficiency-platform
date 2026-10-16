@@ -300,10 +300,8 @@ def _item_candidate(
         if isinstance(raw_time, int) and not isinstance(raw_time, bool) and raw_time >= 0
         else None
     )
-    # HN story title 本身是平台 API 返回的可引用文本；没有 self-text 时只保留标题，
-    # 不读取评论，也不把第三方链接正文伪装成平台内容。
+    # 只有 HN self-text 才属于平台正文；外链故事的标题不能冒充正文。
     body = clean_fragment(mapping.get("text"))
-    text = f"{title}\n{body}" if body and body != title else title
     score = mapping.get("score")
     descendants = mapping.get("descendants")
     heat_parts = []
@@ -325,8 +323,8 @@ def _item_candidate(
         timestamp_semantics="platform_posted" if posted_at else "unknown",
         discovered_via="api",
         heat_observation=";".join(heat_parts) or None,
-        content_scope="platform_text",
-        inline_content=text,
+        content_scope="platform_text" if body else "none",
+        inline_content=body,
     )
 
 

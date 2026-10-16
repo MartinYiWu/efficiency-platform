@@ -7,6 +7,7 @@ import inspect
 import pytest
 
 from efficiency_platform_agent.contracts.requests import (
+    CancelRunRequestV1,
     CreateRunRequestV1,
     ResumeRunRequestV1,
 )
@@ -162,6 +163,73 @@ def _request(
         input_text="hello",
         requested_strategy=StrategyMode.DIRECT,
     )
+
+
+@pytest.mark.asyncio
+async def test_cancel_version_race_returns_latest_authoritative_state() -> None:
+    from efficiency_platform_agent.harness.service import AgentRuntimeService
+    from efficiency_platform_agent.orchestration.cancellation import (
+        InMemoryCancellationSignal,
+    )
+    from efficiency_platform_agent.persistence.in_memory import (
+        FixedClock,
+        InMemoryPersistenceError,
+        InMemoryRunEventStore,
+        InMemoryRunRepository,
+        SequenceIdGenerator,
+    )
+
+    delegate = InMemoryRunRepository()
+
+    class ConflictOnceRepository:
+        def __init__(self) -> None:
+            self.conflicted = False
+
+        async def create(self, record) -> None:
+            await delegate.create(record)
+
+        async def get(self, run_id, tenant_id):
+            return await delegate.get(run_id, tenant_id)
+
+        async def get_by_request_id(self, request_id, tenant_id):
+            return await delegate.get_by_request_id(request_id, tenant_id)
+
+        async def save(self, record, expected_version) -> None:
+            if record.status is RunStatus.CANCELLED and not self.conflicted:
+                self.conflicted = True
+                current = await delegate.get(
+                    record.run_id, record.request.tenant_id
+                )
+                assert current is not None
+                await delegate.save(
+                    current.transition(RunStatus.RUNNING), current.version
+                )
+                raise InMemoryPersistenceError(
+                    "RUN_VERSION_CONFLICT", "Run 版本冲突"
+                )
+            await delegate.save(record, expected_version)
+
+    signal = InMemoryCancellationSignal()
+    service = AgentRuntimeService(
+        repository=ConflictOnceRepository(),
+        event_store=InMemoryRunEventStore(),
+        router=StrategyRouter(frozenset({StrategyMode.DIRECT})),
+        graph_runtime=_Graph(),
+        budget_guard=BudgetGuard(),
+        budget=ExecutionBudget(10, 2, 100, 100, 100, 100),
+        clock=FixedClock(1),
+        id_generator=SequenceIdGenerator(),
+        cancellation_signal=signal,
+    )
+    queued, created = await service._create_queued(_request("cancel-race"))
+    assert created is True
+
+    accepted = await service.cancel_run(
+        queued.run_id, CancelRunRequestV1(tenant_id="tenant-1")
+    )
+
+    assert accepted.status is RunStatus.CANCELLED
+    assert await signal.is_requested(queued.run_id) is True
 
 
 @pytest.mark.asyncio

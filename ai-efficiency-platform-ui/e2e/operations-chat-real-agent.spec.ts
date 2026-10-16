@@ -1,44 +1,53 @@
 import { expect, test } from '@playwright/test';
 
-const agentBaseUrl = process.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8080';
+test('运营助手通过真实 Java 与 Agent HTTP/SSE 完成对话并在刷新后恢复', async ({ page }, testInfo) => {
+  test.setTimeout(90_000);
 
-test('运营助手通过真实 Agent HTTP 与 SSE 完成身份问答', async ({ page }, testInfo) => {
-  test.setTimeout(60_000);
-
-  const agentOrigin = new URL(agentBaseUrl).origin;
-  const apiRequests: Array<{ method: string; path: string }> = [];
+  const apiRequests: Array<{ method: string; path: string; status?: number }> = [];
   const consoleIssues: string[] = [];
-
   page.on('console', (message) => {
     if (message.type() === 'error' || message.type() === 'warning') {
       consoleIssues.push(`${message.type()}: ${message.text()}`);
     }
   });
-  page.on('request', (request) => {
-    const target = new URL(request.url());
-    if (target.origin !== agentOrigin) return;
+  page.on('response', (response) => {
+    const target = new URL(response.url());
+    if (!target.pathname.startsWith('/api/operations/')) return;
     apiRequests.push({
-      method: request.method(),
+      method: response.request().method(),
       path: target.pathname
         .replace(/\/conversations\/[^/]+/, '/conversations/{conversation_id}')
         .replace(/\/runs\/[^/]+/, '/runs/{run_id}'),
+      status: response.status(),
     });
   });
 
+  const createResponsePromise = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === '/api/operations/conversations',
+  );
   await page.goto('/ai-assistants/operations/chat');
+  const createResponse = await createResponsePromise;
+  expect(createResponse.status()).toBe(200);
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get('conversationId'))
+    .not.toBeNull();
+  const conversationId = new URL(page.url()).searchParams.get('conversationId');
   await page.getByLabel('输入消息').fill('你是谁');
 
   const submitResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
-      new URL(response.url()).origin === agentOrigin &&
-      /\/v1\/conversations\/[^/]+\/messages$/.test(new URL(response.url()).pathname),
+      /\/api\/operations\/conversations\/[^/]+\/messages$/.test(
+        new URL(response.url()).pathname,
+      ),
   );
   const streamResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === 'GET' &&
-      new URL(response.url()).origin === agentOrigin &&
-      /\/v1\/runs\/[^/]+\/events$/.test(new URL(response.url()).pathname),
+      /\/api\/operations\/runs\/[^/]+\/events$/.test(new URL(response.url()).pathname),
   );
 
   await page.getByRole('button', { name: '发送消息' }).click();
@@ -47,32 +56,35 @@ test('运营助手通过真实 Agent HTTP 与 SSE 完成身份问答', async ({ 
     streamResponsePromise,
   ]);
   const submission = (await submitResponse.json()) as {
-    contract_version?: string;
-    run_id?: string;
-    status?: string;
+    code?: string;
+    data?: { runId?: string; status?: string };
   };
-
-  expect(submitResponse.status()).toBe(201);
+  expect(submitResponse.status()).toBe(202);
   expect(submission).toMatchObject({
-    contract_version: 'conversation/1',
-    status: 'queued',
+    code: 'SUCCESS',
+    data: { status: 'queued' },
   });
-  expect(submission.run_id).toEqual(expect.any(String));
+  expect(submission.data?.runId).toEqual(expect.any(String));
   expect(streamResponse.status()).toBe(200);
   expect(streamResponse.headers()['content-type']).toContain('text/event-stream');
 
   await expect(
     page.getByText('我是你的 AI 内容运营助手，可以协助完成内容与运营相关工作。'),
   ).toBeVisible();
-  await expect(page.getByRole('button', { name: '发送消息' })).toBeVisible();
+  await page.reload();
+  expect(new URL(page.url()).searchParams.get('conversationId')).toBe(conversationId);
+  await expect(page.getByText('你是谁', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('我是你的 AI 内容运营助手，可以协助完成内容与运营相关工作。'),
+  ).toBeVisible();
   await expect(page.getByRole('alert')).toHaveCount(0);
-  expect(apiRequests.filter(({ method }) => method === 'POST' || method === 'GET')).toEqual([
-    { method: 'POST', path: '/v1/conversations/{conversation_id}/messages' },
-    { method: 'GET', path: '/v1/runs/{run_id}/events' },
-  ]);
   expect(consoleIssues).toEqual([]);
 
-  await testInfo.attach('真实 Agent 脱敏网络摘要', {
+  await testInfo.attach('刷新恢复后的真实运营助手页面', {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
+  await testInfo.attach('真实 Java-Agent 脱敏网络摘要', {
     body: Buffer.from(JSON.stringify(apiRequests, null, 2)),
     contentType: 'application/json',
   });

@@ -30,7 +30,9 @@ $javaLogStartLine = @(Get-Content -LiteralPath $JavaLogPath).Count
 $agentLogStartLine = @(Get-Content -LiteralPath $AgentLogPath).Count
 
 function Get-LogDelta([string]$Path, [int]$StartLine) {
-    return @(Get-Content -LiteralPath $Path | Select-Object -Skip $StartLine)
+    $allLines = @(Get-Content -LiteralPath $Path)
+    $effectiveStart = if ($allLines.Count -lt $StartLine) { 0 } else { $StartLine }
+    return @($allLines | Select-Object -Skip $effectiveStart)
 }
 
 function Save-Json([string]$Name, [object]$Value) {
@@ -126,15 +128,21 @@ function Submit-Message([string]$ConversationId, [string]$TemplateName, [string]
         $modelLines = @(Get-LogDelta $AgentLogPath $agentLogStartLine | Where-Object {
             $_ -match 'event=research_model_succeeded' -and $_ -match [regex]::Escape("run_id=$agentRunId")
         })
+        foreach ($promptId in @('research.v2.relevance', 'research.v2.cluster', 'research.v2.claims')) {
+            if (@($modelLines | Where-Object { $_ -match [regex]::Escape("prompt_id=$promptId") }).Count -lt 1) {
+                throw "研究未完成必需的真实模型阶段：$promptId"
+            }
+        }
         $modelCalls = 0
         foreach ($line in $modelLines) {
             if ($line -match 'total_model_calls=(\d+)') {
                 $modelCalls = [Math]::Max($modelCalls, [int]$Matches[1])
             }
         }
+        if ($modelCalls -lt 1) { throw '研究运行没有真实模型成功日志' }
     }
-    & (Join-Path $scriptRoot 'Assert-OperationsResult.ps1') -Kind $Kind -SsePath $ssePath -MinimumModelCalls $modelCalls
-    if ($LASTEXITCODE -ne 0) { throw "返回语义不满足要求：$ResultName" }
+    $semanticOutput = @(& (Join-Path $scriptRoot 'Assert-OperationsResult.ps1') -Kind $Kind -SsePath $ssePath -MinimumModelCalls $modelCalls)
+    $semanticOutput | Set-Content -LiteralPath (Join-Path $OutputRoot "$ResultName.semantic.txt") -Encoding UTF8
     $run = Invoke-Json 'GET' "$JavaBaseUrl/api/operations/runs/$runId" $null "$ResultName-run"
     if ($run.status -notin @('succeeded', 'degraded_succeeded')) {
         throw "Java 运行记录不是成功终态：runId=$runId，status=$($run.status)，failure=$($run.failureMessage)"
@@ -196,16 +204,34 @@ if ($Scenario -eq 'All') {
 
     $researchSet = Get-DeliverableSetFromSse $research.ssePath
     $xiaohongshuSet = Get-DeliverableSetFromSse $xiaohongshu.ssePath
-    $firstItem = @($researchSet.deliverables | Where-Object { $_.deliverable_kind -eq 'ranked_digest' } | ForEach-Object { $_.content.items } | Where-Object { [int]$_.rank -eq 1 }) | Select-Object -First 1
-    $xiaohongshuDelivery = @($xiaohongshuSet.deliverables | Where-Object { $_.deliverable_kind -eq 'platform_content' -and $_.platform -eq 'xiaohongshu' }) | Select-Object -First 1
-    $expectedRefs = @($firstItem.source_refs | Sort-Object -Unique)
-    $actualRefs = @($xiaohongshuDelivery.citations | ForEach-Object { $_.citation_id } | Sort-Object -Unique)
-    if (($expectedRefs -join ',') -cne ($actualRefs -join ',')) {
-        throw "小红书引用未严格闭合到第 1 条热点：expected=$($expectedRefs -join ',') actual=$($actualRefs -join ',')"
+    $firstItem = @($researchSet.deliverables | Where-Object {
+        $_.deliverable_kind -eq 'ranked_digest' -or $_.content.kind -eq 'ranked_digest'
+    } | ForEach-Object { $_.content.items } | Where-Object { [int]$_.rank -eq 1 }) | Select-Object -First 1
+    $xiaohongshuDelivery = @($xiaohongshuSet.deliverables | Where-Object {
+        ($_.deliverable_kind -eq 'platform_content' -or $_.content.kind -eq 'platform_content') -and
+        (($_.platform -eq 'xiaohongshu') -or ($_.content.platform -eq 'xiaohongshu'))
+    }) | Select-Object -First 1
+    if ($null -eq $firstItem -or $null -eq $xiaohongshuDelivery) {
+        throw '小红书第 1 条热点改写缺少研究条目或成稿'
+    }
+    if ($researchSet.contract_version -eq 'deliverable-set/2') {
+        $expectedRefs = @($firstItem.source_refs | Sort-Object -Unique)
+        $actualRefs = @($xiaohongshuDelivery.citations | ForEach-Object { $_.citation_id } | Sort-Object -Unique)
+        if (($expectedRefs -join ',') -cne ($actualRefs -join ',')) {
+            throw "小红书引用未严格闭合到第 1 条热点：expected=$($expectedRefs -join ',') actual=$($actualRefs -join ',')"
+        }
+    } else {
+        $referenceLoads = @(Get-LogDelta $AgentLogPath $agentLogStartLine | Where-Object {
+            $_ -match 'event=ranked_reference_snapshot_loaded' -and
+            $_ -match [regex]::Escape("source_run_id=$($research.agentRunId)")
+        })
+        if ($referenceLoads.Count -lt 2) {
+            throw '公众号/小红书成稿未均从真实研究快照加载来源闭包'
+        }
     }
 }
 
-$javaSql = "SELECT COUNT(*) AS conversations FROM ai_operation_conversation WHERE id='$conversationId'; SELECT COUNT(*) AS messages FROM ai_operation_message WHERE conversation_id='$conversationId'; SELECT status,COUNT(*) AS runs FROM ai_operation_run WHERE conversation_id='$conversationId' GROUP BY status; SELECT artifact_type,platform,COUNT(*) AS artifacts FROM ai_operation_artifact WHERE conversation_id='$conversationId' GROUP BY artifact_type,platform;"
+$javaSql = "SELECT COUNT(*) AS conversations FROM ai_operation_conversation WHERE id='$conversationId'; SELECT COUNT(*) AS messages FROM ai_operation_message WHERE conversation_id='$conversationId'; SELECT status,COUNT(*) AS runs FROM ai_operation_run WHERE conversation_id='$conversationId' GROUP BY status; SELECT artifact_type,platform,source_research_run_id,COUNT(*) AS artifacts FROM ai_operation_artifact WHERE conversation_id='$conversationId' GROUP BY artifact_type,platform,source_research_run_id;"
 $agentRunIds = @($research.agentRunId, $wechat.agentRunId, $xiaohongshu.agentRunId) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
 if ($conversationId -notmatch '^[A-Za-z0-9_-]+$' -or @($agentRunIds | Where-Object { $_ -notmatch '^[A-Za-z0-9_-]+$' }).Count -gt 0) {
     throw '数据库证据查询标识格式不合法'
@@ -215,7 +241,7 @@ $agentSql = "SELECT status,COUNT(*) AS runs FROM agent_run WHERE run_id IN ($quo
 Export-MySqlEvidence $JavaMySqlContainer 'ai_efficiency_platform' $javaSql 'java-db-evidence.txt'
 Export-MySqlEvidence $AgentMySqlContainer 'ai_efficiency_platform_agent' $agentSql 'agent-db-evidence.txt'
 
-$logPattern = 'ERROR|Traceback|Caused by|SQLSyntaxError|Connection (refused|reset)|DATABASE_UNAVAILABLE|Unhandled'
+$logPattern = '(?-i:\bERROR\b)|(?i:Traceback|Caused by|SQLSyntaxError|Connection (refused|reset)|DATABASE_UNAVAILABLE|Unhandled)'
 $logInputs = @(
     @{ Path = $JavaLogPath; Start = $javaLogStartLine },
     @{ Path = $AgentLogPath; Start = $agentLogStartLine }

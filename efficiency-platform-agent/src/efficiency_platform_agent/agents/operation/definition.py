@@ -139,7 +139,7 @@ _AGENT_ROWS: tuple[
         "operation-channel-quality/1",
         # 多平台长文案需要容纳首稿及一次受限修订；输出仍受单次 7,500
         # Token 上限约束，额外预算只用于真实模型未达到平台长度门槛时修复。
-        ExecutionBudget(4, 0, 24_000, 24_000, 180_000, 0),
+        ExecutionBudget(4, 0, 24_000, 24_000, 240_000, 0),
     ),
     (
         "operation.campaign.plan",

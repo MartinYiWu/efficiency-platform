@@ -2,7 +2,19 @@
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from efficiency_platform_agent.contracts.conversation import ConversationArtifactV1
 from efficiency_platform_agent.contracts.deliverables import CitationV2, RankedItemV2
+
+
+class ReferencedArtifactInput(BaseModel):
+    """经 Java 会话边界授权并由意图计划绑定的完整制品版本。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tenant_id: str = Field(min_length=1, max_length=64)
+    user_id: str = Field(min_length=1, max_length=64)
+    conversation_id: str = Field(min_length=1, max_length=64)
+    artifact: ConversationArtifactV1
 
 
 class ReferencedRankedInput(BaseModel):
@@ -27,3 +39,8 @@ class ReferencedRankedInput(BaseModel):
         if any(c.supports_item_ids != [self.item.item_id] for c in self.citations):
             raise ValueError("REFERENCE_ITEM_CLOSURE_INVALID")
         return self
+
+
+ReferencedInput = ReferencedRankedInput | ReferencedArtifactInput
+
+__all__ = ["ReferencedArtifactInput", "ReferencedInput", "ReferencedRankedInput"]

@@ -17,7 +17,10 @@ from efficiency_platform_agent.agents.operation.scenarios.contracts import (
 from efficiency_platform_agent.agents.operation.specialists.model_backed import (
     plain,
 )
-from efficiency_platform_agent.contracts.deliverables import DeliverableSetV2
+from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV2,
+    DeliverableSetV3,
+)
 from efficiency_platform_agent.contracts.operation_strategy import (
     OperationStrategyPayloadAdapter,
     decode_operation_request,
@@ -116,7 +119,7 @@ class OperationRuntimeGraphBuilder:
                 "output": {
                     "delivery_contract_version": result.contract_version,
                     "content": result.summary.message
-                    if isinstance(result, DeliverableSetV2)
+                    if isinstance(result, (DeliverableSetV2, DeliverableSetV3))
                     else result.summary,
                     "deliverable_set": result.model_dump(mode="json"),
                     "quality_report": asdict(execution.scenario_result.quality_report)

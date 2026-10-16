@@ -75,6 +75,11 @@ def _snapshot(event: RunStreamEventV1) -> RunStreamEventV1:
     return RunStreamEventV1.model_validate(event.model_dump(mode="python"))
 
 
+def _closes_run(event: RunStreamEventV1) -> bool:
+    """等待补充输入只结束当前 SSE 段，不封死可恢复的 Run。"""
+    return event.event == "stream_done" and event.payload.get("status") != "waiting_input"
+
+
 class EventSubscription(AsyncIterator[RunStreamEventV1]):
     """一个可显式关闭的 Run 实时订阅。"""
 
@@ -124,7 +129,7 @@ class EventHub:
             stored = _snapshot(event)
             history.append(stored)
             subscribers = tuple(self._subscribers.get(event.run_id, ()))
-            if event.event == "stream_done":
+            if _closes_run(event):
                 self._closed_runs.add(event.run_id)
             for subscription in subscribers:
                 subscription._queue.put_nowait(_snapshot(stored))
@@ -155,7 +160,7 @@ class EventHub:
             stored = _snapshot(stored)
             history.append(stored)
             subscribers = tuple(self._subscribers.get(run_id, ()))
-            if stored.event == "stream_done":
+            if _closes_run(stored):
                 self._closed_runs.add(run_id)
             for subscription in subscribers:
                 subscription._queue.put_nowait(_snapshot(stored))

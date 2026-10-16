@@ -955,6 +955,37 @@ async def test_unknown_platform_fails_closed_without_expanding_to_all_platforms(
 
 
 @pytest.mark.asyncio
+async def test_platform_label_with_publishing_suffix_selects_only_toutiao() -> None:
+    runtime = RecordingRuntime()
+    parsed = intent().model_copy(
+        update={
+            "requirements": IntentRequirementsV1(
+                topic="新品", platforms=("今日头条发布",)
+            )
+        }
+    )
+    facade = service(runtime, StubInterpreter([parsed]))
+
+    await facade.submit(
+        "conversation-toutiao-platform-label",
+        "tenant-1",
+        ConversationMessageV1(
+            message="生成今日头条文章",
+            request_id="request-toutiao-platform-label",
+            user_id="user-1",
+        ),
+    )
+    await runtime.wait()
+
+    submission = facade.submissions._entries[
+        ("tenant-1", "request-toutiao-platform-label")
+    ].submission
+    assert tuple(
+        item.requirement_id for item in submission.request.requested_deliverables
+    ) == ("platform-content-toutiao",)
+
+
+@pytest.mark.asyncio
 async def test_request_id_is_idempotent_and_conflicts_across_conversations() -> None:
     runtime = RecordingRuntime()
     facade = service(runtime, StubInterpreter([intent()]))

@@ -4,20 +4,26 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, Field, ValidationError, create_model
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from efficiency_platform_agent.agents.operation.contracts.deliverables import (
     DeliverableBundle,
     DeliverableKind,
     GenerationProcessReference,
     OperationDeliverable,
+    OperationQualityCheck,
+    OperationQualityReport,
+    QualityDimension,
+    QualityStatus,
 )
 from efficiency_platform_agent.agents.operation.contracts.evidence import (
     EvidencePack,
@@ -54,6 +60,7 @@ from efficiency_platform_agent.contracts.deliverables import (
     RankedDigestDeliverableV2,
     RetrospectiveDeliverableV2,
     WarningV2,
+    has_complete_wechat_hotspot_fields,
 )
 from efficiency_platform_agent.core.agent import AgentSpec
 from efficiency_platform_agent.core.budget import RemainingBudget
@@ -71,7 +78,21 @@ from efficiency_platform_agent.core.run import (
 from efficiency_platform_agent.core.runtime import UsageSnapshot
 
 _EMPTY_USAGE = UsageSnapshot()
+_REFERENCED_CONTENT_OUTPUT_TOKEN_CAP = 7_500
+logger = logging.getLogger(__name__)
+stage_logger = logging.getLogger("efficiency_platform_agent.execution")
 from efficiency_platform_agent.prompts.runtime import PromptRuntime
+
+_V3_ROUTE_BY_AGENT = {
+    "operation.research.insight": ("industry_digest", "compose"),
+    "operation.channel.content": ("multi_platform_content", "draft"),
+    "operation.brand.strategy": ("brand_operation_plan", "plan"),
+    "operation.ip.strategy": ("ip_operation_plan", "plan"),
+    "operation.campaign.plan": ("campaign_plan", "plan"),
+    "operation.content.create": ("content_calendar", "plan"),
+    "operation.user_growth.plan": ("growth_experiment", "plan"),
+    "operation.analytics.review": ("operation_review", "analyze"),
+}
 
 _V2_MODELS: dict[
     str,
@@ -101,6 +122,30 @@ _V2_DRAFTS: dict[str, type[BaseModel]] = {
 }
 
 
+class _WechatSupplement(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    background_and_impact: list[str] = Field(min_length=1, max_length=5)
+    content_strategy: list[str] = Field(min_length=1, max_length=5)
+    action_guidance: list[str] = Field(min_length=1, max_length=5)
+
+
+class _WechatHotspotRewrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    fact: str = Field(min_length=1, max_length=1_200)
+    impact: str = Field(min_length=1, max_length=1_200)
+    operation_observation: str = Field(min_length=1, max_length=1_200)
+
+
+class _WechatStructuredRewrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    introduction: str = Field(min_length=1, max_length=600)
+    hotspots: list[_WechatHotspotRewrite] = Field(min_length=1, max_length=10)
+    closing: str = Field(min_length=1, max_length=600)
+
+
 def freeze(value: Any) -> JsonValue:
     """将受校验对象转换为不可变 JSON，不允许任意运行时实例。"""
     if isinstance(value, dict):
@@ -123,6 +168,12 @@ def plain(value: JsonValue) -> Any:
     return value
 
 
+def _message_text(message: ProviderMessage) -> str:
+    if not isinstance(message.content, str):
+        raise TypeError("OPERATION_MODEL_RESPONSE_NOT_TEXT")
+    return message.content
+
+
 def _validation_summary(error: ValidationError) -> str:
     """只向修复调用传递字段位置和稳定错误，不回显模型正文。"""
     summaries: list[str] = []
@@ -131,6 +182,74 @@ def _validation_summary(error: ValidationError) -> str:
         message = str(item.get("msg", "validation failed"))
         summaries.append(f"{location}: {message[:160]}")
     return "; ".join(summaries) or "validation failed"
+
+
+def _wechat_body_metrics(output: str) -> tuple[int | None, bool]:
+    """记录重写质量信号，不把模型正文写入日志。"""
+    try:
+        payload = json.loads(output)
+        content = payload.get("content") if isinstance(payload, dict) else None
+        body = content.get("body_markdown") if isinstance(content, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None, False
+    if not isinstance(body, str):
+        return None, False
+    return (
+        len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", body)),
+        has_complete_wechat_hotspot_fields(body),
+    )
+
+
+def _wechat_hotspot_titles(raw: dict[str, Any], count: int) -> list[str]:
+    titles: list[str] = []
+    for index, source in enumerate(raw.get("input_deliverables", ())):
+        item = source.get("item", source) if isinstance(source, dict) else source
+        title = item.get("title") if isinstance(item, dict) else None
+        normalized = " ".join(str(title or "").split()).strip("# ")
+        titles.append(normalized or f"热点 {index + 1}")
+        if len(titles) == count:
+            return titles
+    return [*titles, *(f"热点 {index + 1}" for index in range(len(titles), count))]
+
+
+def _merge_wechat_structured_rewrite(
+    raw: dict[str, Any],
+    initial_candidate: dict[str, Any],
+    rewrite: _WechatStructuredRewrite,
+    hotspot_count: int,
+) -> tuple[str, int]:
+    if len(rewrite.hotspots) != hotspot_count:
+        raise ValueError("WECHAT_STRUCTURED_HOTSPOT_COUNT_INVALID")
+    candidate_content = initial_candidate["content"]
+    assert isinstance(candidate_content, dict)
+    title = str(initial_candidate.get("title", "公众号行业周更")).strip()
+    headings = _wechat_hotspot_titles(raw, hotspot_count)
+    hotspots = "\n\n".join(
+        "\n\n".join(
+            (
+                f"## {heading}",
+                "**事实**\n" + section.fact.strip(),
+                "**影响**\n" + section.impact.strip(),
+                "**运营观察**\n" + section.operation_observation.strip(),
+            )
+        )
+        for heading, section in zip(headings, rewrite.hotspots, strict=True)
+    )
+    candidate_content["body_markdown"] = "\n\n".join(
+        (
+            f"# {title}",
+            rewrite.introduction.strip(),
+            hotspots,
+            "## 收束",
+            rewrite.closing.strip(),
+        )
+    )
+    merged_body = candidate_content["body_markdown"]
+    assert isinstance(merged_body, str)
+    chinese_count = len(
+        re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", merged_body)
+    )
+    return json.dumps(initial_candidate, ensure_ascii=False), chinese_count
 
 
 class ModelBackedOperationSpecialist:
@@ -146,9 +265,16 @@ class ModelBackedOperationSpecialist:
         extra_warnings: tuple[str, ...] = (),
         capability_usage: UsageSnapshot = _EMPTY_USAGE,
         deliverable_contract_version: str = "deliverable/1",
+        scenario_executor: Any | None = None,
     ) -> None:
-        if deliverable_contract_version not in {"deliverable/1", "deliverable/2"}:
+        if deliverable_contract_version not in {
+            "deliverable/1",
+            "deliverable/2",
+            "deliverable/3",
+        }:
             raise ValueError("DELIVERABLE_VERSION_UNSUPPORTED")
+        if deliverable_contract_version == "deliverable/3" and scenario_executor is None:
+            raise ValueError("SCENARIO_EXECUTOR_REQUIRED")
         self.deliverable_contract_version = deliverable_contract_version
         self.spec = spec
         self.prompts = prompts
@@ -157,6 +283,7 @@ class ModelBackedOperationSpecialist:
         self.evidence_pack = evidence_pack
         self.extra_warnings = extra_warnings
         self.capability_usage = capability_usage
+        self.scenario_executor = scenario_executor
         self.descriptor = ExtensionDescriptor(
             spec.agent_id,
             spec.semantic_version,
@@ -187,6 +314,8 @@ class ModelBackedOperationSpecialist:
             raise ValueError("SPECIALIST_INPUT_INVALID")
         if task.target_agent != self.spec.agent_id:
             raise ValueError("SPECIALIST_PERMISSION_DENIED")
+        if self.deliverable_contract_version == "deliverable/3":
+            return await self._run_v3(task, raw)
         kind = deliverable_kind_for(
             self.spec.agent_id, raw["platform"], bool(raw["research"])
         )
@@ -204,11 +333,37 @@ class ModelBackedOperationSpecialist:
         )
         content = json.dumps(raw, ensure_ascii=False)
         budget = task.budget
+        requested_output_tokens = (
+            min(budget.max_output_tokens, _REFERENCED_CONTENT_OUTPUT_TOKEN_CAP)
+            if raw["input_deliverables"]
+            else budget.max_output_tokens
+        )
         schema_model = _V2_DRAFTS[kind] if is_v2 else DeliverableV1
         schema = freeze(schema_model.model_json_schema())
+        schema_instruction = json.dumps(
+            {
+                "authority_fields": {
+                    "contract_version": self.deliverable_contract_version,
+                    "deliverable_id": raw["deliverable_id"],
+                    "platform": raw["platform"],
+                    "deliverable_kind": kind,
+                },
+                "output_schema": plain(schema),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         request = ProviderRequest(
             "operation-model/1",
-            (*rendered.messages, ProviderMessage("user", content)),
+            (
+                *rendered.messages,
+                ProviderMessage(
+                    "system",
+                    "以下 authority_fields 必须逐字输出，output_schema 是唯一允许的输出结构："
+                    + schema_instruction,
+                ),
+                ProviderMessage("user", content),
+            ),
             JsonObject(
                 (
                     (
@@ -234,7 +389,7 @@ class ModelBackedOperationSpecialist:
                             )
                         ),
                     ),
-                    ("max_tokens", budget.max_output_tokens),
+                    ("max_tokens", requested_output_tokens),
                 )
             ),
             budget.timeout_ms,
@@ -252,8 +407,17 @@ class ModelBackedOperationSpecialist:
             ModelTier.BALANCED,
             True,
             False,
-            len(content) + rendered.rendered_chars,
-            budget.max_output_tokens,
+            max(
+                1,
+                (
+                    len(content)
+                    + rendered.rendered_chars
+                    + len(schema_instruction)
+                    + 3
+                )
+                // 4,
+            ),
+            requested_output_tokens,
         )
         started = time.monotonic()
         execution = await self.model.complete(
@@ -266,17 +430,33 @@ class ModelBackedOperationSpecialist:
             self.usage.record(execution)
         if execution.result.error or execution.result.message is None:
             raise ValueError("OPERATION_MODEL_FAILED")
-        output = execution.result.message.content
+        output = _message_text(execution.result.message)
         try:
             item = self._validate_deliverable(
                 output, schema_model, raw, kind, citations_v2
             )
         except ValidationError as validation_error:
+            logger.warning(
+                "event=operation_deliverable_validation_failed platform=%s attempt=1 errors=%s",
+                raw["platform"],
+                _validation_summary(validation_error),
+            )
             retry_budget = replace(
                 self._retry_budget(remaining, execution),
                 timeout_ms=max(
                     0, remaining.timeout_ms - int((time.monotonic() - started) * 1000)
                 ),
+            )
+            stage_logger.info(
+                "event=operation_schema_repair_budget platform=%s "
+                "iterations=%s input_tokens=%s output_tokens=%s "
+                "cost_microunits=%s timeout_ms=%s",
+                raw["platform"],
+                retry_budget.iterations,
+                retry_budget.input_tokens,
+                retry_budget.output_tokens,
+                retry_budget.cost_microunits,
+                retry_budget.timeout_ms,
             )
             if (
                 retry_budget.iterations < 1
@@ -286,31 +466,248 @@ class ModelBackedOperationSpecialist:
                 or retry_budget.timeout_ms < 1
             ):
                 raise
-            retry_max_tokens = min(budget.max_output_tokens, retry_budget.output_tokens)
+            retry_max_tokens = min(requested_output_tokens, retry_budget.output_tokens)
+            validation_summary = _validation_summary(validation_error)
+            retry_schema = schema
+            initial_candidate: dict[str, Any] | None = None
+            initial_body = ""
+            hotspot_count = max(1, len(raw.get("input_deliverables", [])))
+            wechat_presentation_failure = (
+                raw["platform"] == "wechat_official_account"
+                and validation_summary
+                in {
+                    "root: Value error, WECHAT_BODY_CHINESE_LENGTH_INVALID",
+                    "root: Value error, WECHAT_HOTSPOT_STRUCTURE_INVALID",
+                }
+            )
+            if (
+                wechat_presentation_failure
+            ):
+                try:
+                    candidate = json.loads(str(output))
+                    content_candidate = candidate.get("content")
+                    if isinstance(candidate, dict) and isinstance(
+                        content_candidate, dict
+                    ) and isinstance(content_candidate.get("body_markdown"), str):
+                        initial_candidate = candidate
+                        initial_body = content_candidate["body_markdown"]
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    initial_candidate = None
+                    initial_body = ""
+            structured_wechat_repair = (
+                initial_candidate is not None
+                and not has_complete_wechat_hotspot_fields(initial_body)
+            )
+            length_only_repair = (
+                initial_candidate is not None
+                and validation_summary
+                == "root: Value error, WECHAT_BODY_CHINESE_LENGTH_INVALID"
+                and has_complete_wechat_hotspot_fields(initial_body)
+            )
+            if structured_wechat_repair:
+                retry_schema_value = _WechatStructuredRewrite.model_json_schema()
+                introduction_schema = retry_schema_value["properties"]["introduction"]
+                closing_schema = retry_schema_value["properties"]["closing"]
+                introduction_schema["minLength"] = 240
+                introduction_schema["maxLength"] = 360
+                closing_schema["minLength"] = 240
+                closing_schema["maxLength"] = 360
+                hotspot_schema = retry_schema_value["$defs"]["_WechatHotspotRewrite"]
+                hotspot_fields = hotspot_schema["properties"]
+                per_field_min = max(
+                    180,
+                    (3_150 - 240 - 240 + hotspot_count * 40)
+                    // (hotspot_count * 3),
+                )
+                per_field_max = max(per_field_min, min(1_000, per_field_min + 120))
+                for field_name in ("fact", "impact", "operation_observation"):
+                    hotspot_fields[field_name]["minLength"] = per_field_min
+                    hotspot_fields[field_name]["maxLength"] = per_field_max
+                hotspots_schema = retry_schema_value["properties"]["hotspots"]
+                hotspots_schema["minItems"] = hotspot_count
+                hotspots_schema["maxItems"] = hotspot_count
+                retry_schema = freeze(retry_schema_value)
+                stage_logger.info(
+                    "event=operation_wechat_structured_rewrite_requested "
+                    "hotspot_count=%s field_min=%s field_max=%s",
+                    hotspot_count,
+                    per_field_min,
+                    per_field_max,
+                )
+            elif length_only_repair:
+                chinese_count = len(
+                    re.findall(
+                        r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]",
+                        initial_body,
+                    )
+                )
+                supplement_min = max(150, 3_100 - chinese_count)
+                supplement_max = max(supplement_min + 150, 3_950 - chinese_count)
+                paragraphs_per_field = min(
+                    5, max(1, (supplement_min + 3 * 120 - 1) // (3 * 120))
+                )
+                retry_schema_value = _WechatSupplement.model_json_schema()
+                paragraph_count = 3 * paragraphs_per_field
+                paragraph_min = max(
+                    70, (supplement_min + paragraph_count - 1) // paragraph_count
+                )
+                paragraph_max = max(
+                    paragraph_min, min(240, supplement_max // paragraph_count)
+                )
+                for field_name in (
+                    "background_and_impact",
+                    "content_strategy",
+                    "action_guidance",
+                ):
+                    field_schema = retry_schema_value["properties"][field_name]
+                    field_schema["minItems"] = paragraphs_per_field
+                    field_schema["maxItems"] = paragraphs_per_field
+                    field_schema["items"]["minLength"] = paragraph_min
+                    field_schema["items"]["maxLength"] = paragraph_max
+                retry_schema = freeze(retry_schema_value)
+                stage_logger.info(
+                    "event=operation_wechat_supplement_requested "
+                    "initial_chinese_count=%s supplement_target_min=%s "
+                    "supplement_target_max=%s paragraphs_per_field=%s "
+                    "paragraph_min=%s paragraph_max=%s",
+                    chinese_count,
+                    supplement_min,
+                    supplement_max,
+                    paragraphs_per_field,
+                    paragraph_min,
+                    paragraph_max,
+                )
             retry_options = JsonObject(
-                tuple(
-                    (key, retry_max_tokens if key == "max_tokens" else value)
-                    for key, value in request.options.items
+                (
+                    (
+                        "response_format",
+                        JsonObject(
+                            (
+                                ("type", "json_schema"),
+                                (
+                                    "json_schema",
+                                    JsonObject(
+                                        (
+                                            (
+                                                "name",
+                                                (
+                                                    "wechat_structured_rewrite"
+                                                    if structured_wechat_repair
+                                                    else "wechat_supplement"
+                                                    if length_only_repair
+                                                    else f"operation_{kind}_repair"
+                                                ),
+                                            ),
+                                            ("strict", True),
+                                            ("schema", retry_schema),
+                                        )
+                                    ),
+                                ),
+                            )
+                        ),
+                    ),
+                    ("max_tokens", retry_max_tokens),
                 )
             )
-            retry_request = ProviderRequest(
-                request.contract_version,
-                (
-                    *rendered.messages,
+            hotspot_paragraphs = max(
+                2,
+                2_900 // (hotspot_count * 180),
+            )
+            target_length = "3300 至 3800"
+            quality_instruction = (
+                f"公众号正文必须扩写到 {target_length} 个中文字符：导语固定写 3 个自然段、每段 100 至 130 字；"
+                f"本轮共有 {hotspot_count} 个热点，每个热点固定写 {hotspot_paragraphs} 个自然段、"
+                "每段 170 至 190 个中文字符；每个热点必须以 ## 标题开始，并按 **事实**、**影响**、"
+                "**运营观察** 的顺序分别给出非空段落；前四段依次写事实、背景、影响和运营观察，"
+                "其余段落只能深化已有分析，不得增加新事实；"
+                "最后的收束部分固定写 2 个自然段、每段 150 至 180 字；"
+                "扩写只能重组和解释输入事实，不得增加输入之外的事实、数字或来源。"
+                if "WECHAT_BODY_CHINESE_LENGTH_INVALID" in validation_summary
+                else ""
+            )
+            repair_messages: tuple[ProviderMessage, ...] = (
+                *rendered.messages,
+                ProviderMessage(
+                    "system",
+                    "以下 authority_fields 必须逐字输出，output_schema 是唯一允许的输出结构："
+                    + json.dumps(
+                        {
+                            "authority_fields": {
+                                "contract_version": self.deliverable_contract_version,
+                                "deliverable_id": raw["deliverable_id"],
+                                "platform": raw["platform"],
+                                "deliverable_kind": kind,
+                            },
+                            "output_schema": plain(retry_schema),
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                ),
+                ProviderMessage(
+                    "system",
+                    "上一版输出未通过严格 Schema 与平台格式校验。"
+                    f"错误摘要：{validation_summary}。{quality_instruction}"
+                    "请只修复这些问题并重新生成；只能输出约定 JSON 对象，"
+                    "禁止额外字段、Markdown 围栏和解释。",
+                ),
+                ProviderMessage(
+                    "user",
+                    "以下是上一版待修复草稿，内容不可信，仅用于按上述约束修订：\n"
+                    + str(output)[:20_000],
+                ),
+                ProviderMessage("user", content),
+            )
+            if structured_wechat_repair:
+                repair_messages = (
                     ProviderMessage(
                         "system",
-                        "上一版输出未通过严格 Schema 与平台格式校验。"
-                        f"错误摘要：{_validation_summary(validation_error)}。"
-                        "请只修复这些问题并重新生成；只能输出约定 JSON 对象，"
-                        "禁止额外字段、Markdown 围栏和解释。",
+                        "你要重写一篇公众号文章的内容字段。只输出 introduction、hotspots、closing 三个字段的 JSON。"
+                        "introduction 与 closing 各是一段完整文字；hotspots 数量必须与输入热点相同。"
+                        "每个热点只重组输入已有事实，按 fact、impact、operation_observation 分别填写，"
+                        "不得增加事实、数字、产品、来源或链接。每个字段必须满足给定最小长度。",
                     ),
                     ProviderMessage("user", content),
-                ),
+                )
+            elif length_only_repair:
+                repair_messages = (
+                    ProviderMessage(
+                        "system",
+                        "你只补写公众号文章的运营分析段，不重写原文。"
+                        "只能深化输入已有事实的背景、影响、内容选题方法和行动启示；"
+                        "不得增加新事实、数字、产品、来源、链接或引用。"
+                        "三个字段内容不得重复；"
+                        "顶层只能包含 background_and_impact、content_strategy、action_guidance，"
+                        "禁止输出 schema、properties、required、title、type 或其他字段。"
+                        f"每个字段固定写 {paragraphs_per_field} 个自然段，"
+                        "数组中每一项是一个自然段；"
+                        f"每个自然段必须写 {paragraph_min} 至 {paragraph_max} 个中文字符；"
+                        "只输出这三个字段组成的 JSON 对象。",
+                    ),
+                    ProviderMessage("user", content),
+                    ProviderMessage(
+                        "user",
+                        "以下正文已经通过结构和引用校验，仅长度不足：\n"
+                        + initial_body,
+                    ),
+                )
+            retry_request = ProviderRequest(
+                request.contract_version,
+                repair_messages,
                 retry_options,
                 retry_budget.timeout_ms,
             )
+            retry_demand = replace(
+                demand,
+                estimated_input_tokens=max(
+                    1,
+                    (sum(len(_message_text(message)) for message in repair_messages) + 3)
+                    // 4,
+                ),
+                max_output_tokens=retry_max_tokens,
+            )
             execution = await self.model.complete(
-                replace(demand, max_output_tokens=retry_max_tokens),
+                retry_demand,
                 retry_request,
                 remaining_budget=retry_budget,
             )
@@ -340,7 +737,7 @@ class ModelBackedOperationSpecialist:
                     raise ValueError("OPERATION_MODEL_FAILED")
                 # 唯一修复的响应被截断时，只重传相同修复消息，不再生成修复 Prompt。
                 final_max_tokens = min(
-                    budget.max_output_tokens, final_budget.output_tokens
+                    requested_output_tokens, final_budget.output_tokens
                 )
                 final_request = replace(
                     retry_request,
@@ -353,7 +750,7 @@ class ModelBackedOperationSpecialist:
                     ),
                 )
                 execution = await self.model.complete(
-                    replace(demand, max_output_tokens=final_max_tokens),
+                    replace(retry_demand, max_output_tokens=final_max_tokens),
                     final_request,
                     remaining_budget=final_budget,
                 )
@@ -362,9 +759,263 @@ class ModelBackedOperationSpecialist:
                     self.usage.record(execution)
                 if execution.result.error or execution.result.message is None:
                     raise ValueError("OPERATION_MODEL_FAILED")
-            item = self._validate_deliverable(
-                execution.result.message.content, schema_model, raw, kind, citations_v2
-            )
+            try:
+                repaired_output = _message_text(execution.result.message)
+                if structured_wechat_repair:
+                    rewrite = _WechatStructuredRewrite.model_validate_json(
+                        repaired_output, strict=True
+                    )
+                    assert initial_candidate is not None
+                    repaired_output, rewritten_chinese_count = (
+                        _merge_wechat_structured_rewrite(
+                            raw,
+                            initial_candidate,
+                            rewrite,
+                            hotspot_count,
+                        )
+                    )
+                    stage_logger.info(
+                        "event=operation_wechat_structured_rewrite_merged "
+                        "hotspot_count=%s chinese_count=%s",
+                        hotspot_count,
+                        rewritten_chinese_count,
+                    )
+                elif length_only_repair:
+                    supplement_payload = json.loads(repaired_output)
+                    if isinstance(supplement_payload, dict):
+                        allowed_supplement_fields = (
+                            "background_and_impact",
+                            "content_strategy",
+                            "action_guidance",
+                        )
+                        unexpected_fields = sorted(
+                            str(key)
+                            for key in supplement_payload
+                            if key not in allowed_supplement_fields
+                        )
+                        if unexpected_fields:
+                            stage_logger.warning(
+                                "event=operation_wechat_supplement_fields_dropped fields=%s",
+                                ",".join(unexpected_fields),
+                            )
+                        supplement_payload = {
+                            field_name: (
+                                supplement_payload[field_name][
+                                    :paragraphs_per_field
+                                ]
+                                if isinstance(supplement_payload[field_name], list)
+                                else supplement_payload[field_name]
+                            )
+                            for field_name in allowed_supplement_fields
+                            if field_name in supplement_payload
+                        }
+                    supplement = _WechatSupplement.model_validate(
+                        supplement_payload, strict=True
+                    )
+                    if any(
+                        len(value) != paragraphs_per_field
+                        for value in (
+                            supplement.background_and_impact,
+                            supplement.content_strategy,
+                            supplement.action_guidance,
+                        )
+                    ):
+                        raise ValueError("WECHAT_SUPPLEMENT_PARAGRAPH_COUNT_INVALID")
+                    assert initial_candidate is not None
+                    candidate_content = initial_candidate["content"]
+                    assert isinstance(candidate_content, dict)
+                    candidate_content["body_markdown"] = (
+                        initial_body.rstrip()
+                        + "\n\n## 运营背景与影响\n\n"
+                        + "\n\n".join(
+                            value.strip() for value in supplement.background_and_impact
+                        )
+                        + "\n\n## 内容选题方法\n\n"
+                        + "\n\n".join(
+                            value.strip() for value in supplement.content_strategy
+                        )
+                        + "\n\n## 行动启示\n\n"
+                        + "\n\n".join(
+                            value.strip() for value in supplement.action_guidance
+                        )
+                    )
+                    merged_chinese_count = len(
+                        re.findall(
+                            r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]",
+                            candidate_content["body_markdown"],
+                        )
+                    )
+                    stage_logger.info(
+                        "event=operation_wechat_supplement_merged "
+                        "initial_chinese_count=%s merged_chinese_count=%s",
+                        chinese_count,
+                        merged_chinese_count,
+                    )
+                    repaired_output = json.dumps(initial_candidate, ensure_ascii=False)
+                item = self._validate_deliverable(
+                    repaired_output,
+                    schema_model,
+                    raw,
+                    kind,
+                    citations_v2,
+                )
+            except ValidationError as final_validation_error:
+                final_validation_summary = _validation_summary(final_validation_error)
+                chinese_count_after_rewrite, structure_complete = _wechat_body_metrics(
+                    repaired_output
+                )
+                stage_logger.warning(
+                    "event=operation_wechat_rewrite_validation_failed "
+                    "attempt=2 chinese_count=%s hotspot_structure_complete=%s errors=%s",
+                    chinese_count_after_rewrite,
+                    structure_complete,
+                    final_validation_summary,
+                )
+                retryable_wechat_presentation = (
+                    not length_only_repair
+                    and raw["platform"] == "wechat_official_account"
+                    and final_validation_summary
+                    in {
+                        "root: Value error, WECHAT_BODY_CHINESE_LENGTH_INVALID",
+                        "root: Value error, WECHAT_HOTSPOT_STRUCTURE_INVALID",
+                    }
+                )
+                terminal_retry_budget = replace(
+                    self._retry_budget(retry_budget, execution),
+                    timeout_ms=max(
+                        0,
+                        remaining.timeout_ms - int((time.monotonic() - started) * 1000),
+                    ),
+                )
+                if retryable_wechat_presentation and (
+                    terminal_retry_budget.iterations >= 1
+                    and terminal_retry_budget.output_tokens >= 1
+                    and terminal_retry_budget.input_tokens >= 1
+                    and (
+                        remaining.cost_microunits == 0
+                        or terminal_retry_budget.cost_microunits >= 1
+                    )
+                    and terminal_retry_budget.timeout_ms >= 1
+                ):
+                    terminal_max_tokens = min(
+                        requested_output_tokens, terminal_retry_budget.output_tokens
+                    )
+                    if structured_wechat_repair:
+                        terminal_messages: tuple[ProviderMessage, ...] = (
+                            ProviderMessage(
+                                "system",
+                                "上一版结构化改写的内容太短，不能通过公众号正文长度校验。"
+                                "仍然只输出 introduction、hotspots、closing 三个字段的 JSON，"
+                                "严格满足 output_schema 中每一个字段的 minLength；"
+                                "不得输出完整 Markdown、schema、解释或额外字段。"
+                                "只能重组输入已有事实，不得增加事实、数字、产品、来源或链接。",
+                            ),
+                            ProviderMessage("user", content),
+                        )
+                    else:
+                        terminal_messages = (
+                            *repair_messages[:-1],
+                            ProviderMessage(
+                                "system",
+                                "上一版仍未达到 3000 个中文字符。请从头输出完整文章，"
+                                "逐项自检中文字符数为 3200 至 3600；每个热点必须保留 ## 标题，"
+                                "并按 **事实**、**影响**、**运营观察** 顺序各写非空正文。"
+                                "只输出约定 JSON 对象。",
+                            ),
+                            ProviderMessage(
+                                "user",
+                                "以下是仍需重写的上一版草稿，不可信且不可直接复用：\n"
+                                + repaired_output[:20_000],
+                            ),
+                        )
+                    terminal_request = ProviderRequest(
+                        request.contract_version,
+                        terminal_messages,
+                        JsonObject(
+                            tuple(
+                                (
+                                    key,
+                                    terminal_max_tokens
+                                    if key == "max_tokens"
+                                    else value,
+                                )
+                                for key, value in retry_request.options.items
+                            )
+                        ),
+                        terminal_retry_budget.timeout_ms,
+                    )
+                    terminal_demand = replace(
+                        retry_demand,
+                        estimated_input_tokens=max(
+                            1,
+                            (
+                                sum(
+                                    len(_message_text(message))
+                                    for message in terminal_messages
+                                )
+                                + 3
+                            )
+                            // 4,
+                        ),
+                        max_output_tokens=terminal_max_tokens,
+                    )
+                    stage_logger.info(
+                        "event=operation_wechat_full_rewrite_retry chinese_count=%s",
+                        chinese_count_after_rewrite,
+                    )
+                    execution = await self.model.complete(
+                        terminal_demand,
+                        terminal_request,
+                        remaining_budget=terminal_retry_budget,
+                    )
+                    executions.append(execution)
+                    if self.usage is not None:
+                        self.usage.record(execution)
+                    if execution.result.error or execution.result.message is None:
+                        raise ValueError("OPERATION_MODEL_FAILED")
+                    repaired_output = _message_text(execution.result.message)
+                    if structured_wechat_repair:
+                        try:
+                            rewrite = _WechatStructuredRewrite.model_validate_json(
+                                repaired_output, strict=True
+                            )
+                        except ValidationError as structured_validation_error:
+                            stage_logger.warning(
+                                "event=operation_wechat_structured_rewrite_invalid "
+                                "attempt=3 response_chars=%s errors=%s",
+                                len(repaired_output),
+                                _validation_summary(structured_validation_error),
+                            )
+                            raise
+                        assert initial_candidate is not None
+                        repaired_output, rewritten_chinese_count = (
+                            _merge_wechat_structured_rewrite(
+                                raw,
+                                initial_candidate,
+                                rewrite,
+                                hotspot_count,
+                            )
+                        )
+                        stage_logger.info(
+                            "event=operation_wechat_structured_rewrite_merged "
+                            "attempt=3 hotspot_count=%s chinese_count=%s",
+                            hotspot_count,
+                            rewritten_chinese_count,
+                        )
+                    item = self._validate_deliverable(
+                        repaired_output,
+                        schema_model,
+                        raw,
+                        kind,
+                        citations_v2,
+                    )
+                else:
+                    logger.warning(
+                        "event=operation_deliverable_validation_failed platform=%s attempt=2 errors=%s",
+                        raw["platform"],
+                        final_validation_summary,
+                    )
+                    raise
         if item.platform != raw["platform"]:
             raise ValueError("DELIVERABLE_PLATFORM_MISMATCH")
         sources = {citation["url"]: citation for citation in raw["citations"]}
@@ -507,6 +1158,142 @@ class ModelBackedOperationSpecialist:
         )
         return encode_specialist_result(result, task.parent_run_id)
 
+    async def _run_v3(self, task: SupervisorTask, raw: dict[str, Any]) -> RunResult:
+        scenario, stage = _V3_ROUTE_BY_AGENT[self.spec.agent_id]
+        executor = self.scenario_executor
+        assert executor is not None
+        arguments = {
+            "run_id": task.parent_run_id,
+            "scenario": scenario,
+            "stage": stage,
+            "platform": None if raw["platform"] == "general" else raw["platform"],
+            "user_request": raw["goal"],
+            "input_artifact_ids": tuple(
+                str(item.get("source_deliverable_id"))
+                for item in raw["input_deliverables"]
+                if isinstance(item, dict) and item.get("source_deliverable_id")
+            ),
+            "evidence": {
+                "evidence_pack": (
+                    asdict(self.evidence_pack) if self.evidence_pack is not None else None
+                ),
+                "citations": raw["citations"],
+                "input_deliverables": raw["input_deliverables"],
+            },
+        }
+        if hasattr(executor, "generate_with_usage"):
+            generation = await executor.generate_with_usage(**arguments)
+            generated_deliverable = generation.deliverable
+            generation_executions = generation.executions
+        else:
+            generated_deliverable = await executor.generate(**arguments)
+            generation_executions = ()
+        generated = generated_deliverable.model_copy(
+            update={
+                "deliverable_id": raw["deliverable_id"],
+                "platform": None
+                if raw["platform"] == "general"
+                else raw["platform"],
+            }
+        )
+        report = OperationQualityReport(
+            "operation-quality-report/1",
+            f"quality-{task.task_id}",
+            raw["task_id"],
+            (raw["deliverable_id"],),
+            (
+                OperationQualityCheck(
+                    QualityDimension.FORMAT,
+                    QualityStatus.PASSED,
+                    (),
+                    "deliverable/3 强类型契约校验通过",
+                ),
+            ),
+            QualityStatus.PASSED,
+            0,
+        )
+        payload = freeze(generated.model_dump(mode="json"))
+        assert isinstance(payload, JsonObject)
+        kind = {
+            "multi_platform_content": DeliverableKind.COPY,
+            "operation_review": DeliverableKind.ANALYSIS,
+            "industry_digest": DeliverableKind.REPORT,
+        }.get(scenario, DeliverableKind.PLAN)
+        artifact = OperationDeliverable(
+            "operation-deliverable/1",
+            raw["deliverable_id"],
+            kind,
+            "3.0.0",
+            generated.title,
+            (),
+            (raw["platform"],) if raw["platform"] != "general" else (),
+            None,
+            payload,
+            frozenset(),
+            frozenset(),
+            frozenset(warning.code for warning in generated.warnings),
+            tuple(raw["profile_reference_ids"]),
+            GenerationProcessReference(
+                f"process-{task.task_id}", "operation-process/1", (task.task_id,), ()
+            ),
+            None,
+            None,
+            raw["plan_id"],
+            report.report_id,
+            None,
+        )
+        bundle = DeliverableBundle(
+            "deliverable-bundle/1",
+            f"bundle-{task.task_id}",
+            raw["task_id"],
+            raw["plan_id"],
+            (artifact,),
+            None,
+            (report.report_id,),
+            frozenset(),
+        )
+        for execution in generation_executions:
+            if self.usage is not None:
+                self.usage.record(execution)
+        return encode_specialist_result(
+            SpecialistExecutionResult(
+                "operation-specialist-result/1",
+                task.task_id,
+                (task.task_id,),
+                (),
+                bundle,
+                self.evidence_pack,
+                report,
+                (),
+                tuple(warning.code for warning in generated.warnings),
+                None,
+                None,
+                None,
+                BudgetUsage(
+                    iterations=sum(
+                        max(1, len(execution.attempts))
+                        for execution in generation_executions
+                    ),
+                    input_tokens=sum(
+                        execution.usage.input_tokens
+                        for execution in generation_executions
+                    )
+                    + self.capability_usage.input_tokens,
+                    output_tokens=sum(
+                        execution.usage.output_tokens
+                        for execution in generation_executions
+                    )
+                    + self.capability_usage.output_tokens,
+                    cost_microunits=sum(
+                        execution.usage.cost_microunits
+                        for execution in generation_executions
+                    )
+                    + self.capability_usage.cost_microunits,
+                ),
+            ),
+            task.parent_run_id,
+        )
+
     def _validate_deliverable(
         self,
         output: JsonValue,
@@ -520,7 +1307,19 @@ class ModelBackedOperationSpecialist:
             value = json.loads(output) if isinstance(output, str) else plain(output)
         except json.JSONDecodeError:
             assert isinstance(output, str)
-            return schema.model_validate_json(output, strict=True)
+            candidate = output.lstrip()
+            try:
+                value, end = json.JSONDecoder().raw_decode(candidate)
+            except json.JSONDecodeError:
+                return schema.model_validate_json(output, strict=True)
+            trailing = candidate[end:].strip()
+            if not trailing or not isinstance(value, dict):
+                return schema.model_validate_json(output, strict=True)
+            logger.warning(
+                "event=operation_deliverable_trailing_text_removed platform=%s trailing_chars=%s",
+                raw["platform"],
+                len(trailing),
+            )
         if isinstance(value, dict):
             fixed = {
                 "contract_version": self.deliverable_contract_version,

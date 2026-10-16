@@ -399,7 +399,7 @@ async def test_new_research_runs_share_only_application_network_limits(monkeypat
             ledger = await stage["binding"].port.snapshot(stage["binding"].scope)
             assert ledger.limits.max_calls == 60
             assert ledger.limits.output_time_reserve_ms == 35_000
-            assert ledger.limits.output_token_reserve == 8_000
+            assert ledger.limits.output_token_reserve == 16_000
             assert 0 < ledger.used.calls < 60
         assert len(connector.calls) == 4
     finally:

@@ -37,6 +37,9 @@ from efficiency_platform_agent.contracts.intent_v2 import (
     PermissionSnapshotV2,
     TrustedMessageV2,
 )
+from efficiency_platform_agent.contracts.referenced_inputs import (
+    ReferencedArtifactInput,
+)
 from efficiency_platform_agent.contracts.requests import CreateRunRequestV1
 from efficiency_platform_agent.contracts.research_v2 import (
     ResearchBriefV2,
@@ -77,6 +80,7 @@ class IntentV2ConversationDecision:
     usage: UsageSnapshot
     charge: BudgetCharge
     clarification_question: str | None = None
+    referenced_artifact: ReferencedArtifactInput | None = None
 
 
 @runtime_checkable

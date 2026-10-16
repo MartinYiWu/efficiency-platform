@@ -914,6 +914,53 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
 
     async def complete(self, request: ProviderRequest) -> ProviderResult:
         """通过同一流式适配器提供 ModelProvider 非流式兼容能力。"""
+        total = ProviderUsage(0, 0, 0, 0, 0)
+        for attempt in range(self.max_retries + 1):
+            result = await self._complete_once(request)
+            total = ProviderUsage(
+                total.input_tokens + result.usage.input_tokens,
+                total.output_tokens + result.usage.output_tokens,
+                total.cached_tokens + result.usage.cached_tokens,
+                total.reasoning_tokens + result.usage.reasoning_tokens,
+                total.cost_microunits + result.usage.cost_microunits,
+            )
+            response_error = result.error
+            retry_empty = (
+                response_error is not None
+                and response_error.code == "PROVIDER_RESPONSE_INVALID"
+                and response_error.retryable
+                and attempt < self.max_retries
+            )
+            if retry_empty:
+                assert response_error is not None
+                try:
+                    self.diagnostic_recorder.record(
+                        DiagnosticRecord(
+                            event_name="provider_empty_response_retrying",
+                            component="provider",
+                            level=DiagnosticLevel.WARNING,
+                            capability="deepseek_chat",
+                            stage="chat.completions.stream",
+                            provider="deepseek",
+                            error_code=response_error.code,
+                            retryable=True,
+                            attempt=attempt + 1,
+                        )
+                    )
+                except Exception:  # noqa: BLE001, S110 - 诊断失败不得改变语义
+                    pass
+                await self._backoff(attempt + 1)
+                continue
+            return ProviderResult(
+                request.contract_version,
+                result.message,
+                total,
+                result.error,
+            )
+        raise AssertionError("unreachable")
+
+    async def _complete_once(self, request: ProviderRequest) -> ProviderResult:
+        """收集一次完整流；重试只由 complete 的有界循环触发。"""
         parts: list[str] = []
         total = ProviderUsage(0, 0, 0, 0, 0)
         finish = False
@@ -947,11 +994,24 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                     "DeepSeek 流响应未正常结束",
                 ),
             )
+        content = "".join(parts)
+        if not content and not tool_calls:
+            return ProviderResult(
+                request.contract_version,
+                None,
+                total,
+                ProviderError(
+                    "PROVIDER_RESPONSE_INVALID",
+                    "provider",
+                    True,
+                    "DeepSeek 响应内容为空",
+                ),
+            )
         if not tool_calls:
             try:
                 schema = request_json_schema(request.options)
                 if schema is not None:
-                    validate_json_response("".join(parts), schema)
+                    validate_json_response(content, schema)
             except (TypeError, ValueError):
                 return ProviderResult(
                     request.contract_version,
@@ -968,7 +1028,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
             request.contract_version,
             ProviderMessage(
                 "assistant",
-                "".join(parts) or None,
+                content or None,
                 tool_calls=tool_calls,
             ),
             total,
