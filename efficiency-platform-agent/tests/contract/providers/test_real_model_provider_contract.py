@@ -13,6 +13,7 @@ from efficiency_platform_agent.core.run import (
     ProviderMessage,
     ProviderRequest,
     ProviderResult,
+    ProviderToolCall,
 )
 from efficiency_platform_agent.providers.llm.deepseek import DeepSeekModelProvider
 
@@ -90,6 +91,55 @@ class DeepSeekModelProviderContractTests(unittest.IsolatedAsyncioTestCase):
             client.chat.completions.calls[0]["response_format"], {"type": "json_object"}
         )
 
+    async def test_native_developer_and_tool_calls_are_preserved(self):
+        response = SimpleNamespace(
+            choices=(
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        tool_calls=(
+                            SimpleNamespace(
+                                id="call-1",
+                                function=SimpleNamespace(
+                                    name="search_web",
+                                    arguments='{"query":"AI 新闻"}',
+                                ),
+                            ),
+                        ),
+                    )
+                ),
+            ),
+            usage=None,
+        )
+        client = _Client(response)
+        provider = DeepSeekModelProvider(
+            client,
+            "deepseek-chat",
+            supports_developer_role=True,
+        )
+        request = ProviderRequest(
+            "s2/1",
+            (ProviderMessage("developer", "只使用证据"),),
+            JsonObject(),
+            10_000,
+        )
+
+        result = await provider.complete(request)
+
+        self.assertEqual(
+            client.chat.completions.calls[0]["messages"][0]["role"], "developer"
+        )
+        self.assertEqual(
+            result.message.tool_calls,
+            (
+                ProviderToolCall(
+                    "call-1",
+                    "search_web",
+                    JsonObject((("query", "AI 新闻"),)),
+                ),
+            ),
+        )
+
     async def test_runtime_logical_model_option_is_not_forwarded_to_sdk(self):
         response = SimpleNamespace(
             choices=(SimpleNamespace(message=SimpleNamespace(content="完成")),),
@@ -103,6 +153,34 @@ class DeepSeekModelProviderContractTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(result.error)
         self.assertNotIn("logical_model", client.chat.completions.calls[0])
+
+    async def test_invalid_json_schema_result_fails_closed(self):
+        response = SimpleNamespace(
+            choices=(
+                SimpleNamespace(
+                    message=SimpleNamespace(content='{"summary":"缺少标题"}')
+                ),
+            ),
+            usage=None,
+        )
+        schema = JsonObject(
+            (
+                ("type", "object"),
+                ("required", ("title",)),
+                (
+                    "properties",
+                    JsonObject(
+                        (("title", JsonObject((("type", "string"),))),)
+                    ),
+                ),
+            )
+        )
+
+        result = await DeepSeekModelProvider(
+            _Client(response), "deepseek-chat"
+        ).complete(_request(JsonObject((("json_schema", schema),))))
+
+        self.assertEqual(result.error.code, "PROVIDER_SCHEMA_INVALID")
 
     async def test_responses_api_shape_is_supported(self):
         client = _ResponsesClient(SimpleNamespace(output_text="响应结果", usage=None))

@@ -14,6 +14,7 @@ from efficiency_platform_agent.core.run import (
     JsonObject,
     ProviderMessage,
     ProviderRequest,
+    ProviderToolCall,
 )
 from efficiency_platform_agent.providers.deepseek_stream import (
     DeepSeekStreamingProvider,
@@ -93,6 +94,195 @@ def _data(payload: dict[str, Any]) -> str:
 
 
 @pytest.mark.asyncio
+async def test_developer_role_and_tool_messages_are_serialized_without_data_loss() -> None:
+    response = _FakeResponse(
+        [_data({"choices": [{"delta": {}, "finish_reason": "stop"}]})]
+    )
+    http = _FakeHttp(response)
+    provider = DeepSeekStreamingProvider(
+        http,
+        "deepseek-chat",
+        api_key="synthetic",
+        supports_developer_role=True,
+    )
+    request = ProviderRequest(
+        "conversation/1",
+        (
+            ProviderMessage("developer", "只使用证据"),
+            ProviderMessage(
+                "assistant",
+                None,
+                tool_calls=(
+                    ProviderToolCall(
+                        "call-1",
+                        "search_web",
+                        JsonObject((("query", "AI"),)),
+                    ),
+                ),
+            ),
+            ProviderMessage("tool", JsonObject((("count", 1),)), "call-1"),
+        ),
+        JsonObject(),
+        1000,
+    )
+
+    _ = [chunk async for chunk in provider.stream(request)]
+
+    messages = http.calls[0]["json"]["messages"]
+    assert messages[0] == {"role": "developer", "content": "只使用证据"}
+    assert messages[1]["tool_calls"][0]["function"]["arguments"] == '{"query":"AI"}'
+    assert messages[2]["tool_call_id"] == "call-1"
+    assert messages[2]["content"] == {"count": 1}
+
+
+@pytest.mark.asyncio
+async def test_stream_accumulates_tool_call_argument_deltas() -> None:
+    response = _FakeResponse(
+        [
+            _data(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {
+                                        "index": 0,
+                                        "id": "call-1",
+                                        "function": {
+                                            "name": "search_web",
+                                            "arguments": '{"query":"AI',
+                                        },
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ),
+            _data(
+                {
+                    "choices": [
+                        {
+                            "delta": {
+                                "tool_calls": [
+                                    {"index": 0, "function": {"arguments": ' 新闻"}'}}
+                                ]
+                            },
+                            "finish_reason": "tool_calls",
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    provider = DeepSeekStreamingProvider(
+        _FakeHttp(response), "deepseek-chat", api_key="synthetic"
+    )
+
+    chunks = [chunk async for chunk in provider.stream(_request())]
+
+    assert chunks[-1].finish_reason == "tool_calls"
+    assert chunks[-1].tool_calls == (
+        ProviderToolCall(
+            "call-1",
+            "search_web",
+            JsonObject((("query", "AI 新闻"),)),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_rejects_content_that_violates_json_schema() -> None:
+    response = _FakeResponse(
+        [
+            _data({"choices": [{"delta": {"content": '{"summary":"x"}'}}]}),
+            _data({"choices": [{"delta": {}, "finish_reason": "stop"}]}),
+        ]
+    )
+    provider = DeepSeekStreamingProvider(
+        _FakeHttp(response), "deepseek-chat", api_key="synthetic"
+    )
+    schema = JsonObject(
+        (
+            ("type", "object"),
+            ("required", ("title",)),
+            (
+                "properties",
+                JsonObject((("title", JsonObject((("type", "string"),))),)),
+            ),
+        )
+    )
+    request = ProviderRequest(
+        "conversation/1",
+        (ProviderMessage("user", "写标题"),),
+        JsonObject((("json_schema", schema),)),
+        1000,
+    )
+
+    result = await provider.complete(request)
+
+    assert result.error is not None
+    assert result.error.code == "PROVIDER_SCHEMA_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_unsupported_developer_role_is_deterministically_mapped_to_system() -> None:
+    response = _FakeResponse(
+        [_data({"choices": [{"delta": {}, "finish_reason": "stop"}]})]
+    )
+    http = _FakeHttp(response)
+    provider = DeepSeekStreamingProvider(
+        http, "deepseek-chat", api_key="synthetic"
+    )
+    request = ProviderRequest(
+        "conversation/1",
+        (
+            ProviderMessage("developer", "输出 JSON"),
+            ProviderMessage("user", "生成周报"),
+        ),
+        JsonObject(),
+        1000,
+    )
+
+    _ = [chunk async for chunk in provider.stream(request)]
+
+    messages = http.calls[0]["json"]["messages"]
+    assert messages[0] == {
+        "role": "system",
+        "content": "[DEVELOPER INSTRUCTION]\n输出 JSON",
+    }
+    assert messages[1] == {"role": "user", "content": "生成周报"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (httpx.ConnectTimeout("connect"), "PROVIDER_CONNECT_TIMEOUT"),
+        (httpx.ReadTimeout("read"), "PROVIDER_READ_TIMEOUT"),
+    ],
+)
+async def test_timeout_phase_maps_to_distinct_error_code(
+    error: httpx.TimeoutException, code: str
+) -> None:
+    class _TimeoutHttp:
+        def stream(self, *_: Any, **__: Any) -> Any:
+            raise error
+
+    provider = DeepSeekStreamingProvider(
+        _TimeoutHttp(),
+        "deepseek-chat",
+        api_key="synthetic",
+        max_retries=0,
+    )
+
+    chunks = [chunk async for chunk in provider.stream(_request())]
+
+    assert chunks[-1].error is not None
+    assert chunks[-1].error.code == code
+
+
+@pytest.mark.asyncio
 async def test_stream_preserves_deltas_and_merges_final_usage() -> None:
     response = _FakeResponse(
         [
@@ -165,11 +355,17 @@ async def test_network_retries_have_distinct_call_ids_and_safe_terminal_facts() 
     assert len(http.calls) == 2
     assert [record.event_name for record in recorder.records] == [
         "provider_request_started",
+        "provider_response_headers_received",
         "provider_request_retrying",
         "provider_request_started",
+        "provider_response_headers_received",
+        "provider_first_sse_event_received",
         "provider_request_succeeded",
     ]
-    first_started, retrying, second_started, succeeded = recorder.records
+    first_started = recorder.records[0]
+    retrying = recorder.records[2]
+    second_started = recorder.records[3]
+    succeeded = recorder.records[-1]
     assert first_started.provider_call_id == retrying.provider_call_id
     assert second_started.provider_call_id == succeeded.provider_call_id
     assert first_started.provider_call_id != second_started.provider_call_id
@@ -268,10 +464,13 @@ async def test_cancellation_after_network_start_records_safe_terminal_fact() -> 
     assert first.delta == "a"
     assert [record.event_name for record in recorder.records] == [
         "provider_request_started",
+        "provider_response_headers_received",
+        "provider_first_sse_event_received",
+        "provider_first_content_received",
         "provider_request_cancelled",
     ]
-    assert recorder.records[0].provider_call_id == recorder.records[1].provider_call_id
-    assert recorder.records[1].error_code == "CANCELLED"
+    assert recorder.records[0].provider_call_id == recorder.records[-1].provider_call_id
+    assert recorder.records[-1].error_code == "CANCELLED"
 
 
 @pytest.mark.asyncio

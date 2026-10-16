@@ -7,8 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Mapping
 from typing import Any
+
+import httpx
 
 from ...core.ports import ModelProvider
 from ...core.run import (
@@ -20,8 +23,10 @@ from ...core.run import (
     ProviderMessage,
     ProviderRequest,
     ProviderResult,
+    ProviderToolCall,
     ProviderUsage,
 )
+from ..json_schema import request_json_schema, validate_json_response
 
 
 def _json_value(value: JsonValue) -> Any:
@@ -60,10 +65,80 @@ def _usage(raw: Any) -> ProviderUsage:
     )
 
 
+def _serialize_message(
+    message: ProviderMessage, *, supports_developer_role: bool
+) -> dict[str, Any]:
+    role = message.role
+    content = _json_value(message.content)
+    if role == "developer" and not supports_developer_role:
+        role = "system"
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False, sort_keys=True)
+        content = f"[DEVELOPER INSTRUCTION]\n{content}"
+    payload: dict[str, Any] = {"role": role, "content": content}
+    if message.tool_call_id is not None:
+        payload["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": call.tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(
+                        _json_value(call.arguments),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                },
+            }
+            for call in message.tool_calls
+        ]
+    return payload
+
+
+def _freeze_json(value: Any) -> JsonValue:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, Mapping):
+        return JsonObject(
+            tuple((str(key), _freeze_json(item)) for key, item in value.items())
+        )
+    raise ValueError("tool arguments are not JSON")
+
+
+def _parse_tool_calls(raw_calls: Any) -> tuple[ProviderToolCall, ...]:
+    calls: list[ProviderToolCall] = []
+    for raw_call in raw_calls or ():
+        function = _field(raw_call, "function", {}) or {}
+        arguments = json.loads(_field(function, "arguments", "{}") or "{}")
+        frozen = _freeze_json(arguments)
+        if not isinstance(frozen, JsonObject):
+            raise TypeError("tool arguments must be an object")
+        calls.append(
+            ProviderToolCall(
+                str(_field(raw_call, "id", "")),
+                str(_field(function, "name", "")),
+                frozen,
+            )
+        )
+    return tuple(calls)
+
+
 class DeepSeekModelProvider(ModelProvider):
     """通过注入的 OpenAI 兼容客户端调用 DeepSeek。"""
 
-    def __init__(self, client: Any, model: str, *, timeout_ms: int = 30_000) -> None:
+    def __init__(
+        self,
+        client: Any,
+        model: str,
+        *,
+        timeout_ms: int = 30_000,
+        supports_developer_role: bool = False,
+    ) -> None:
         if client is None:
             raise ValueError("client不能为空")
         if not isinstance(model, str) or not model.strip():
@@ -73,6 +148,7 @@ class DeepSeekModelProvider(ModelProvider):
         self.client = client
         self.model = model
         self.timeout_ms = timeout_ms
+        self.supports_developer_role = supports_developer_role
         self.descriptor = ExtensionDescriptor(
             name=f"deepseek.{model}",
             semantic_version="1.0.0",
@@ -91,7 +167,10 @@ class DeepSeekModelProvider(ModelProvider):
         if not isinstance(request, ProviderRequest):
             raise TypeError("request必须是ProviderRequest")
         messages = tuple(
-            {"role": item.role, "content": _json_value(item.content)}
+            _serialize_message(
+                item,
+                supports_developer_role=self.supports_developer_role,
+            )
             for item in request.messages
         )
         options = _json_value(request.options)
@@ -101,6 +180,7 @@ class DeepSeekModelProvider(ModelProvider):
         # logical_model 是 Agent Runtime 的路由元数据，不是 OpenAI-compatible
         # SDK 参数；若透传会在发起网络请求前触发客户端参数错误。
         options.pop("logical_model", None)
+        options.pop("json_schema", None)
         options["timeout"] = min(request.timeout_ms, self.timeout_ms) / 1000
         try:
             responses = getattr(self.client, "responses", None)
@@ -133,6 +213,12 @@ class DeepSeekModelProvider(ModelProvider):
                 code, retryable = "PROVIDER_RATE_LIMITED", True
             elif isinstance(status, int) and status >= 500:
                 code, retryable = "PROVIDER_UPSTREAM", True
+            elif isinstance(error, httpx.ConnectTimeout):
+                code, retryable = "PROVIDER_CONNECT_TIMEOUT", True
+            elif isinstance(error, httpx.ReadTimeout):
+                code, retryable = "PROVIDER_READ_TIMEOUT", True
+            elif isinstance(error, httpx.ConnectError):
+                code, retryable = "PROVIDER_CONNECTION", True
             elif isinstance(error, (TimeoutError, asyncio.TimeoutError)):
                 code, retryable = "PROVIDER_TIMEOUT", True
             else:
@@ -148,20 +234,40 @@ class DeepSeekModelProvider(ModelProvider):
         if choices:
             message = _field(choices[0], "message")
             content = _field(message, "content")
+            raw_tool_calls = _field(message, "tool_calls", ()) or ()
         else:
             content = _field(response, "output_text")
+            raw_tool_calls = ()
             if content is None:
                 output = _field(response, "output", ())
                 content = _field(output[0], "content") if output else None
-        if content is None:
+        if content is None and not raw_tool_calls:
             return self._invalid_result(request, "DeepSeek 响应内容为空")
         try:
-            normalized = ProviderMessage("assistant", content)
-            return ProviderResult(
-                request.contract_version, normalized, _usage(response)
+            normalized = ProviderMessage(
+                "assistant",
+                content,
+                tool_calls=_parse_tool_calls(raw_tool_calls),
             )
         except (TypeError, ValueError):
             return self._invalid_result(request, "DeepSeek 响应结构无效")
+        try:
+            schema = request_json_schema(request.options)
+            if schema is not None and not normalized.tool_calls:
+                validate_json_response(normalized.content, schema)
+        except (TypeError, ValueError):
+            return ProviderResult(
+                request.contract_version,
+                None,
+                ProviderUsage(0, 0, 0, 0, 0),
+                ProviderError(
+                    "PROVIDER_SCHEMA_INVALID",
+                    "provider",
+                    False,
+                    "DeepSeek 响应不符合输出契约",
+                ),
+            )
+        return ProviderResult(request.contract_version, normalized, _usage(response))
 
     @staticmethod
     def _invalid_result(request: ProviderRequest, message: str) -> ProviderResult:

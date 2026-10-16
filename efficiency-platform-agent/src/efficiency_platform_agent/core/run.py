@@ -234,16 +234,50 @@ class ToolResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderToolCall:
+    """Provider-independent function Tool Call emitted by a model."""
+
+    tool_call_id: str
+    name: str
+    arguments: JsonObject
+
+    def __post_init__(self) -> None:
+        _require_non_empty("tool_call_id", self.tool_call_id)
+        _require_non_empty("name", self.name)
+        _require_json_object("arguments", self.arguments)
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderMessage:
     """Version-neutral structured model message."""
 
     role: str
     content: JsonValue
+    tool_call_id: str | None = None
+    tool_calls: tuple[ProviderToolCall, ...] = ()
 
     def __post_init__(self) -> None:
-        if self.role not in {"system", "user", "assistant", "tool"}:
-            raise ValueError("role must be system, user, assistant, or tool")
+        if self.role not in {"system", "developer", "user", "assistant", "tool"}:
+            raise ValueError(
+                "role must be system, developer, user, assistant, or tool"
+            )
         _validate_json_value(self.content)
+        _require_optional_non_empty("tool_call_id", self.tool_call_id)
+        if self.role == "tool" and self.tool_call_id is None:
+            raise ValueError("tool messages require tool_call_id")
+        if self.role != "tool" and self.tool_call_id is not None:
+            raise ValueError("tool_call_id is only valid for tool messages")
+        if not isinstance(self.tool_calls, tuple) or any(
+            not isinstance(item, ProviderToolCall) for item in self.tool_calls
+        ):
+            raise TypeError("tool_calls must contain ProviderToolCall values")
+        if self.tool_calls and self.role != "assistant":
+            raise ValueError("tool_calls are only valid for assistant messages")
+        call_ids = [item.tool_call_id for item in self.tool_calls]
+        if len(call_ids) != len(set(call_ids)):
+            raise ValueError("duplicate tool_call_id in assistant message")
+        if self.role == "assistant" and self.content is None and not self.tool_calls:
+            raise ValueError("assistant message requires content or tool_calls")
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +331,13 @@ class ProviderStreamChunk:
     finish_reason: str | None = None
     error: ProviderError | None = None
     event: str | None = None
+    tool_calls: tuple[ProviderToolCall, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.tool_calls, tuple) or any(
+            not isinstance(item, ProviderToolCall) for item in self.tool_calls
+        ):
+            raise TypeError("tool_calls must contain ProviderToolCall values")
 
     @property
     def text(self) -> str:

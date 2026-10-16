@@ -29,11 +29,14 @@ from ..core.run import (
     JsonObject,
     JsonValue,
     ProviderError,
+    ProviderMessage,
     ProviderRequest,
     ProviderResult,
     ProviderStreamChunk,
+    ProviderToolCall,
     ProviderUsage,
 )
+from .json_schema import request_json_schema, validate_json_response
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -71,6 +74,71 @@ def _usage(value: Any) -> ProviderUsage:
     )
 
 
+def _serialize_message(
+    message: ProviderMessage, *, supports_developer_role: bool
+) -> dict[str, Any]:
+    role = message.role
+    content = _json_value(message.content)
+    if role == "developer" and not supports_developer_role:
+        role = "system"
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=False, sort_keys=True)
+        content = f"[DEVELOPER INSTRUCTION]\n{content}"
+    payload: dict[str, Any] = {"role": role, "content": content}
+    if message.tool_call_id is not None:
+        payload["tool_call_id"] = message.tool_call_id
+    if message.tool_calls:
+        payload["tool_calls"] = [
+            {
+                "id": call.tool_call_id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(
+                        _json_value(call.arguments),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                },
+            }
+            for call in message.tool_calls
+        ]
+    return payload
+
+
+def _freeze_json(value: Any) -> JsonValue:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, Mapping):
+        return JsonObject(
+            tuple((str(key), _freeze_json(item)) for key, item in value.items())
+        )
+    raise ValueError("tool arguments are not JSON")
+
+
+def _finalize_tool_calls(
+    parts: Mapping[int, Mapping[str, str]],
+) -> tuple[ProviderToolCall, ...]:
+    calls: list[ProviderToolCall] = []
+    for index in sorted(parts):
+        part = parts[index]
+        arguments = json.loads(part.get("arguments", "{}"))
+        frozen = _freeze_json(arguments)
+        if not isinstance(frozen, JsonObject):
+            raise TypeError("tool arguments must be an object")
+        calls.append(
+            ProviderToolCall(
+                part.get("id", ""),
+                part.get("name", ""),
+                frozen,
+            )
+        )
+    return tuple(calls)
+
+
 def _error(
     code: str, category: str, message: str, retryable: bool
 ) -> ProviderStreamChunk:
@@ -93,6 +161,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
         owns_client: bool = False,
         logical_model_map: Mapping[str, str] | None = None,
         diagnostic_recorder: DiagnosticRecorderPort | None = None,
+        supports_developer_role: bool = False,
     ) -> None:
         if client is None:
             raise ValueError("client不能为空")
@@ -115,6 +184,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
         self.cancellation_signal = cancellation_signal
         self.owns_client = owns_client
         self.diagnostic_recorder = diagnostic_recorder or NoopDiagnosticRecorder()
+        self.supports_developer_role = supports_developer_role
         normalized_models = dict(logical_model_map or {})
         if any(
             not isinstance(key, str)
@@ -200,7 +270,10 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
         if not isinstance(request, ProviderRequest):
             raise TypeError("request必须是ProviderRequest")
         messages = [
-            {"role": message.role, "content": _json_value(message.content)}
+            _serialize_message(
+                message,
+                supports_developer_role=self.supports_developer_role,
+            )
             for message in request.messages
         ]
         options = _json_value(request.options)
@@ -260,6 +333,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
             first_sse_event_recorded = False
             first_reasoning_recorded = False
             first_content_recorded = False
+            tool_call_parts: dict[int, dict[str, str]] = {}
             if await self._cancel_requested():
                 raise asyncio.CancelledError
             attempt_number = attempts + 1
@@ -570,9 +644,10 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 return
                             choices = _field(event, "choices", ()) or ()
                             choice = choices[0] if choices else None
+                            delta_object = _field(choice, "delta", {})
                             reasoning_delta = (
                                 _field(
-                                    _field(choice, "delta", {}),
+                                    delta_object,
                                     "reasoning_content",
                                     "",
                                 )
@@ -589,9 +664,23 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                     http_status=status,
                                 )
                                 first_reasoning_recorded = True
-                            delta = (
-                                _field(_field(choice, "delta", {}), "content", "") or ""
-                            )
+                            delta = _field(delta_object, "content", "") or ""
+                            raw_tool_calls = _field(delta_object, "tool_calls", ()) or ()
+                            for raw_call in raw_tool_calls:
+                                index = int(_field(raw_call, "index", 0) or 0)
+                                current = tool_call_parts.setdefault(
+                                    index, {"id": "", "name": "", "arguments": ""}
+                                )
+                                call_id = _field(raw_call, "id")
+                                if call_id:
+                                    current["id"] = str(call_id)
+                                function = _field(raw_call, "function", {}) or {}
+                                name = _field(function, "name")
+                                if name:
+                                    current["name"] += str(name)
+                                arguments = _field(function, "arguments")
+                                if arguments:
+                                    current["arguments"] += str(arguments)
                             if delta and not first_content_recorded:
                                 self._record_provider_attempt(
                                     "provider_first_content_received",
@@ -609,13 +698,42 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 if _field(event, "usage") is not None
                                 else ProviderUsage(0, 0, 0, 0, 0)
                             )
+                            tool_calls: tuple[ProviderToolCall, ...] = ()
+                            if finish_reason is not None and tool_call_parts:
+                                try:
+                                    tool_calls = _finalize_tool_calls(tool_call_parts)
+                                except (TypeError, ValueError):
+                                    self._record_provider_attempt(
+                                        "provider_request_failed",
+                                        DiagnosticLevel.ERROR,
+                                        selected_model=selected_model,
+                                        provider_call_id=provider_call_id,
+                                        attempt=attempt_number,
+                                        started_at_ns=started_at_ns,
+                                        error_code="PROVIDER_TOOL_CALL_INVALID",
+                                        error_type="ToolCallDecodeError",
+                                        retryable=False,
+                                    )
+                                    yield _error(
+                                        "PROVIDER_TOOL_CALL_INVALID",
+                                        "provider",
+                                        "DeepSeek Tool Call 格式无效",
+                                        False,
+                                    )
+                                    return
                             emitted = (
                                 emitted
                                 or bool(delta)
+                                or bool(raw_tool_calls)
                                 or finish_reason is not None
                                 or usage != ProviderUsage(0, 0, 0, 0, 0)
                             )
-                            yield ProviderStreamChunk(str(delta), usage, finish_reason)
+                            yield ProviderStreamChunk(
+                                str(delta),
+                                usage,
+                                finish_reason,
+                                tool_calls=tool_calls,
+                            )
                             if finish_reason is not None:
                                 terminated = True
                         if not terminated:
@@ -692,6 +810,15 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                 yield _error("PROVIDER_TIMEOUT", "timeout", "DeepSeek 请求超时", True)
                 return
             except httpx.TimeoutException as error:
+                if isinstance(error, httpx.ConnectTimeout):
+                    timeout_code = "PROVIDER_CONNECT_TIMEOUT"
+                    timeout_message = "DeepSeek 建立连接超时"
+                elif isinstance(error, httpx.ReadTimeout):
+                    timeout_code = "PROVIDER_READ_TIMEOUT"
+                    timeout_message = "DeepSeek 读取响应超时"
+                else:
+                    timeout_code = "PROVIDER_TIMEOUT"
+                    timeout_message = "DeepSeek 请求超时"
                 if not emitted and attempts < self.max_retries:
                     self._record_provider_attempt(
                         "provider_request_retrying",
@@ -700,7 +827,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                         provider_call_id=provider_call_id,
                         attempt=attempt_number,
                         started_at_ns=started_at_ns,
-                        error_code="PROVIDER_TIMEOUT",
+                        error_code=timeout_code,
                         error_type=type(error).__name__,
                         retryable=True,
                         error=error,
@@ -715,12 +842,12 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                     provider_call_id=provider_call_id,
                     attempt=attempt_number,
                     started_at_ns=started_at_ns,
-                    error_code="PROVIDER_TIMEOUT",
+                    error_code=timeout_code,
                     error_type=type(error).__name__,
                     retryable=True,
                     error=error,
                 )
-                yield _error("PROVIDER_TIMEOUT", "timeout", "DeepSeek 请求超时", True)
+                yield _error(timeout_code, "timeout", timeout_message, True)
                 return
             except httpx.TransportError as error:
                 if not emitted and attempts < self.max_retries:
@@ -790,6 +917,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
         parts: list[str] = []
         total = ProviderUsage(0, 0, 0, 0, 0)
         finish = False
+        tool_calls: tuple[ProviderToolCall, ...] = ()
         async for chunk in self.stream(request):
             if chunk.error is not None:
                 return ProviderResult(
@@ -805,6 +933,8 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                 0,
             )
             finish = finish or chunk.finish_reason is not None
+            if chunk.tool_calls:
+                tool_calls = chunk.tool_calls
         if not finish:
             return ProviderResult(
                 request.contract_version,
@@ -817,11 +947,30 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                     "DeepSeek 流响应未正常结束",
                 ),
             )
-        from ..core.run import ProviderMessage
-
+        if not tool_calls:
+            try:
+                schema = request_json_schema(request.options)
+                if schema is not None:
+                    validate_json_response("".join(parts), schema)
+            except (TypeError, ValueError):
+                return ProviderResult(
+                    request.contract_version,
+                    None,
+                    total,
+                    ProviderError(
+                        "PROVIDER_SCHEMA_INVALID",
+                        "provider",
+                        False,
+                        "DeepSeek 响应不符合输出契约",
+                    ),
+                )
         return ProviderResult(
             request.contract_version,
-            ProviderMessage("assistant", "".join(parts)),
+            ProviderMessage(
+                "assistant",
+                "".join(parts) or None,
+                tool_calls=tool_calls,
+            ),
             total,
         )
 
