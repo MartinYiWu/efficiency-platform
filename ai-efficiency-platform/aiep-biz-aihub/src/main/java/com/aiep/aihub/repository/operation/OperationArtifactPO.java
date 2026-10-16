@@ -13,11 +13,15 @@ public class OperationArtifactPO {
     private String sourceResearchRunId;
     private String tenantId;
     private String artifactType;
+    private String scenario;
     private String platform;
     private int versionNo;
+    private String rootArtifactId;
+    private String parentArtifactId;
     private String title;
     private String bodyMarkdown;
     private String bodyHtml;
+    private String publicContent;
     private String internalMetadata;
     private LocalDateTime createdAt;
 
@@ -33,16 +37,24 @@ public class OperationArtifactPO {
     public void setTenantId(String tenantId) { this.tenantId = tenantId; }
     public String getArtifactType() { return artifactType; }
     public void setArtifactType(String artifactType) { this.artifactType = artifactType; }
+    public String getScenario() { return scenario; }
+    public void setScenario(String scenario) { this.scenario = scenario; }
     public String getPlatform() { return platform; }
     public void setPlatform(String platform) { this.platform = platform; }
     public int getVersionNo() { return versionNo; }
     public void setVersionNo(int versionNo) { this.versionNo = versionNo; }
+    public String getRootArtifactId() { return rootArtifactId; }
+    public void setRootArtifactId(String rootArtifactId) { this.rootArtifactId = rootArtifactId; }
+    public String getParentArtifactId() { return parentArtifactId; }
+    public void setParentArtifactId(String parentArtifactId) { this.parentArtifactId = parentArtifactId; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getBodyMarkdown() { return bodyMarkdown; }
     public void setBodyMarkdown(String bodyMarkdown) { this.bodyMarkdown = bodyMarkdown; }
     public String getBodyHtml() { return bodyHtml; }
     public void setBodyHtml(String bodyHtml) { this.bodyHtml = bodyHtml; }
+    public String getPublicContent() { return publicContent; }
+    public void setPublicContent(String publicContent) { this.publicContent = publicContent; }
     public String getInternalMetadata() { return internalMetadata; }
     public void setInternalMetadata(String internalMetadata) { this.internalMetadata = internalMetadata; }
     public LocalDateTime getCreatedAt() { return createdAt; }

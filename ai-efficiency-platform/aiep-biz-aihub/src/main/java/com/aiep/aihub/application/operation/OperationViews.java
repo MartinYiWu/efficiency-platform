@@ -24,11 +24,15 @@ public final class OperationViews {
             String conversationId,
             String runId,
             String artifactType,
+            String scenario,
             String platform,
             int version,
+            String rootArtifactId,
+            String parentArtifactId,
             String title,
             String bodyMarkdown,
             String bodyHtml,
+            String publicContent,
             LocalDateTime createdAt) { }
     public record ArtifactSummary(
             String artifactId, String artifactType, String platform, int version, String title, LocalDateTime createdAt) { }

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,6 +33,7 @@ import reactor.core.publisher.Flux;
 @Service
 public class OperationAssistantService {
     private static final Logger log = LoggerFactory.getLogger(OperationAssistantService.class);
+    private static final Set<String> TERMINAL_STATUSES = Set.of("succeeded", "failed", "cancelled", "timed_out");
     private final OperationConversationMapper conversationMapper;
     private final OperationMessageMapper messageMapper;
     private final OperationRunMapper runMapper;
@@ -170,9 +172,14 @@ public class OperationAssistantService {
 
     @Transactional
     public void projectEvent(String runId, OperationAgentRunEvent event) {
-        OperationRunPO run = ownedRun(runId);
+        OperationRunPO run = ownedRunForUpdate(runId);
         if (!run.getAgentRunId().equals(event.runId())) {
             throw new OperationAssistantException("RUN_EVENT_MISMATCH", "运行事件标识不匹配");
+        }
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            log.info("event=operation_event_ignored_terminal runId={} agentRunId={} sequence={} event={} status={}",
+                    run.getId(), run.getAgentRunId(), event.sequence(), event.event(), run.getStatus());
+            return;
         }
         if (event.sequence() <= run.getLastEventSequence()) {
             log.warn("event=operation_event_ignored runId={} agentRunId={} sequence={} lastSequence={}",
@@ -204,16 +211,20 @@ public class OperationAssistantService {
 
     @Transactional
     public OperationViews.RunView cancelRun(String runId) {
-        OperationRunPO run = ownedRun(runId);
+        OperationRunPO run = ownedRunForUpdate(runId);
         if (run.getAgentRunId() == null) {
             throw new OperationAssistantException("RUN_NOT_CANCELLABLE", "运行任务未成功提交到Agent");
         }
+        if (TERMINAL_STATUSES.contains(run.getStatus())) {
+            return toRunView(run);
+        }
         OperationAgentCancelResponse cancelled = aiInvokeFacade.cancelOperationRun(run.getAgentRunId(), run.getTenantId());
-        run.setStatus(cancelled.status());
+        String persistedStatus = TERMINAL_STATUSES.contains(cancelled.status()) ? cancelled.status() : "cancelled";
+        run.setStatus(persistedStatus);
         run.setUpdatedAt(LocalDateTime.now());
         runMapper.updateById(run);
-        log.info("event=operation_cancel_result runId={} agentRunId={} status={}",
-                run.getId(), run.getAgentRunId(), run.getStatus());
+        log.info("event=operation_cancel_result runId={} agentRunId={} agentStatus={} status={}",
+                run.getId(), run.getAgentRunId(), cancelled.status(), run.getStatus());
         return toRunView(run);
     }
 
@@ -287,11 +298,16 @@ public class OperationAssistantService {
             artifact.setRunId(run.getId());
             artifact.setTenantId(run.getTenantId());
             artifact.setArtifactType(artifactType);
+            artifact.setScenario(firstNonBlank(item, "scenario", "deliverable_kind", artifactType));
             artifact.setPlatform(platform);
-            artifact.setVersionNo(nextArtifactVersion(run.getConversationId(), artifactType));
+            OperationArtifactPO previous = latestArtifact(run.getConversationId(), artifactType);
+            artifact.setVersionNo(previous == null ? 1 : previous.getVersionNo() + 1);
+            artifact.setParentArtifactId(previous == null ? null : previous.getId());
+            artifact.setRootArtifactId(previous == null ? artifact.getId() : previous.getRootArtifactId());
             artifact.setTitle(title);
             artifact.setBodyMarkdown(body);
             artifact.setBodyHtml(SafeMarkdownRenderer.render(body));
+            artifact.setPublicContent(writeJson(item));
             artifact.setCreatedAt(LocalDateTime.now());
             if ("ranked_digest".equals(artifactType)) {
                 artifact.setSourceResearchRunId(run.getId());
@@ -333,13 +349,12 @@ public class OperationAssistantService {
         messageMapper.insert(message);
     }
 
-    private int nextArtifactVersion(String conversationId, String artifactType) {
-        OperationArtifactPO previous = artifactMapper.selectOne(new LambdaQueryWrapper<OperationArtifactPO>()
+    private OperationArtifactPO latestArtifact(String conversationId, String artifactType) {
+        return artifactMapper.selectOne(new LambdaQueryWrapper<OperationArtifactPO>()
                 .eq(OperationArtifactPO::getConversationId, conversationId)
                 .eq(OperationArtifactPO::getArtifactType, artifactType)
                 .orderByDesc(OperationArtifactPO::getVersionNo)
                 .last("LIMIT 1"));
-        return previous == null ? 1 : previous.getVersionNo() + 1;
     }
 
     private String extractBody(Map<String, Object> item) {
@@ -350,11 +365,13 @@ public class OperationAssistantService {
                 return body;
             }
         }
-        for (String key : List.of("copy_text", "body")) {
-            Object value = item.get(key);
-            if (value instanceof String body && !body.isBlank()) {
-                return body;
-            }
+        Object copyText = item.get("copy_text");
+        if (copyText instanceof String body && !body.isBlank()) {
+            return body;
+        }
+        Object bodyValue = item.get("body");
+        if (bodyValue instanceof String body && !body.isBlank()) {
+            return body;
         }
         throw new OperationAssistantException("DELIVERABLE_BODY_EMPTY", "交付正文为空");
     }
@@ -377,6 +394,16 @@ public class OperationAssistantService {
                 .eq(OperationRunPO::getId, id)
                 .eq(OperationRunPO::getTenantId, actor.tenantId())
                 .last("LIMIT 1"));
+        if (value == null) {
+            throw new OperationAssistantException("RUN_NOT_FOUND", "运行记录不存在");
+        }
+        ownedConversation(value.getConversationId(), actor);
+        return value;
+    }
+
+    private OperationRunPO ownedRunForUpdate(String id) {
+        OperationActor actor = OperationActor.developmentActor();
+        OperationRunPO value = runMapper.selectForUpdate(id, actor.tenantId());
         if (value == null) {
             throw new OperationAssistantException("RUN_NOT_FOUND", "运行记录不存在");
         }
@@ -409,8 +436,9 @@ public class OperationAssistantService {
 
     private OperationViews.ArtifactView toArtifactView(OperationArtifactPO value) {
         return new OperationViews.ArtifactView(
-                value.getId(), value.getConversationId(), value.getRunId(), value.getArtifactType(), value.getPlatform(),
-                value.getVersionNo(), value.getTitle(), value.getBodyMarkdown(), value.getBodyHtml(), value.getCreatedAt());
+                value.getId(), value.getConversationId(), value.getRunId(), value.getArtifactType(), value.getScenario(), value.getPlatform(),
+                value.getVersionNo(), value.getRootArtifactId(), value.getParentArtifactId(), value.getTitle(), value.getBodyMarkdown(),
+                value.getBodyHtml(), value.getPublicContent(), value.getCreatedAt());
     }
 
     private String writeJson(Object value) {
