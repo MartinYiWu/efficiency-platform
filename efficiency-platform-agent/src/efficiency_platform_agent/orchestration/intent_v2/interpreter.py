@@ -20,6 +20,7 @@ from efficiency_platform_agent.contracts.intent_v2 import (
     IntentFrameV2,
     IntentPatchV2,
 )
+from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
 from efficiency_platform_agent.core.budget import RemainingBudget
 from efficiency_platform_agent.core.model import (
     CancellationSignal,
@@ -34,6 +35,7 @@ from efficiency_platform_agent.core.run import (
     JsonValue,
     ProviderMessage,
     ProviderRequest,
+    ProviderResult,
     RunContext,
     RunRequest,
 )
@@ -41,8 +43,13 @@ from efficiency_platform_agent.core.runtime import UsageSnapshot
 from efficiency_platform_agent.orchestration.intent_interpreter import (
     IntentModelRuntime,
 )
-from efficiency_platform_agent.prompts.contracts import RenderedPrompt
-from efficiency_platform_agent.prompts.runtime import PromptRuntime
+from efficiency_platform_agent.orchestration.prompt_keys import PromptKeyResolver
+from efficiency_platform_agent.prompts.contracts import (
+    AssembledPrompt,
+    PromptValue,
+    RenderedPrompt,
+)
+from efficiency_platform_agent.prompts.runtime import PromptAssembler, PromptRuntime
 
 type ReviewPolicy = Callable[[IntentPatchV2, IntentFrameV2 | None], bool]
 type DeterministicPatchResolver = Callable[
@@ -52,6 +59,270 @@ type DeterministicPatchResolver = Callable[
 
 _MAX_MODEL_OUTPUT_CHARS = 20_000
 _MAX_OUTPUT_TOKENS = 8_000
+
+
+class OperationIntentPlanningError(RuntimeError):
+    """统一意图与任务规划无法形成可信计划。"""
+
+    def __init__(self, code: str, safe_message: str) -> None:
+        self.code = code
+        self.safe_message = safe_message
+        super().__init__(f"{code}: {safe_message}")
+
+
+@dataclass(frozen=True, slots=True)
+class OperationIntentPlanningExecution:
+    plan: IntentPlanV1
+    usage: UsageSnapshot
+    attempts: tuple[ModelSelection, ...]
+    provider_calls: int
+    repaired: bool
+
+
+class OperationIntentPlanningAgent:
+    """所有运营消息的第一入口；模型规划，强契约和受控映射裁决。"""
+
+    def __init__(
+        self,
+        model_runtime: IntentModelRuntime,
+        prompt_assembler: PromptAssembler,
+    ) -> None:
+        complete = getattr(model_runtime, "complete", None)
+        assemble = getattr(prompt_assembler, "assemble", None)
+        if complete is None or not callable(complete):
+            raise TypeError("model_runtime 必须实现 IntentModelRuntime")
+        if assemble is None or not callable(assemble):
+            raise TypeError("prompt_assembler 必须实现 assemble")
+        self.model_runtime = model_runtime
+        self.prompt_assembler = prompt_assembler
+
+    async def plan(
+        self,
+        *,
+        run_id: str,
+        user_text: str,
+        visible_history: tuple[str, ...],
+        remaining_budget: RemainingBudget,
+    ) -> IntentPlanV1:
+        return (
+            await self.execute(
+                run_id=run_id,
+                user_text=user_text,
+                visible_history=visible_history,
+                remaining_budget=remaining_budget,
+            )
+        ).plan
+
+    async def execute(
+        self,
+        *,
+        run_id: str,
+        user_text: str,
+        visible_history: tuple[str, ...],
+        remaining_budget: RemainingBudget,
+    ) -> OperationIntentPlanningExecution:
+        if not isinstance(run_id, str) or not run_id.strip():
+            raise ValueError("run_id 必须为非空字符串")
+        if not isinstance(user_text, str) or not user_text.strip():
+            raise ValueError("user_text 必须为非空字符串")
+        if not isinstance(visible_history, tuple) or any(
+            not isinstance(item, str) for item in visible_history
+        ):
+            raise TypeError("visible_history 必须为字符串 tuple")
+        if not isinstance(remaining_budget, RemainingBudget):
+            raise TypeError("remaining_budget 必须为 RemainingBudget")
+
+        bounded_history = tuple(item[-4_000:] for item in visible_history[-12:])
+        context_payload = {
+            "visible_history": bounded_history,
+            "output_contract": "intent-plan/1",
+            "allowed_scenarios": [
+                "industry_digest",
+                "multi_platform_content",
+                "brand_operation_plan",
+                "ip_operation_plan",
+                "campaign_plan",
+                "content_calendar",
+                "growth_experiment",
+                "operation_review",
+            ],
+            "allowed_actions": [
+                "create",
+                "revise",
+                "refresh",
+                "clarify",
+                "general_chat",
+            ],
+        }
+        assembled = await self._assemble(
+            run_id=run_id,
+            repair=False,
+            user_text=user_text,
+            context_payload=context_payload,
+        )
+        first = await self._invoke(assembled, remaining_budget)
+        try:
+            return self._execution(self._parse(first.result), (first,), repaired=False)
+        except (TypeError, ValueError, ValidationError) as first_error:
+            if first.result.error is not None:
+                raise OperationIntentPlanningError(
+                    "INTENT_PROVIDER_UNAVAILABLE", "意图规划模型当前不可用"
+                ) from first_error
+            invalid_output = (
+                "null"
+                if first.result.message is None
+                else str(first.result.message.content)[:20_000]
+            )
+            repair_budget = _remaining_after(first, remaining_budget)
+            repair = await self._assemble(
+                run_id=run_id,
+                repair=True,
+                user_text=user_text,
+                context_payload=context_payload,
+                previous_output=invalid_output,
+                validation_errors={"code": "INTENT_PLAN_INVALID"},
+            )
+            repaired = await self._invoke(repair, repair_budget)
+            try:
+                return self._execution(
+                    self._parse(repaired.result),
+                    (first, repaired),
+                    repaired=True,
+                )
+            except (TypeError, ValueError, ValidationError) as final_error:
+                code = (
+                    "INTENT_PROVIDER_UNAVAILABLE"
+                    if repaired.result.error is not None
+                    else "INTENT_PLAN_INVALID"
+                )
+                raise OperationIntentPlanningError(
+                    code,
+                    "意图规划无法形成有效任务计划",
+                ) from final_error
+
+    async def _assemble(
+        self,
+        *,
+        run_id: str,
+        repair: bool,
+        user_text: str,
+        context_payload: object,
+        previous_output: object | None = None,
+        validation_errors: object | None = None,
+    ) -> AssembledPrompt:
+        values = {
+            "user_request": PromptValue(user_text, "user_input"),
+            "context_payload": PromptValue(context_payload, "research_data"),
+        }
+        if repair:
+            values["previous_output"] = PromptValue(previous_output, "artifact")
+            values["validation_errors"] = PromptValue(
+                validation_errors, "system_context"
+            )
+        return await self.prompt_assembler.assemble(
+            run_id=run_id,
+            stage="intent.repair" if repair else "intent.plan",
+            prompt_key=PromptKeyResolver.intent(repair=repair),
+            variables=values,
+        )
+
+    async def _invoke(
+        self,
+        assembled: AssembledPrompt,
+        budget: RemainingBudget,
+    ) -> ModelExecutionResult:
+        if budget.iterations <= 0 or budget.output_tokens <= 0 or budget.timeout_ms <= 0:
+            raise OperationIntentPlanningError(
+                "INTENT_BUDGET_EXHAUSTED", "意图规划预算不足"
+            )
+        request = ProviderRequest(
+            contract_version="intent-plan/1",
+            messages=tuple(
+                ProviderMessage(item.role, item.content)
+                for item in assembled.messages
+            ),
+            options=JsonObject(
+                (
+                    ("temperature", assembled.model_policy.temperature),
+                    (
+                        "max_tokens",
+                        min(
+                            assembled.model_policy.max_output_tokens,
+                            budget.output_tokens,
+                        ),
+                    ),
+                    (
+                        "response_format",
+                        JsonObject((("type", "json_object"),)),
+                    ),
+                    (
+                        "json_schema",
+                        _immutable_json(assembled.output_contract.json_schema),
+                    ),
+                )
+            ),
+            timeout_ms=max(
+                1,
+                min(assembled.model_policy.read_timeout_ms, budget.timeout_ms),
+            ),
+        )
+        demand = ModelDemand(
+            demand_version="intent-plan/1",
+            requested_tier=ModelTier.BALANCED,
+            requires_structured_output=True,
+            requires_tools=False,
+            estimated_input_tokens=max(
+                1, sum(len(item.content) for item in assembled.messages) // 4
+            ),
+            max_output_tokens=min(
+                assembled.model_policy.max_output_tokens,
+                budget.output_tokens,
+            ),
+        )
+        if budget.input_tokens < demand.estimated_input_tokens:
+            raise OperationIntentPlanningError(
+                "INTENT_BUDGET_EXHAUSTED", "意图规划输入预算不足"
+            )
+        execution = await self.model_runtime.complete(
+            demand,
+            request,
+            remaining_budget=budget,
+        )
+        if not isinstance(execution, ModelExecutionResult):
+            raise OperationIntentPlanningError(
+                "INTENT_PROVIDER_UNAVAILABLE", "意图规划模型返回类型无效"
+            )
+        return execution
+
+    @staticmethod
+    def _parse(result: ProviderResult) -> IntentPlanV1:
+        if result.error is not None:
+            raise ValueError(result.error.code)
+        if result.message is None or not isinstance(result.message.content, str):
+            raise ValueError("INTENT_PLAN_CONTENT_MISSING")
+        return IntentPlanV1.model_validate_json(result.message.content)
+
+    @staticmethod
+    def _execution(
+        plan: IntentPlanV1,
+        executions: tuple[ModelExecutionResult, ...],
+        *,
+        repaired: bool,
+    ) -> OperationIntentPlanningExecution:
+        return OperationIntentPlanningExecution(
+            plan=plan,
+            usage=UsageSnapshot(
+                input_tokens=sum(item.usage.input_tokens for item in executions),
+                output_tokens=sum(item.usage.output_tokens for item in executions),
+                cost_microunits=sum(item.usage.cost_microunits for item in executions),
+                estimated=any(item.usage.estimated for item in executions),
+            ),
+            attempts=tuple(
+                attempt for item in executions for attempt in item.attempts
+            ),
+            provider_calls=len(executions),
+            repaired=repaired,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -788,6 +1059,18 @@ def _plain_json(value: JsonValue) -> object:
     return value
 
 
+def _immutable_json(value: object) -> JsonValue:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, Mapping):
+        return JsonObject(
+            tuple((str(key), _immutable_json(item)) for key, item in value.items())
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_immutable_json(item) for item in value)
+    raise TypeError("value 不是 JSON 值")
+
+
 __all__ = [
     "ControlledIntentInterpreterV2",
     "IntentInterpretationV2Error",
@@ -795,4 +1078,7 @@ __all__ = [
     "IntentV2BudgetResolver",
     "IntentV2ContextBuildScope",
     "IntentV2ContextScopeResolver",
+    "OperationIntentPlanningAgent",
+    "OperationIntentPlanningError",
+    "OperationIntentPlanningExecution",
 ]

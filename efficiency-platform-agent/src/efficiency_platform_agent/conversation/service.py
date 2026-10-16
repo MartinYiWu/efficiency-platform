@@ -590,6 +590,10 @@ class ConversationService:
         intent_v2_coordinator: IntentV2ConversationCoordinator | None = None,
         ranked_reference_validator: Callable[[ReferencedRankedInput], Awaitable[None]]
         | None = None,
+        ranked_reference_resolver: Callable[
+            [str, str, str], Awaitable[str | None]
+        ]
+        | None = None,
         max_contexts: int = 256,
         max_requests: int = 2_048,
         max_active_runs: int = 1_024,
@@ -612,6 +616,7 @@ class ConversationService:
         self.fast_path_detector = fast_path_detector
         self.intent_v2_coordinator = intent_v2_coordinator
         self.ranked_reference_validator = ranked_reference_validator
+        self.ranked_reference_resolver = ranked_reference_resolver
         self.max_contexts = max_contexts
         self.max_requests = max_requests
         self.max_active_runs = max_active_runs
@@ -768,6 +773,12 @@ class ConversationService:
             ranked_set_size = requested_ranked_set_size(message.message)
             reference_intent = None
             if rank is not None or ranked_set_size is not None:
+                if previous_run is None and self.ranked_reference_resolver is not None:
+                    restored_run_id = await self.ranked_reference_resolver(
+                        tenant_id, message.user_id, conversation_id
+                    )
+                    if restored_run_id is not None:
+                        previous_run = (restored_run_id, message.user_id)
                 if previous_run is None or previous_run[1] != message.user_id:
                     raise reference_error()
                 try:
@@ -937,6 +948,11 @@ class ConversationService:
                     tenant_id, conversation_id, message, intent, resolution
                 )
             )
+            if (
+                v2_decision is not None
+                and v2_decision.clarification_question is not None
+            ):
+                question = v2_decision.clarification_question
             submission = replace(submission, referenced_inputs=referenced_inputs)
             await self.submissions.put(submission)
             async with self._lock:

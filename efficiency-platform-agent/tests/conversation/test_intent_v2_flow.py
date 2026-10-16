@@ -833,3 +833,75 @@ async def test_explicit_offline_independent_question_bypasses_stale_research() -
     ].submission
     assert submission.visible_history == ()
     assert submission.current_message.startswith("请用两句话解释RSS是什么")
+
+
+@pytest.mark.asyncio
+async def test_operation_intent_coordinator_preserves_model_clarification_question() -> None:
+    from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
+    from efficiency_platform_agent.conversation.operation_intent_coordinator import (
+        OperationIntentPlanningCoordinator,
+    )
+    from efficiency_platform_agent.core.budget import RemainingBudget
+    from efficiency_platform_agent.harness.service import RunPipelineContext
+    from efficiency_platform_agent.orchestration.intent_v2.interpreter import (
+        OperationIntentPlanningExecution,
+    )
+
+    class _Planner:
+        async def execute(self, **kwargs):
+            assert kwargs["visible_history"] == ()
+            return OperationIntentPlanningExecution(
+                plan=IntentPlanV1.model_validate(
+                    {
+                        "route_kind": "operation",
+                        "primary_scenario": "industry_digest",
+                        "action_mode": "revise",
+                        "user_goal": "修改热点条目",
+                        "requirements": {
+                            "topic": "AI 行业",
+                            "date_range": "最近7天",
+                        },
+                        "artifact_reference": {
+                            "reference_text": "第 3 条",
+                            "referenced_item_index": 3,
+                        },
+                        "required_missing_fields": ["artifact_reference"],
+                        "next_step": "clarify",
+                        "clarification_question": "你说的第 3 条是本轮热点列表中的第 3 条吗？",
+                        "planned_capabilities": [],
+                        "confidence": 0.72,
+                    }
+                ),
+                usage=UsageSnapshot(12, 6, 1, False),
+                attempts=(),
+                provider_calls=1,
+                repaired=False,
+            )
+
+    async def _false() -> bool:
+        return False
+
+    async def _wait() -> None:
+        return None
+
+    coordinator = OperationIntentPlanningCoordinator(_Planner())
+    decision = await coordinator.prepare(
+        RunPipelineContext(
+            "run-1",
+            RemainingBudget(3, 0, 100_000, 8_000, 1_000_000, 30_000),
+            _false,
+            _wait,
+        ),
+        "tenant-1",
+        "conversation-1",
+        ConversationMessageV1(
+            message="把第 3 条改一下",
+            request_id="request-1",
+            user_id="user-1",
+        ),
+    )
+
+    assert decision.intent.task_type == "industry_digest"
+    assert decision.intent.needs_clarification is True
+    assert decision.clarification_question == "你说的第 3 条是本轮热点列表中的第 3 条吗？"
+    assert decision.charge.input_tokens == 12

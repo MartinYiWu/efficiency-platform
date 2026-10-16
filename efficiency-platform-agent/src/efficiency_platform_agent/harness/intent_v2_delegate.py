@@ -76,6 +76,7 @@ class IntentV2ConversationDecision:
     intent: IntentEnvelopeV1
     usage: UsageSnapshot
     charge: BudgetCharge
+    clarification_question: str | None = None
 
 
 @runtime_checkable

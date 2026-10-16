@@ -6,6 +6,8 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
+
 from .contracts import (
     ModelPolicy,
     OutputContract,
@@ -32,17 +34,17 @@ class _PromptSpec:
 
 _CONTRACT_FIELDS: dict[str, dict[str, str]] = {
     "intent-plan": {
-        "primary_intent": "八个业务场景之一或 general_chat/clarify",
-        "action": "create/revise/refresh/clarify/general_chat 控制动作",
-        "platform": "目标平台；未指定时为 null",
-        "goal": "用户希望达成的业务结果",
-        "date_range": "研究或交付覆盖的起止日期",
-        "target_audience": "目标受众",
-        "constraints": "用户明确给出的限制条件数组",
-        "missing_fields": "阻断执行且必须澄清的字段数组",
-        "should_clarify": "是否必须先向用户澄清",
-        "research_required": "是否需要外部研究数据",
-        "execution_steps": "后续 Agent 阶段及目标数组",
+        "contract_version": "固定为 intent-plan/1 的契约版本",
+        "route_kind": "operation 或 general_chat 顶层路由",
+        "primary_scenario": "八个运营场景之一；普通对话为 null",
+        "action_mode": "create/revise/refresh/clarify/general_chat 控制动作",
+        "user_goal": "用户希望达成的业务结果",
+        "requirements": "主题、平台、时间、受众和场景条件对象",
+        "artifact_reference": "修改或序号指代绑定的交付物与版本",
+        "required_missing_fields": "阻断执行且必须澄清的字段数组",
+        "next_step": "execute/clarify/answer 下一步决策",
+        "clarification_question": "澄清时唯一一个面向用户的问题",
+        "planned_capabilities": "受控能力及依赖关系数组",
         "confidence": "0 到 1 的意图判断置信度",
     },
     "research-plan": {
@@ -328,15 +330,19 @@ def _build_policies() -> tuple[ModelPolicy, ...]:
 def _build_contracts() -> tuple[OutputContract, ...]:
     contracts: list[OutputContract] = []
     for identifier, (key, fields) in enumerate(_CONTRACT_FIELDS.items(), start=1):
-        schema = {
-            "type": "object",
-            "properties": {
-                name: {"description": description}
-                for name, description in fields.items()
-            },
-            "required": list(fields),
-            "additionalProperties": False,
-        }
+        schema = (
+            IntentPlanV1.model_json_schema()
+            if key == "intent-plan"
+            else {
+                "type": "object",
+                "properties": {
+                    name: {"description": description}
+                    for name, description in fields.items()
+                },
+                "required": list(fields),
+                "additionalProperties": False,
+            }
+        )
         field_description = "；".join(
             f"{name} 字段表示{description}" for name, description in fields.items()
         )
