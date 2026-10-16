@@ -43,6 +43,7 @@ QUALITY_CHECKS = frozenset(
 # 总 Run 预算仍由组合根统一约束，避免单个平台无限等待。
 # 多平台平台正文和结构化 JSON 需要完整输出，避免 2,000 Token 旧上限截断。
 _BUDGET = ExecutionBudget(4, 1, 4000, 8000, 120000, 0)
+_PLATFORM_CONTENT_BUDGET = ExecutionBudget(4, 1, 24000, 24000, 180000, 0)
 _RESEARCH_BUDGET = ExecutionBudget(4, 1, 4000, 8000, 240000, 0)
 _TERMINATION = frozenset({"stop_on_failure"})
 
@@ -156,18 +157,21 @@ MULTI_PLATFORM_CONTENT_PACK_V1 = _manifest(
             "operation.channel_content",
             C.CHANNEL_CONTENT,
             ("platform-content-xiaohongshu",),
+            budget=_PLATFORM_CONTENT_BUDGET,
         ),
         _step(
             "wechat-official-account",
             "operation.channel_content",
             C.CHANNEL_CONTENT,
             ("platform-content-wechat-official-account",),
+            budget=_PLATFORM_CONTENT_BUDGET,
         ),
         _step(
             "toutiao",
             "operation.channel_content",
             C.CHANNEL_CONTENT,
             ("platform-content-toutiao",),
+            budget=_PLATFORM_CONTENT_BUDGET,
         ),
     ),
     (
@@ -182,6 +186,7 @@ MULTI_PLATFORM_CONTENT_PACK_V1 = _manifest(
         _requirement("platform-content-toutiao", DeliverableKind.COPY, ("toutiao",)),
     ),
     frozenset({ProfileKind.CHANNEL}),
+    budget=_PLATFORM_CONTENT_BUDGET,
 )
 
 BRAND_OPERATION_PLAN_PACK_V1 = _manifest(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -61,7 +61,14 @@ ConfidenceV2 = Literal["high", "medium", "low"]
 VerificationStatusV2 = Literal[
     "verified", "partially_verified", "unverified", "conflicted"
 ]
-RankingBasisV2 = Literal["importance", "recency", "heat", "mixed", "evidence_order"]
+RankingBasisV2 = Literal[
+    "importance", "recency", "heat", "mixed", "evidence_order", "model_event_order"
+]
+_WECHAT_HOTSPOT_LABEL_PATTERNS = (
+    r"\*\*[^*\n]{0,8}事实[^*\n]{0,8}\*\*",
+    r"\*\*[^*\n]{0,8}影响[^*\n]{0,8}\*\*",
+    r"\*\*[^*\n]{0,8}运营观察[^*\n]{0,8}\*\*",
+)
 NextActionTypeV2 = Literal[
     "rewrite_for_platform",
     "expand_item",
@@ -236,6 +243,8 @@ class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
                 line.startswith("## ") for line in lines
             ) < 2:
                 raise ValueError("WECHAT_MARKDOWN_STRUCTURE_INVALID")
+            if not has_complete_wechat_hotspot_fields(body):
+                raise ValueError("WECHAT_HOTSPOT_STRUCTURE_INVALID")
         elif self.platform == "xiaohongshu":
             paragraphs = [
                 value.strip()
@@ -250,6 +259,51 @@ class PlatformContentDeliverableV2(OperationDeliverableBaseV2):
             ):
                 raise ValueError("XIAOHONGSHU_HASHTAGS_INVALID")
         return self
+
+
+def _wechat_hotspot_fields_complete(section: str) -> bool:
+    """每个热点按事实、影响、运营观察顺序给出非空正文。"""
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for pattern in _WECHAT_HOTSPOT_LABEL_PATTERNS:
+        match = re.search(pattern, section[cursor:])
+        if match is None:
+            return False
+        start = cursor + match.start()
+        end = cursor + match.end()
+        spans.append((start, end))
+        cursor = end
+    for index, (_, end) in enumerate(spans):
+        next_start = spans[index + 1][0] if index + 1 < len(spans) else len(section)
+        meaningful = re.findall(
+            r"[0-9A-Za-z\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]",
+            section[end:next_start],
+        )
+        if len(meaningful) < 8:
+            return False
+    return True
+
+
+def has_complete_wechat_hotspot_fields(body: str) -> bool:
+    """只校验公众号热点结构，供长度补写前判断是否可安全追加正文。"""
+    sections = re.split(r"(?m)^##\s+", body)[1:]
+    non_hotspot_titles = (
+        "收束",
+        "结语",
+        "总结",
+        "运营背景与影响",
+        "内容选题方法",
+        "行动启示",
+    )
+    hotspot_sections = [
+        section
+        for section in sections
+        if section.splitlines()
+        and not section.splitlines()[0].strip().startswith(non_hotspot_titles)
+    ]
+    return bool(hotspot_sections) and all(
+        _wechat_hotspot_fields_complete(section) for section in hotspot_sections
+    )
 
 
 class ActionPlanDeliverableV2(OperationDeliverableBaseV2):
@@ -355,13 +409,261 @@ DeliverableSet = Annotated[
 ]
 
 
+class _OperationContractV3Model(BaseModel):
+    """八场景对外内容契约；内部来源闭包不进入这些模型。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class IndustryDigestItemV1(_OperationContractV3Model):
+    rank: int = Field(ge=1)
+    title: str = Field(min_length=1)
+    event_summary: str = Field(min_length=1)
+    why_it_matters: str = Field(min_length=1)
+    operator_insight: str = Field(min_length=1)
+    occurred_at: datetime | None = None
+
+
+class IndustryDigestV1(_OperationContractV3Model):
+    kind: Literal["industry_digest"] = "industry_digest"
+    topic: str = Field(min_length=1)
+    time_window: str = Field(min_length=1)
+    items: list[IndustryDigestItemV1] = Field(min_length=1, max_length=100)
+    actual_count: int = Field(ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_ranks(self) -> IndustryDigestV1:
+        if self.actual_count != len(self.items):
+            raise ValueError("INDUSTRY_ACTUAL_COUNT_INVALID")
+        if [item.rank for item in self.items] != list(range(1, len(self.items) + 1)):
+            raise ValueError("INDUSTRY_RANKS_INVALID")
+        return self
+
+
+class ArticleSectionV1(_OperationContractV3Model):
+    heading: str = Field(min_length=1)
+    facts: list[str] = Field(default_factory=list)
+    analysis: list[str] = Field(default_factory=list)
+    operator_takeaway: str = Field(min_length=1)
+
+
+class ArticleDraftV1(_OperationContractV3Model):
+    kind: Literal["article_draft"] = "article_draft"
+    platform: Literal["wechat_official_account", "xiaohongshu", "toutiao"]
+    title: str = Field(min_length=1)
+    introduction: str = Field(min_length=1)
+    sections: list[ArticleSectionV1] = Field(min_length=1)
+    closing: str = Field(min_length=1)
+    hashtags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_rendered_content(self) -> ArticleDraftV1:
+        if self.platform == "wechat_official_account":
+            visible = "\n".join(
+                [
+                    self.title,
+                    self.introduction,
+                    *(
+                        text
+                        for section in self.sections
+                        for text in (
+                            section.heading,
+                            *section.facts,
+                            *section.analysis,
+                            section.operator_takeaway,
+                        )
+                    ),
+                    self.closing,
+                ]
+            )
+            count = len(re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", visible))
+            if not 3_000 <= count <= 4_000:
+                raise ValueError("WECHAT_BODY_CHINESE_LENGTH_INVALID")
+            if self.hashtags:
+                raise ValueError("WECHAT_HASHTAGS_FORBIDDEN")
+        return self
+
+
+class MetricDefinitionV1(_OperationContractV3Model):
+    name: str = Field(min_length=1)
+    definition: str = Field(min_length=1)
+    observation_period: str = Field(min_length=1)
+    purpose: str = Field(min_length=1)
+
+
+class BrandPlanV1(_OperationContractV3Model):
+    kind: Literal["brand_plan"] = "brand_plan"
+    current_context: list[str] = Field(min_length=1)
+    objectives: list[str] = Field(min_length=1)
+    positioning: str = Field(min_length=1)
+    audience_segments: list[dict[str, JsonValue]] = Field(min_length=1)
+    value_proposition: list[str] = Field(min_length=1)
+    content_pillars: list[dict[str, JsonValue]] = Field(min_length=1)
+    channel_strategy: list[dict[str, JsonValue]] = Field(min_length=1)
+    roadmap: list[dict[str, JsonValue]] = Field(min_length=1)
+    metric_framework: list[MetricDefinitionV1] = Field(min_length=1)
+    risks: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(min_length=1)
+
+
+class IpPlanV1(_OperationContractV3Model):
+    kind: Literal["ip_plan"] = "ip_plan"
+    ip_profile: list[str] = Field(min_length=1)
+    positioning: str = Field(min_length=1)
+    audience: list[dict[str, JsonValue]] = Field(min_length=1)
+    differentiators: list[str] = Field(min_length=1)
+    persona_rules: list[str] = Field(min_length=1)
+    content_columns: list[dict[str, JsonValue]] = Field(min_length=1)
+    voice_style: list[str] = Field(min_length=1)
+    interaction_mechanism: list[str] = Field(min_length=1)
+    growth_phases: list[dict[str, JsonValue]] = Field(min_length=1)
+    metrics: list[MetricDefinitionV1] = Field(min_length=1)
+    risks: list[str] = Field(default_factory=list)
+
+
+class CampaignPlanV1(_OperationContractV3Model):
+    kind: Literal["campaign_plan"] = "campaign_plan"
+    objective: str = Field(min_length=1)
+    theme: str = Field(min_length=1)
+    value_proposition: str = Field(min_length=1)
+    audience: list[dict[str, JsonValue]] = Field(min_length=1)
+    mechanics: list[str] = Field(min_length=1)
+    participant_journey: list[dict[str, JsonValue]] = Field(min_length=1)
+    timeline: list[dict[str, JsonValue]] = Field(min_length=1)
+    channel_plan: list[dict[str, JsonValue]] = Field(min_length=1)
+    asset_checklist: list[dict[str, JsonValue]] = Field(min_length=1)
+    metric_framework: list[MetricDefinitionV1] = Field(min_length=1)
+    risks: list[str] = Field(default_factory=list)
+    contingencies: list[str] = Field(default_factory=list)
+
+
+class CalendarPeriodV1(_OperationContractV3Model):
+    start_date: date
+    end_date: date
+    timezone: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> CalendarPeriodV1:
+        if self.start_date > self.end_date:
+            raise ValueError("CALENDAR_PERIOD_INVALID")
+        return self
+
+
+class ContentCalendarEntryV1(_OperationContractV3Model):
+    publish_at: datetime
+    platform: str = Field(min_length=1)
+    topic: str = Field(min_length=1)
+    format: str = Field(min_length=1)
+    objective: str = Field(min_length=1)
+    angle: str = Field(min_length=1)
+    cta: str = Field(min_length=1)
+    dependencies: list[str] = Field(default_factory=list)
+
+
+class ContentCalendarV1(_OperationContractV3Model):
+    kind: Literal["content_calendar"] = "content_calendar"
+    period: CalendarPeriodV1
+    cadence: list[dict[str, JsonValue]] = Field(min_length=1)
+    entries: list[ContentCalendarEntryV1] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_dates(self) -> ContentCalendarV1:
+        if any(
+            not self.period.start_date <= item.publish_at.date() <= self.period.end_date
+            for item in self.entries
+        ):
+            raise ValueError("CALENDAR_ENTRY_OUT_OF_RANGE")
+        return self
+
+
+class GrowthExperimentV1(_OperationContractV3Model):
+    hypothesis: str = Field(min_length=1)
+    target_segment: str = Field(min_length=1)
+    design: list[str] = Field(min_length=1)
+    variants: list[str] = Field(min_length=2)
+    primary_metric: MetricDefinitionV1
+    guardrail_metrics: list[MetricDefinitionV1] = Field(min_length=1)
+    data_requirements: list[str] = Field(min_length=1)
+    duration: str = Field(min_length=1)
+    stopping_rule: str = Field(min_length=1)
+    decision_rule: str = Field(min_length=1)
+    cost_and_risk: list[str] = Field(min_length=1)
+
+
+class GrowthExperimentBacklogV1(_OperationContractV3Model):
+    kind: Literal["growth_experiment_backlog"] = "growth_experiment_backlog"
+    business_goal: str = Field(min_length=1)
+    funnel_stage: str = Field(min_length=1)
+    current_problem: str = Field(min_length=1)
+    experiments: list[GrowthExperimentV1] = Field(min_length=1)
+
+
+class ReviewMetricV1(_OperationContractV3Model):
+    name: str = Field(min_length=1)
+    definition: str = Field(min_length=1)
+    current_value: str = Field(min_length=1)
+    comparison_value: str | None = None
+    change: str | None = None
+    data_source: str = Field(min_length=1)
+
+
+class ConfirmedCauseV1(_OperationContractV3Model):
+    cause: str = Field(min_length=1)
+    evidence_refs: list[str] = Field(min_length=1)
+
+
+class ReviewHypothesisV1(_OperationContractV3Model):
+    explanation: str = Field(min_length=1)
+    validation_method: str = Field(min_length=1)
+    required_data: list[str] = Field(min_length=1)
+
+
+class OperationReviewV1(_OperationContractV3Model):
+    kind: Literal["operation_review"] = "operation_review"
+    review_period: str = Field(min_length=1)
+    comparison_period: str = Field(min_length=1)
+    metric_table: list[ReviewMetricV1] = Field(min_length=1)
+    verified_changes: list[str] = Field(default_factory=list)
+    confirmed_causes: list[ConfirmedCauseV1] = Field(default_factory=list)
+    hypotheses: list[ReviewHypothesisV1] = Field(default_factory=list)
+    wins: list[str] = Field(default_factory=list)
+    issues: list[str] = Field(default_factory=list)
+    data_gaps: list[str] = Field(default_factory=list)
+    next_actions: list[dict[str, JsonValue]] = Field(min_length=1)
+
+
+OperationContentV3 = Annotated[
+    IndustryDigestV1
+    | ArticleDraftV1
+    | BrandPlanV1
+    | IpPlanV1
+    | CampaignPlanV1
+    | ContentCalendarV1
+    | GrowthExperimentBacklogV1
+    | OperationReviewV1,
+    Field(discriminator="kind"),
+]
+
+
+class OperationDeliverableV3(_OperationContractV3Model):
+    contract_version: Literal["deliverable/3"] = "deliverable/3"
+    deliverable_id: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    content: OperationContentV3
+    warnings: list[WarningV2] = Field(default_factory=list)
+
+
 __all__ = [
     "ActionPhaseV2",
     "ActionPlanContentV2",
     "ActionPlanDeliverableV2",
+    "ArticleDraftV1",
+    "BrandPlanV1",
+    "CampaignPlanV1",
     "CitationV1",
     "CitationV2",
     "ConfidenceV2",
+    "ContentCalendarV1",
     "DeliverableSet",
     "DeliverableSetV1",
     "DeliverableSetV2",
@@ -371,11 +673,18 @@ __all__ = [
     "DiagnosisContentV2",
     "DiagnosisDeliverableV2",
     "FindingV2",
+    "GrowthExperimentBacklogV1",
+    "IndustryDigestV1",
+    "IpPlanV1",
+    "MetricDefinitionV1",
     "NextActionTypeV2",
     "NextActionV2",
     "OperationContentV2",
+    "OperationContentV3",
     "OperationDeliverableBaseV2",
     "OperationDeliverableV2",
+    "OperationDeliverableV3",
+    "OperationReviewV1",
     "PlatformContentDeliverableV2",
     "PlatformContentV2",
     "RankedDigestContentV2",

@@ -15,6 +15,7 @@ from efficiency_platform_agent.contracts.deliverables import (
     DeliverableSetV2,
     NextActionTypeV2,
     NextActionV2,
+    PlatformContentDeliverableV2,
 )
 
 
@@ -212,3 +213,49 @@ def test_v2_models_are_frozen_and_do_not_share_input_state() -> None:
     assert parsed.model_dump() == original
     with pytest.raises(ValidationError):
         parsed.degraded = True
+
+
+def test_wechat_hotspot_labels_require_ordered_non_empty_content() -> None:
+    body = "\n\n".join(
+        (
+            "# 本周热点",
+            "## 热点一",
+            "**事实****影响****运营观察**",
+            "无关" * 1_600,
+            "## 结语",
+            "以上为本周观察。",
+        )
+    )
+
+    with pytest.raises(ValidationError, match="WECHAT_HOTSPOT_STRUCTURE_INVALID"):
+        PlatformContentDeliverableV2(
+            deliverable_id="deliverable-wechat",
+            platform="wechat_official_account",
+            title="本周热点",
+            lead="本周热点导语",
+            copy_text=body,
+            content={"body_markdown": body},
+        )
+
+
+def test_wechat_hotspot_labels_cannot_be_reordered() -> None:
+    body = "\n\n".join(
+        (
+            "# 本周热点",
+            "## 热点一",
+            "**影响**\n影响内容足够。\n**事实**\n事实内容足够。\n**运营观察**",
+            "无关" * 1_600,
+            "## 结语",
+            "以上为本周观察。",
+        )
+    )
+
+    with pytest.raises(ValidationError, match="WECHAT_HOTSPOT_STRUCTURE_INVALID"):
+        PlatformContentDeliverableV2(
+            deliverable_id="deliverable-wechat-order",
+            platform="wechat_official_account",
+            title="本周热点",
+            lead="本周热点导语",
+            copy_text=body,
+            content={"body_markdown": body},
+        )

@@ -74,8 +74,8 @@ class ScenarioPackRegistryTests(unittest.TestCase):
             item for item in operation_agent_specs()
             if item.agent_id == "operation.channel.content"
         )
-        self.assertEqual(channel.budget.timeout_ms, 120_000)
-        self.assertEqual(channel.budget.max_output_tokens, 8_000)
+        self.assertEqual(channel.budget.timeout_ms, 180_000)
+        self.assertEqual(channel.budget.max_output_tokens, 24_000)
 
 
 if __name__ == "__main__":
