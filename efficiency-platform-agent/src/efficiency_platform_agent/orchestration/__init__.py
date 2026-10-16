@@ -10,11 +10,6 @@ from .intent_interpreter import (
 )
 from .registry import GraphRegistry
 from .runtime import GraphRuntime
-from .scenario_resolver import (
-    ResolvedScenarioCondition,
-    ScenarioResolution,
-    ScenarioResolver,
-)
 
 __all__ = [
     "CheckpointView",
@@ -31,3 +26,15 @@ __all__ = [
     "ScenarioResolution",
     "ScenarioResolver",
 ]
+
+
+def __getattr__(name: str):
+    if name in {
+        "ResolvedScenarioCondition",
+        "ScenarioResolution",
+        "ScenarioResolver",
+    }:
+        from . import scenario_resolver
+
+        return getattr(scenario_resolver, name)
+    raise AttributeError(name)
