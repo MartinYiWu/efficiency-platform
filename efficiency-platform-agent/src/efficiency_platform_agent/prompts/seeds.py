@@ -6,6 +6,18 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
+from efficiency_platform_agent.contracts.deliverables import (
+    ArticleDraftV1,
+    BrandPlanV1,
+    CampaignPlanV1,
+    ContentCalendarV1,
+    GrowthExperimentBacklogV1,
+    IndustryDigestV1,
+    IpPlanV1,
+    OperationReviewV1,
+)
 from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
 
 from .contracts import (
@@ -90,15 +102,51 @@ _CONTRACT_FIELDS: dict[str, dict[str, str]] = {
         "source_refs": "正文事实对应的来源引用数组",
         "character_count": "最终可见正文的中文字符统计",
     },
-    "strategy-plan": {
-        "goal": "方案的业务目标",
-        "analysis": "基于输入和证据的现状分析",
-        "strategy": "核心策略与取舍",
-        "initiatives": "可执行举措数组，含 owner/action/deliverable",
-        "milestones": "时间节点和阶段成果数组",
-        "metrics": "指标名称、口径、目标值和观察周期数组",
-        "risks": "风险、触发条件和应对措施数组",
-        "source_refs": "方案判断使用的来源引用数组",
+    "brand-plan": {
+        "current_context": "用户提供的品牌现状、资源和约束，不补造市场数据",
+        "objectives": "本方案要解决的业务与运营目标",
+        "positioning": "品牌定位及其成立依据",
+        "audience_segments": "核心受众、需求、障碍和触达场景",
+        "value_proposition": "面向核心受众的价值表达",
+        "content_pillars": "内容支柱、边界和示例方向",
+        "channel_strategy": "渠道角色、内容分工和协同方式",
+        "roadmap": "分阶段动作、交付和依赖",
+        "metric_framework": "指标名称、定义、观察周期和用途，不虚构目标值",
+        "risks": "风险和前置验证",
+        "next_actions": "接下来可直接执行的动作",
+    },
+    "ip-plan": {
+        "ip_profile": "用户提供的真实主体资料和能力边界",
+        "positioning": "人设定位、核心价值与记忆点",
+        "audience": "目标受众、关注动机和内容需求",
+        "differentiators": "差异化方向及依据",
+        "persona_rules": "可持续的人设行为边界，不虚构经历",
+        "content_columns": "栏目名称、目标、范围和形式",
+        "voice_style": "语言、叙事、视觉和禁用表达规范",
+        "interaction_mechanism": "评论、私域、共创和反馈机制",
+        "growth_phases": "冷启动、稳定增长和放大阶段动作与门槛",
+        "metrics": "指标名称、定义、观察周期和用途",
+        "risks": "风险和修正信号",
+    },
+    "campaign-plan": {
+        "objective": "活动目标及成功判定口径",
+        "theme": "活动主题",
+        "value_proposition": "用户参与价值",
+        "audience": "目标人群、触发场景和参与障碍",
+        "mechanics": "活动规则、权益条件和异常边界",
+        "participant_journey": "触达、参与、转化和留存路径",
+        "timeline": "预热、启动、爆发、收尾和复盘节点",
+        "channel_plan": "各渠道角色、内容和流量承接",
+        "asset_checklist": "页面、文案、素材、埋点和负责人占位",
+        "metric_framework": "过程、结果和护栏指标定义",
+        "risks": "风险触发条件",
+        "contingencies": "风险对应的可执行预案",
+    },
+    "growth-experiment": {
+        "business_goal": "实验服务的业务目标",
+        "funnel_stage": "要改善的漏斗位置",
+        "current_problem": "由输入数据支持的问题描述",
+        "experiments": "可证伪假设、人群、分组、指标、周期、停止和决策规则",
     },
     "calendar-plan": {
         "date_range": "内容日历起止日期",
@@ -106,15 +154,17 @@ _CONTRACT_FIELDS: dict[str, dict[str, str]] = {
         "entries": "逐日条目数组，含 date/platform/theme/content_type/objective/cta/source_refs",
         "dependencies": "素材、审核或活动依赖数组",
     },
-    "review-analysis": {
-        "period": "复盘统计周期",
-        "summary": "结果与核心结论摘要",
-        "metrics": "指标实际值、目标值和差异数组",
-        "diagnoses": "问题、证据和根因数组",
-        "learnings": "可复用经验数组",
-        "recommendations": "有优先级的改进建议数组",
-        "next_actions": "负责人、期限和验收口径明确的行动项数组",
-        "source_refs": "分析所依据的数据或来源引用数组",
+    "operation-review": {
+        "review_period": "本期明确时间范围",
+        "comparison_period": "对比期明确时间范围",
+        "metric_table": "指标定义、本期值、对比值、变化和数据来源",
+        "verified_changes": "由真实数值直接支持的变化事实",
+        "confirmed_causes": "具有证据引用的已确认原因",
+        "hypotheses": "未验证解释、验证方法和所需数据",
+        "wins": "有证据的有效动作和可复用经验",
+        "issues": "影响目标的问题、范围和优先级",
+        "data_gaps": "缺失字段、口径冲突和数据质量问题",
+        "next_actions": "负责人占位、期限和验收指标明确的行动项",
     },
     "artifact-revision": {
         "artifact_type": "被修改的交付物类型",
@@ -143,18 +193,18 @@ _PROMPTS = (
     _PromptSpec("content.xiaohongshu.repair", "multi_platform_content", "repair", "xiaohongshu", "小红书成稿修复", "修复小红书内容质量问题", "content-draft", 3),
     _PromptSpec("content.toutiao.draft", "multi_platform_content", "draft", "toutiao", "头条成稿", "生成符合头条表达和排版的内容", "content-draft", 3),
     _PromptSpec("content.toutiao.repair", "multi_platform_content", "repair", "toutiao", "头条成稿修复", "修复头条内容质量问题", "content-draft", 3),
-    _PromptSpec("brand.plan", "brand_plan", "plan", None, "品牌方案", "生成有依据且可落地的品牌方案", "strategy-plan", 3),
-    _PromptSpec("brand.repair", "brand_plan", "repair", None, "品牌方案修复", "修复品牌方案质量问题", "strategy-plan", 3),
-    _PromptSpec("ip.plan", "ip_plan", "plan", None, "IP 方案", "生成人设、内容与增长一致的 IP 方案", "strategy-plan", 3),
-    _PromptSpec("ip.repair", "ip_plan", "repair", None, "IP 方案修复", "修复 IP 方案质量问题", "strategy-plan", 3),
-    _PromptSpec("campaign.plan", "campaign_plan", "plan", None, "活动策划", "生成目标、节奏和指标完整的活动方案", "strategy-plan", 3),
-    _PromptSpec("campaign.repair", "campaign_plan", "repair", None, "活动策划修复", "修复活动方案质量问题", "strategy-plan", 3),
+    _PromptSpec("brand.plan", "brand_plan", "plan", None, "品牌方案", "生成有依据且可落地的品牌方案", "brand-plan", 3),
+    _PromptSpec("brand.repair", "brand_plan", "repair", None, "品牌方案修复", "修复品牌方案质量问题", "brand-plan", 3),
+    _PromptSpec("ip.plan", "ip_plan", "plan", None, "IP 方案", "生成人设、内容与增长一致的 IP 方案", "ip-plan", 3),
+    _PromptSpec("ip.repair", "ip_plan", "repair", None, "IP 方案修复", "修复 IP 方案质量问题", "ip-plan", 3),
+    _PromptSpec("campaign.plan", "campaign_plan", "plan", None, "活动策划", "生成目标、节奏和指标完整的活动方案", "campaign-plan", 3),
+    _PromptSpec("campaign.repair", "campaign_plan", "repair", None, "活动策划修复", "修复活动方案质量问题", "campaign-plan", 3),
     _PromptSpec("calendar.plan", "content_calendar", "plan", None, "内容日历", "生成日期和渠道明确的内容日历", "calendar-plan", 3),
     _PromptSpec("calendar.repair", "content_calendar", "repair", None, "内容日历修复", "修复日历完整性或排期冲突", "calendar-plan", 3),
-    _PromptSpec("growth.plan", "growth_experiment", "plan", None, "增长实验", "生成可验证的增长实验方案", "strategy-plan", 3),
-    _PromptSpec("growth.repair", "growth_experiment", "repair", None, "增长实验修复", "修复实验变量、指标或验收问题", "strategy-plan", 3),
-    _PromptSpec("review.analyze", "operation_review", "analyze", None, "运营复盘", "基于真实指标完成诊断和行动闭环", "review-analysis", 3),
-    _PromptSpec("review.repair", "operation_review", "repair", None, "运营复盘修复", "修复复盘中的证据或行动问题", "review-analysis", 3),
+    _PromptSpec("growth.plan", "growth_experiment", "plan", None, "增长实验", "生成可验证的增长实验方案", "growth-experiment", 3),
+    _PromptSpec("growth.repair", "growth_experiment", "repair", None, "增长实验修复", "修复实验变量、指标或验收问题", "growth-experiment", 3),
+    _PromptSpec("review.analyze", "operation_review", "analyze", None, "运营复盘", "基于真实指标完成诊断和行动闭环", "operation-review", 3),
+    _PromptSpec("review.repair", "operation_review", "repair", None, "运营复盘修复", "修复复盘中的证据或行动问题", "operation-review", 3),
     _PromptSpec("artifact.revise", "artifact", "revise", None, "交付物修改", "按用户反馈生成新的交付版本", "artifact-revision", 3),
     _PromptSpec("artifact.repair", "artifact", "repair", None, "交付物修复", "按质量错误修复交付物版本", "artifact-revision", 3),
 )
@@ -328,11 +378,23 @@ def _build_policies() -> tuple[ModelPolicy, ...]:
 
 
 def _build_contracts() -> tuple[OutputContract, ...]:
+    contract_models: dict[str, type[BaseModel]] = {
+        "intent-plan": IntentPlanV1,
+        "industry-digest": IndustryDigestV1,
+        "content-draft": ArticleDraftV1,
+        "brand-plan": BrandPlanV1,
+        "ip-plan": IpPlanV1,
+        "campaign-plan": CampaignPlanV1,
+        "calendar-plan": ContentCalendarV1,
+        "growth-experiment": GrowthExperimentBacklogV1,
+        "operation-review": OperationReviewV1,
+    }
     contracts: list[OutputContract] = []
     for identifier, (key, fields) in enumerate(_CONTRACT_FIELDS.items(), start=1):
+        model = contract_models.get(key)
         schema = (
-            IntentPlanV1.model_json_schema()
-            if key == "intent-plan"
+            model.model_json_schema()
+            if model is not None
             else {
                 "type": "object",
                 "properties": {

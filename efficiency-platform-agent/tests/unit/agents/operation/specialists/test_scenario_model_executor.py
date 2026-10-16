@@ -1,0 +1,133 @@
+import json
+
+import pytest
+
+from efficiency_platform_agent.agents.operation.specialists.scenario_model_executor import (
+    ScenarioModelExecutor,
+)
+from efficiency_platform_agent.core.model import ModelExecutionResult
+from efficiency_platform_agent.core.run import (
+    ProviderMessage,
+    ProviderResult,
+    ProviderUsage,
+)
+from efficiency_platform_agent.core.runtime import UsageSnapshot
+from efficiency_platform_agent.prompts.contracts import (
+    AssembledPrompt,
+    ModelPolicy,
+    OutputContract,
+    PromptMessage,
+)
+
+
+class _Assembler:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def assemble(self, **kwargs):
+        self.calls.append(kwargs)
+        return AssembledPrompt(
+            "brand.plan",
+            "1.0.0",
+            (
+                PromptMessage("system", "s"),
+                PromptMessage("developer", "d"),
+                PromptMessage("user", "u"),
+            ),
+            ModelPolicy(1, "p", "1.0.0", "deepseek", "deepseek-chat", 0.2, None, 8000, 4000, 1000, 60000, 0, 0, "d" * 64),
+            OutputContract(1, "brand-plan", "1.0.0", {"type": "object"}, "fields", "a" * 64),
+            "b" * 64,
+            "c" * 64,
+        )
+
+
+class _Model:
+    def __init__(self, outputs: list[str]) -> None:
+        self.outputs = outputs
+        self.requests = []
+
+    async def complete(self, demand, request, *, remaining_budget):
+        self.requests.append(request)
+        return ModelExecutionResult(
+            ProviderResult(
+                "model-result/1", ProviderMessage("assistant", self.outputs.pop(0)), ProviderUsage(0, 0, 0, 0, 0)
+            ),
+            (),
+            UsageSnapshot(),
+            False,
+        )
+
+
+def _brand_payload() -> dict:
+    metric = {
+        "name": "内容互动率",
+        "definition": "互动数/曝光数",
+        "observation_period": "每周",
+        "purpose": "判断内容有效性",
+    }
+    return {
+        "kind": "brand_plan",
+        "current_context": ["处于冷启动阶段"],
+        "objectives": ["建立品牌认知"],
+        "positioning": "面向运营团队的效率助手",
+        "audience_segments": [{"name": "运营负责人"}],
+        "value_proposition": ["减少重复工作"],
+        "content_pillars": [{"name": "实战方法"}],
+        "channel_strategy": [{"channel": "公众号"}],
+        "roadmap": [{"phase": "验证"}],
+        "metric_framework": [metric],
+        "risks": ["样本不足"],
+        "next_actions": ["访谈 5 位用户"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_scenario_executor_uses_dedicated_database_prompt() -> None:
+    assembler = _Assembler()
+    model = _Model([json.dumps(_brand_payload(), ensure_ascii=False)])
+    executor = ScenarioModelExecutor(model, assembler)
+
+    result = await executor.generate(
+        run_id="run-1",
+        scenario="brand_operation_plan",
+        stage="plan",
+        platform=None,
+        user_request="为效率产品做品牌运营方案",
+        input_artifact_ids=(),
+        evidence=None,
+    )
+
+    assert assembler.calls[0]["prompt_key"] == "brand.plan"
+    assert result.contract_version == "deliverable/3"
+    assert result.content.kind == "brand_plan"
+    assert [message.role for message in model.requests[0].messages] == [
+        "system",
+        "developer",
+        "user",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_scenario_executor_repairs_once_with_exact_validation_errors() -> None:
+    assembler = _Assembler()
+    model = _Model(["{}", json.dumps(_brand_payload(), ensure_ascii=False)])
+    executor = ScenarioModelExecutor(model, assembler)
+
+    await executor.generate(
+        run_id="run-2",
+        scenario="brand_operation_plan",
+        stage="plan",
+        platform=None,
+        user_request="品牌方案",
+        input_artifact_ids=(),
+        evidence=None,
+    )
+
+    assert [call["prompt_key"] for call in assembler.calls] == [
+        "brand.plan",
+        "brand.repair",
+    ]
+    repair_values = assembler.calls[1]["variables"]
+    assert repair_values["previous_output"].source == "artifact"
+    assert repair_values["validation_errors"].source == "system_context"
+    assert len(model.requests) == 2

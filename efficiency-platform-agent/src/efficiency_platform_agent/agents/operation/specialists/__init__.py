@@ -10,6 +10,7 @@ from .ip import IPOperationAgent
 from .product import ProductOperationAgent
 from .quality import QualityReviewAgent
 from .research import ResearchInsightAgent
+from .scenario_model_executor import ScenarioModelExecutor
 from .user_growth import UserGrowthAgent
 
 __all__ = [
@@ -23,5 +24,6 @@ __all__ = [
     "ProductOperationAgent",
     "QualityReviewAgent",
     "ResearchInsightAgent",
+    "ScenarioModelExecutor",
     "UserGrowthAgent",
 ]
