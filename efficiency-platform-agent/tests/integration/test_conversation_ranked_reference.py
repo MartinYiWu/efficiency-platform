@@ -164,6 +164,63 @@ async def test_two_rounds_pass_only_ranked_item_and_source_closure_to_model():
 
 
 @pytest.mark.asyncio
+async def test_follow_up_can_rewrite_all_recent_hotspots_without_researching_again():
+    runtime, facade, interpreter, payload = await first_round()
+    second = await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="把刚才真实收集到的热点写成一篇可直接使用的公众号周更推文",
+            request_id="rewrite-all",
+            user_id="user-a",
+        ),
+    )
+    await runtime.wait()
+
+    source = facade.submissions._entries[("tenant-a", "rewrite-all")].submission
+    assert source.task_spec.requires_research is False
+    assert [item.item.item_id for item in source.referenced_inputs] == [
+        item["item_id"] for item in payload["deliverables"][0]["content"]["items"]
+    ]
+    assert interpreter.context_sizes == [0]
+    assert second.run_id == "run-2"
+
+
+@pytest.mark.asyncio
+async def test_follow_up_restores_latest_ranked_run_after_context_loss():
+    runtime, facade, interpreter, _ = await first_round()
+    facade._contexts.clear()
+
+    async def restore(tenant_id: str, user_id: str, conversation_id: str) -> str:
+        assert (tenant_id, user_id, conversation_id) == (
+            "tenant-a",
+            "user-a",
+            "conversation-a",
+        )
+        return "run-1"
+
+    facade.ranked_reference_resolver = restore
+    second = await facade.submit(
+        "conversation-a",
+        "tenant-a",
+        ConversationMessageV1(
+            message="把刚才真实收集到的热点写成公众号周更推文",
+            request_id="rewrite-after-restart",
+            user_id="user-a",
+        ),
+    )
+    await runtime.wait()
+
+    source = facade.submissions._entries[
+        ("tenant-a", "rewrite-after-restart")
+    ].submission
+    assert source.referenced_inputs
+    assert source.referenced_inputs[0].source_run_id == "run-1"
+    assert second.run_id == "run-2"
+    assert interpreter.context_sizes == [0]
+
+
+@pytest.mark.asyncio
 async def test_reference_rejects_citation_not_supporting_selected_item_before_model():
     def break_selected_item_closure(value):
         value["deliverables"][0]["citations"][0]["supports_item_ids"] = ["item-2"]

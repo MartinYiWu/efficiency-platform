@@ -18,6 +18,7 @@ from efficiency_platform_agent.harness.errors import HarnessError
 
 _RANK = re.compile(r"第\s*([+-]?[0-9]+)\s*条")
 _RANKED_SET = re.compile(r"(?:这|前)\s*(\d{1,2})\s*条")
+_RANKED_ALL = re.compile(r"(?:这些|全部|所有|刚才[^，。！？]{0,16})(?:热点|动态|条目)")
 _REWRITE = ("改写", "改成", "写成")
 _PLATFORMS = (
     ("小红书", "xiaohongshu"),
@@ -42,9 +43,11 @@ def requested_rank(message: str) -> int | None:
 def requested_ranked_set_size(message: str) -> int | None:
     """识别“把这 N 条写成……”这类明确的整组改写指令。"""
     match = _RANKED_SET.search(message)
-    if match is None or not any(word in message for word in _REWRITE):
+    if not any(word in message for word in _REWRITE):
         return None
-    return max(1, min(int(match.group(1)), 20))
+    if match is not None:
+        return max(1, min(int(match.group(1)), 20))
+    return 20 if _RANKED_ALL.search(message) is not None else None
 
 
 def reference_error() -> HarnessError:

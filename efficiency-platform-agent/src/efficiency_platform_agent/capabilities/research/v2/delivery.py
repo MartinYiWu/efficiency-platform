@@ -141,7 +141,7 @@ class DeliveryPackBuilder:
             summary=(
                 f"已整理 {len(structured)} 条近期 AI 行业有效动态。"
                 + (
-                    "当前没有可交付的有效条目。"
+                    "当前未发现可交付的有效条目。"
                     if outcome.outcome == "NO_MATCHES"
                     else (
                         "每条均保留可访问来源；当前有效条目不足目标数量时，"
@@ -167,7 +167,7 @@ def _deterministic_summary(
     if delivered < requested:
         lines.append("当前有效条目不足目标数量，未使用未核实内容补足。")
     if outcome == "NO_MATCHES":
-        lines.append("当前没有可交付的有效条目。")
+        lines.append("当前未发现可交付的有效条目。")
     return "\n".join(lines)
 
 

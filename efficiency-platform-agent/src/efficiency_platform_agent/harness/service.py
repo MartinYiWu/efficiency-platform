@@ -1116,7 +1116,38 @@ class AgentRuntimeService:
             in {RunStatus.CREATED, RunStatus.QUEUED, RunStatus.WAITING_INPUT}
             or getattr(self, "_test_mode", None) == "suspend"
         ):
-            cancelled = await self._transition(record, RunStatus.CANCELLED)
+            candidate = record
+            last_conflict: Exception | None = None
+            cancelled = None
+            for _ in range(3):
+                try:
+                    cancelled = await self._transition(
+                        candidate, RunStatus.CANCELLED
+                    )
+                    break
+                except Exception as error:
+                    if getattr(error, "code", None) != "RUN_VERSION_CONFLICT":
+                        raise
+                    last_conflict = error
+                    latest = await self.repository.get(run_id, request.tenant_id)
+                    if latest is None:
+                        raise HarnessError(
+                            "RUN_NOT_FOUND", "Run 不存在", category="request"
+                        ) from error
+                    if latest.status in {
+                        RunStatus.SUCCEEDED,
+                        RunStatus.FAILED,
+                        RunStatus.CANCELLED,
+                        RunStatus.TIMED_OUT,
+                    }:
+                        return self._view(latest)
+                    candidate = latest
+            if cancelled is None:
+                raise HarnessError(
+                    "RUN_STATE_CONFLICT",
+                    "Run 状态正在变化，请重试取消请求",
+                    category="persistence",
+                ) from last_conflict
             await self._event(cancelled, "run_cancelled")
             view = self._view(cancelled)
             await self._notify_run_state(view)

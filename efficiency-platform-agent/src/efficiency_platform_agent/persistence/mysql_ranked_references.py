@@ -42,6 +42,13 @@ class RankedReferenceRepository(Protocol):
         source_run_id: str,
     ) -> DeliveryPackV2 | None: ...
 
+    async def get_latest_source_run_id(
+        self,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+    ) -> str | None: ...
+
 
 class MySqlRankedReferenceRepository:
     """按完整会话身份保存不可变、可校验的已核验引用快照。"""
@@ -178,6 +185,41 @@ class MySqlRankedReferenceRepository:
         )
         return delivery
 
+    async def get_latest_source_run_id(
+        self,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+    ) -> str | None:
+        try:
+            async with self.engine.connect() as connection:
+                result = await connection.execute(
+                    text(
+                        "SELECT source_run_id FROM agent_ranked_reference_snapshot "
+                        "WHERE tenant_id=:tenant_id AND user_id=:user_id "
+                        "AND conversation_id=:conversation_id "
+                        "AND (expires_at_epoch_ms IS NULL OR expires_at_epoch_ms>:now) "
+                        "ORDER BY created_at_epoch_ms DESC,id DESC LIMIT 1"
+                    ),
+                    {
+                        "tenant_id": tenant_id,
+                        "user_id": user_id,
+                        "conversation_id": conversation_id,
+                        "now": self.now_epoch_ms(),
+                    },
+                )
+                source_run_id = result.scalar_one_or_none()
+        except SQLAlchemyError as exc:
+            raise RankedReferencePersistenceError(
+                "RANKED_REFERENCE_DATABASE_UNAVAILABLE"
+            ) from exc
+        if source_run_id is None:
+            return None
+        delivery = await self.get_verified(
+            tenant_id, user_id, conversation_id, str(source_run_id)
+        )
+        return str(source_run_id) if delivery is not None else None
+
 
 class InMemoryRankedReferenceRepository:
     """仅供显式测试组合使用，语义与 MySQL 仓储一致。"""
@@ -218,6 +260,20 @@ class InMemoryRankedReferenceRepository:
             return None
         _verified_payload(None, value[1])
         return value[1].model_copy(deep=True)
+
+    async def get_latest_source_run_id(
+        self,
+        tenant_id: str,
+        user_id: str,
+        conversation_id: str,
+    ) -> str | None:
+        matches = [
+            source_run_id
+            for entry_tenant, entry_user, entry_conversation, source_run_id in self._entries
+            if (entry_tenant, entry_user, entry_conversation)
+            == (tenant_id, user_id, conversation_id)
+        ]
+        return matches[-1] if matches else None
 
 
 def _verified_payload(
