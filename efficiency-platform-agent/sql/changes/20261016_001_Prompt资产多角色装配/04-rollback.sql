@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS agent_prompt_test_case;
+DROP TABLE IF EXISTS agent_run_prompt_snapshot;
+DROP TABLE IF EXISTS agent_prompt_release;
+DROP TABLE IF EXISTS agent_prompt_variable;
+DROP TABLE IF EXISTS agent_prompt_message_template;
+DROP TABLE IF EXISTS agent_prompt_version;
+DROP TABLE IF EXISTS agent_prompt_definition;
+DROP TABLE IF EXISTS agent_output_contract;
+DROP TABLE IF EXISTS agent_model_policy;
