@@ -289,6 +289,7 @@ public class OperationAssistantService {
                                 .eq(OperationArtifactPO::getTenantId, actor.tenantId())
                                 .orderByAsc(OperationArtifactPO::getCreatedAt))
                 .stream()
+                .filter(item -> isPublicArtifactMetadata(item.getInternalMetadata(), objectMapper))
                 .map(item -> new OperationViews.ArtifactSummary(
                         item.getId(), item.getArtifactType(), item.getPlatform(), item.getVersionNo(),
                         item.getTitle(), item.getCreatedAt()))
@@ -302,6 +303,7 @@ public class OperationAssistantService {
             throw new OperationAssistantException("DELIVERABLE_INVALID", "交付结果格式无效");
         }
         Map<String, Object> deliverableSet = stringKeyMap(rawMap);
+        String presentationMode = presentationMode(payload);
         Object rawDeliverables = deliverableSet.get("deliverables");
         if (!(rawDeliverables instanceof List<?> list)) {
             throw new OperationAssistantException("DELIVERABLE_INVALID", "交付结果缺少内容列表");
@@ -349,7 +351,8 @@ public class OperationAssistantService {
             artifact.setInternalMetadata(writeJson(Map.of(
                     "deliverable", item,
                     "provenance", provenance == null ? Map.of() : provenance,
-                    "agentRunId", run.getAgentRunId())));
+                    "agentRunId", run.getAgentRunId(),
+                    "presentationMode", presentationMode)));
             artifactMapper.insert(artifact);
             artifacts.add(artifact);
         }
@@ -560,6 +563,23 @@ public class OperationAssistantService {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException exception) {
             throw new OperationAssistantException("DELIVERABLE_METADATA_INVALID", "交付元数据无法保存");
+        }
+    }
+
+    static String presentationMode(Map<String, ?> payload) {
+        Object value = payload.get("presentation_mode");
+        return "inline".equals(value) ? "inline" : "artifact";
+    }
+
+    static boolean isPublicArtifactMetadata(String metadata, ObjectMapper objectMapper) {
+        if (metadata == null || metadata.isBlank()) {
+            return true;
+        }
+        try {
+            Map<String, Object> value = objectMapper.readValue(metadata, new TypeReference<>() { });
+            return !"inline".equals(value.get("presentationMode"));
+        } catch (JsonProcessingException exception) {
+            return true;
         }
     }
 

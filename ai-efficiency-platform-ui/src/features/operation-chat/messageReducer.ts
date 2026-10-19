@@ -333,6 +333,7 @@ export function operationChatReducer(
         },
       };
     case 'deliverable': {
+      if (event.payload.presentation_mode === 'inline') return base;
       const set = parseDeliverableSet(event.payload.deliverable_set ?? event.payload);
       return set && ('run_id' in set ? set.run_id === event.run_id : true)
         ? { ...base, deliverableSets: [...base.deliverableSets, set] }

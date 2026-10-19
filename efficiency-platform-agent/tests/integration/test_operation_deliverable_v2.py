@@ -86,6 +86,60 @@ def build_test_agent(provider=None, **kwargs):
     return build_operation_agent(ModelRuntime(Selector(), registry), **kwargs)
 
 
+async def execute_operation_graph(source, agent, *, run_id: str):
+    from efficiency_platform_agent.core.enums import StrategyMode
+    from efficiency_platform_agent.core.run import JsonObject
+    from efficiency_platform_agent.orchestration.builders.operation_runtime import (
+        build_operation_multi_agent_registration,
+    )
+    from efficiency_platform_agent.orchestration.registry import GraphRegistry
+    from efficiency_platform_agent.orchestration.runtime import GraphRuntime
+    from efficiency_platform_agent.routing.strategy_router import StrategySelection
+
+    async def resolve(_request, _state):
+        return source
+
+    registry = GraphRegistry()
+    registry.register(build_operation_multi_agent_registration(agent, resolve))
+    result = await GraphRuntime(registry).execute(
+        StrategySelection(StrategyMode.MULTI_AGENT, "operation", "test"),
+        {
+            "run_id": run_id,
+            "tenant_id": source.task_spec.tenant_id,
+            "user_id": source.task_spec.user_id,
+            "request_id": source.request.request.request_id,
+            "strategy_payload_schema_version": "operation-strategy-payload/1",
+            "strategy_payload": JsonObject(
+                (
+                    (
+                        "operation_request",
+                        JsonObject(
+                            (
+                                ("operation_id", source.request.operation_id),
+                                (
+                                    "request",
+                                    JsonObject(
+                                        (
+                                            (
+                                                "request_id",
+                                                source.request.request.request_id,
+                                            ),
+                                            ("tenant_id", source.task_spec.tenant_id),
+                                            ("user_id", source.task_spec.user_id),
+                                            ("input_text", "汇总上周 AI 热点"),
+                                        )
+                                    ),
+                                ),
+                            )
+                        ),
+                    ),
+                )
+            ),
+        },
+    )
+    return dict(result.output.items)
+
+
 @pytest.mark.asyncio
 async def test_new_run_defaults_to_complete_v2_collection():
     result = await build_test_agent().execute(submission(), run_id="run-v2-default")
@@ -154,6 +208,65 @@ async def test_verified_research_pack_reaches_ranked_item_and_source_provenance(
     assert ref.supports_item_ids == [item.item_id]
     assert value.provenance.verified_source_count == 1
     assert result.status is CompletionStatus.PARTIAL and not value.summary.complete
+
+
+@pytest.mark.asyncio
+async def test_research_digest_uses_inline_presentation_with_full_copy_text():
+    source, research, _, _ = research_case(
+        "COMPLETE", "run-research-v2-presentation"
+    )
+    output = await execute_operation_graph(
+        source,
+        build_test_agent(research_provider=research),
+        run_id="run-research-v2-presentation",
+    )
+
+    deliverable = dict(dict(output["deliverable_set"].items)["deliverables"][0].items)
+    assert output["presentation_mode"] == "inline"
+    assert output["content"] == deliverable["copy_text"]
+    assert output["content"] != dict(
+        dict(output["deliverable_set"].items)["summary"].items
+    )["message"]
+
+
+@pytest.mark.asyncio
+async def test_v1_research_digest_also_streams_full_body_inline():
+    source, research, _, _ = research_case(
+        "COMPLETE", "run-research-v1-presentation"
+    )
+    agent = build_test_agent(
+        ContentProvider(),
+        research_provider=research,
+        deliverable_set_contract_version="deliverable-set/1",
+    )
+    output = await execute_operation_graph(
+        source,
+        agent,
+        run_id="run-research-v1-presentation",
+    )
+    deliverable = dict(dict(output["deliverable_set"].items)["deliverables"][0].items)
+
+    assert dict(output["deliverable_set"].items)["contract_version"] == "deliverable-set/1"
+    assert output["presentation_mode"] == "inline"
+    assert output["content"] == deliverable["body"]
+    assert output["content"] != dict(output["deliverable_set"].items)["summary"]
+
+
+@pytest.mark.asyncio
+async def test_platform_content_keeps_artifact_presentation_and_summary_message():
+    from efficiency_platform_agent.orchestration.builders import operation_runtime
+
+    source = submission()
+    execution = await build_test_agent().execute(source, run_id="run-artifact-content")
+    mode_resolver = getattr(operation_runtime, "_presentation_mode", None)
+    content_resolver = getattr(operation_runtime, "_assistant_content", None)
+
+    assert mode_resolver is not None
+    assert content_resolver is not None
+    assert mode_resolver(source) == "artifact"
+    assert content_resolver(execution.deliverables, "artifact") == (
+        execution.deliverables.summary.message
+    )
 
 
 @pytest.mark.asyncio

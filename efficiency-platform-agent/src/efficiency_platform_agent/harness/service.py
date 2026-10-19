@@ -1333,6 +1333,9 @@ class AgentRuntimeService:
                     )
         deliverable_set = output.get("deliverable_set")
         if isinstance(deliverable_set, Mapping):
+            presentation_mode = output.get("presentation_mode", "artifact")
+            if presentation_mode not in {"inline", "artifact"}:
+                presentation_mode = "artifact"
             delivery_version = output.get("delivery_contract_version")
             if delivery_version is None:
                 delivery_version = deliverable_set.get(
@@ -1368,7 +1371,10 @@ class AgentRuntimeService:
             await self.event_hub.publish_next(
                 record.run_id,
                 "deliverable",
-                {"deliverable_set": validated},
+                {
+                    "deliverable_set": validated,
+                    "presentation_mode": presentation_mode,
+                },
             )
         return presentation_degraded
 

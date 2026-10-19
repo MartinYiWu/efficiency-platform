@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
-from typing import Any
+from typing import Any, Literal
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
@@ -18,6 +18,7 @@ from efficiency_platform_agent.agents.operation.specialists.model_backed import 
     plain,
 )
 from efficiency_platform_agent.contracts.deliverables import (
+    DeliverableSetV1,
     DeliverableSetV2,
     DeliverableSetV3,
 )
@@ -39,6 +40,37 @@ from efficiency_platform_agent.orchestration.contracts import GraphRegistration
 SubmissionResolver = Callable[
     [OperationRequest, dict[str, Any]], Awaitable[ScenarioSubmission]
 ]
+PresentationMode = Literal["inline", "artifact"]
+
+
+def _presentation_mode(submission: ScenarioSubmission) -> PresentationMode:
+    """研究摘要直接进入对话，明确内容创作继续生成独立制品。"""
+
+    return "inline" if submission.scenario_id == "industry_digest" else "artifact"
+
+
+def _assistant_content(
+    result: Any, presentation_mode: PresentationMode
+) -> str:
+    """从已校验交付结构生成对话正文，不再次调用模型改写。"""
+
+    if presentation_mode == "artifact":
+        return (
+            result.summary.message
+            if isinstance(result, (DeliverableSetV2, DeliverableSetV3))
+            else result.summary
+        )
+    if isinstance(result, DeliverableSetV1):
+        rendered = [item.body.strip() for item in result.deliverables if item.body.strip()]
+        return "\n\n".join(rendered) or result.summary
+    if isinstance(result, (DeliverableSetV2, DeliverableSetV3)):
+        rendered = [
+            item.copy_text.strip()
+            for item in result.deliverables
+            if isinstance(item.copy_text, str) and item.copy_text.strip()
+        ]
+        return "\n\n".join(rendered) or result.summary.message
+    return result.summary
 
 
 class OperationRuntimeGraphBuilder:
@@ -114,13 +146,13 @@ class OperationRuntimeGraphBuilder:
                     "error_code": execution.error_code,
                     "usage": usage,
                 }
+            presentation_mode = _presentation_mode(submission)
             return {
                 "next_status": "succeeded",
                 "output": {
                     "delivery_contract_version": result.contract_version,
-                    "content": result.summary.message
-                    if isinstance(result, (DeliverableSetV2, DeliverableSetV3))
-                    else result.summary,
+                    "presentation_mode": presentation_mode,
+                    "content": _assistant_content(result, presentation_mode),
                     "deliverable_set": result.model_dump(mode="json"),
                     "quality_report": asdict(execution.scenario_result.quality_report)
                     if execution.scenario_result

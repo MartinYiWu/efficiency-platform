@@ -94,12 +94,16 @@ class OperationDeliveryGraph:
         omit_output_version: bool = False,
         omit_set_version: bool = False,
         internal_extra: bool = False,
+        presentation_mode: str | None = None,
+        content: str | None = None,
     ) -> None:
         self.contract_version = contract_version
         self.invalid_action = invalid_action
         self.omit_output_version = omit_output_version
         self.omit_set_version = omit_set_version
         self.internal_extra = internal_extra
+        self.presentation_mode = presentation_mode
+        self.content = content
 
     async def execute(self, _selection, state):
         if self.contract_version == "deliverable-set/2":
@@ -121,9 +125,11 @@ class OperationDeliveryGraph:
         if self.internal_extra:
             deliverable_set["next_actions"][0]["hidden_reasoning"] = "private"
         output_payload = {
-            "content": content,
+            "content": self.content or content,
             "deliverable_set": deliverable_set,
         }
+        if self.presentation_mode is not None:
+            output_payload["presentation_mode"] = self.presentation_mode
         if not self.omit_output_version:
             output_payload["delivery_contract_version"] = result.contract_version
         output = _json_value(output_payload)
@@ -148,6 +154,8 @@ def _service(
     omit_output_version: bool = False,
     omit_set_version: bool = False,
     internal_extra: bool = False,
+    presentation_mode: str | None = None,
+    content: str | None = None,
 ) -> AgentRuntimeService:
     """构造只运行一个受控运营图的 Harness。"""
 
@@ -161,6 +169,8 @@ def _service(
             omit_output_version=omit_output_version,
             omit_set_version=omit_set_version,
             internal_extra=internal_extra,
+            presentation_mode=presentation_mode,
+            content=content,
         ),
         budget_guard=BudgetGuard(),
         budget=ExecutionBudget(20, 4, 100, 100, 100, 100),
@@ -223,6 +233,33 @@ async def test_plain_graph_does_not_infer_phases_from_research_words() -> None:
     serialized = "".join(item.model_dump_json() for item in events).lower()
     for forbidden in ("prompt", "token", "model_candidates", "tool_args", "raw_page"):
         assert forbidden not in serialized
+
+
+@pytest.mark.asyncio
+async def test_inline_research_streams_full_content_and_marks_structured_event() -> None:
+    content = "# AI 热点汇总\n\n1. 第一条热点\n\n来源：https://example.com/source"
+    service = _service(presentation_mode="inline", content=content)
+    queued = await service.create_and_schedule(
+        _request("request-inline-research", "汇总上周 AI 热点")
+    )
+    await service.wait_for_background_tasks()
+    events = await service.event_hub.replay(queued.run_id, 0)
+
+    streamed = "".join(
+        item.payload["delta"] for item in events if item.event == "assistant_delta"
+    )
+    delivery = next(item for item in events if item.event == "deliverable")
+
+    assert streamed == content
+    assert delivery.payload["presentation_mode"] == "inline"
+
+
+@pytest.mark.asyncio
+async def test_legacy_delivery_defaults_to_artifact_presentation() -> None:
+    events = await _run_stream("为新品撰写一篇公众号内容")
+    delivery = next(item for item in events if item.event == "deliverable")
+
+    assert delivery.payload["presentation_mode"] == "artifact"
 
 
 @pytest.mark.asyncio

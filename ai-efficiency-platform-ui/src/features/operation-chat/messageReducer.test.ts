@@ -330,6 +330,19 @@ describe('operationChatReducer', () => {
     expect(state.deliverableSets[0]?.contract_version).toBe('deliverable-set/2');
   });
 
+  it('内联研究保留打字机正文但不创建用户可见制品', () => {
+    const state = reduce([
+      event(1, 'assistant_delta', { delta: '# AI 热点汇总\n\n1. 第一条热点' }),
+      event(2, 'deliverable', {
+        presentation_mode: 'inline',
+        deliverable_set: deliverableSetV2(),
+      }),
+    ]);
+
+    expect(state.messages.at(-1)?.content).toBe('# AI 热点汇总\n\n1. 第一条热点');
+    expect(state.deliverableSets).toEqual([]);
+  });
+
   it('拒绝无效 V2 且不将原始 JSON 作为消息显示', () => {
     const invalidV2 = { ...deliverableSetV2(), unexpected: true };
     const state = reduce([event(1, 'deliverable', { deliverable_set: invalidV2 })]);
