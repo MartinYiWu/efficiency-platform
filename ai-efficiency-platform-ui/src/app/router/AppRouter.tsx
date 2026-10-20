@@ -27,6 +27,10 @@ import { PositionPreviewPage } from '../../pages/hr-assistant/positions/Position
 import { PositionWizardPage } from '../../pages/hr-assistant/positions/PositionWizardPage';
 import { PositionWeightsPage } from '../../pages/hr-assistant/positions/PositionWeightsPage';
 import { NotFoundPage } from '../../pages/not-found/NotFoundPage';
+import { KnowledgeBaseListPage } from '../../pages/knowledge-center/KnowledgeBaseListPage';
+import { KnowledgeBaseDetailPage } from '../../pages/knowledge-center/KnowledgeBaseDetailPage';
+import { KnowledgeDocumentPage } from '../../pages/knowledge-center/KnowledgeDocumentPage';
+import { KnowledgeImportPage } from '../../pages/knowledge-center/KnowledgeImportPage';
 import { HrAssistantShell } from '../../widgets/hrAssistantShell';
 
 export function AppRouter() {
@@ -38,6 +42,38 @@ export function AppRouter() {
         element={
           <HrAssistantShell>
             <OperationsChatPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases"
+        element={
+          <HrAssistantShell>
+            <KnowledgeBaseListPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases/:baseId"
+        element={
+          <HrAssistantShell>
+            <KnowledgeBaseDetailPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases/:baseId/imports"
+        element={
+          <HrAssistantShell>
+            <KnowledgeImportPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/documents/:documentId"
+        element={
+          <HrAssistantShell>
+            <KnowledgeDocumentPage />
           </HrAssistantShell>
         }
       />
