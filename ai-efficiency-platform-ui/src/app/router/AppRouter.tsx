@@ -40,6 +40,7 @@ import { RagDebugPage } from '../../pages/ai-center/RagDebugPage';
 import { RunListPage } from '../../pages/ai-center/RunListPage';
 import { RunReplayPage } from '../../pages/ai-center/RunReplayPage';
 import { FeedbackPage } from '../../pages/ai-center/FeedbackPage';
+import { CustomerServiceChatPage } from '../../pages/customer-service/CustomerServiceChatPage';
 import { HrAssistantShell } from '../../widgets/hrAssistantShell';
 
 export function AppRouter() {
@@ -51,6 +52,14 @@ export function AppRouter() {
         element={
           <HrAssistantShell>
             <OperationsChatPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-assistants/customer-service/chat"
+        element={
+          <HrAssistantShell>
+            <CustomerServiceChatPage />
           </HrAssistantShell>
         }
       />
