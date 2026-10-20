@@ -172,29 +172,7 @@ class VerifiedSourceRegistry:
             set(descriptor.regions) & set(brief.source_constraints.event_regions)
         ):
             return _unavailable(descriptor.source_id, "SOURCE_REGION_UNSUPPORTED")
-        if not _history_covers(descriptor, context, brief):
-            return _unavailable(descriptor.source_id, "SOURCE_HISTORY_UNSUPPORTED")
         return SourceAvailabilityV2(descriptor.source_id, True)
-
-
-def _history_covers(
-    descriptor: SourceDescriptorV2,
-    context: SourceRuntimeContextV2,
-    brief: ResearchBriefV2,
-) -> bool:
-    if descriptor.history_mode == "unknown":
-        return False
-    if descriptor.max_lookback is not None and (
-        brief.time_window.start < context.now - descriptor.max_lookback
-    ):
-        return False
-    if descriptor.history_mode == "latest_only":
-        if not descriptor.admission.history_verified:
-            return False
-        freshness = descriptor.freshness_sla
-        if freshness is None or brief.time_window.start < context.now - freshness:
-            return False
-    return True
 
 
 def _unavailable(source_id: str, code: str) -> SourceAvailabilityV2:

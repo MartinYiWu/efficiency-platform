@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -194,6 +195,11 @@ class QualityReportV2(_FrozenContract):
 class CollectionHistoryV2(_FrozenContract):
     completed_action_ids: tuple[str, ...] = Field(default=(), max_length=10_000)
     attempted_source_ids: tuple[str, ...] = Field(default=(), max_length=1_000)
+    attempted_queries: tuple[str, ...] = Field(default=(), max_length=1_000)
+    failed_queries: tuple[str, ...] = Field(default=(), max_length=1_000)
+    failed_source_ids: tuple[str, ...] = Field(default=(), max_length=1_000)
+    qualified_event_count: int = Field(default=0, ge=0, le=1_000)
+    remaining_target_count: int = Field(default=0, ge=0, le=1_000)
     rounds: int = Field(ge=0, le=1_000)
     no_gain_rounds: int = Field(ge=0, le=1_000)
 
@@ -228,6 +234,29 @@ class CollectionActionV2(_FrozenContract):
     time_window: ResolvedTimeWindow
     cursor: str | None = Field(default=None, min_length=1, max_length=2_000)
     revision: int = Field(ge=0)
+
+
+def build_collection_action_id(
+    intent_revision: int,
+    gap: QualityGapV2,
+    source_id: str,
+    query: str,
+    cursor: str | None,
+) -> str:
+    """从受信任范围和规范化查询生成稳定动作标识。"""
+
+    normalized_query = re.sub(r"\s+", " ", query).strip().casefold()
+    value = "\x00".join(
+        (
+            str(intent_revision),
+            gap.gap_id,
+            gap.code,
+            source_id,
+            normalized_query,
+            cursor or "",
+        )
+    )
+    return "action-" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
 
 
 class CollectionPlanV2(_FrozenContract):
@@ -376,5 +405,6 @@ __all__ = [
     "ResearchRuntimeContextV2",
     "ResearchUsageV2",
     "TrustedResearchContextV2",
+    "build_collection_action_id",
     "build_research_requirement",
 ]

@@ -214,6 +214,39 @@ describe('OperationsChatPage', () => {
     expect(screen.getByLabelText('助手回复')).toHaveTextContent(/^完$/);
   });
 
+  it('普通对话不在底部重复显示历史制品', () => {
+    useOperationChatMock.mockReturnValue({
+      state: baseState({
+        messages: [
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: '最近7天，AI 热点已整理完成。',
+            createdAt: 1,
+          },
+        ],
+      }),
+      sendMessage: vi.fn(),
+      cancel: vi.fn(),
+      isBusy: false,
+      artifacts: [
+        {
+          artifactId: 'artifact-1',
+          artifactType: 'platform_content',
+          platform: 'wechat_official_account',
+          version: 1,
+          title: '上一轮公众号成稿',
+          createdAt: '2026-10-19T10:00:00+08:00',
+        },
+      ],
+    });
+
+    renderPage();
+
+    expect(screen.queryByRole('heading', { name: '已生成内容' })).not.toBeInTheDocument();
+    expect(screen.queryByText('上一轮公众号成稿')).not.toBeInTheDocument();
+  });
+
   it('仅将 V1 安全 HTTPS 来源渲染为链接，保留不安全来源的原始文本', async () => {
     const user = userEvent.setup();
     useOperationChatMock.mockReturnValue({

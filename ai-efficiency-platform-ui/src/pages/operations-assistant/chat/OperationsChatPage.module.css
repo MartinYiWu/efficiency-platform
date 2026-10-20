@@ -82,7 +82,6 @@
   padding: 16px 18px;
   font-size: 15px;
   line-height: 1.75;
-  white-space: pre-wrap;
 }
 
 .assistantBubble {
@@ -90,10 +89,50 @@
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 4px var(--ant-border-radius-lg) var(--ant-border-radius-lg);
+  white-space: normal;
 }
 
 .assistantBubble :global(p) {
-  margin: 0;
+  margin: 0 0 12px;
+}
+
+.assistantBubble :global(p:last-child) {
+  margin-bottom: 0;
+}
+
+.assistantBubble :global(h1),
+.assistantBubble :global(h2),
+.assistantBubble :global(h3) {
+  margin: 16px 0 6px;
+  line-height: 1.5;
+}
+
+.assistantBubble :global(h1:first-child),
+.assistantBubble :global(h2:first-child),
+.assistantBubble :global(h3:first-child) {
+  margin-top: 0;
+}
+
+.assistantBubble :global(h1) {
+  font-size: 20px;
+}
+
+.assistantBubble :global(h2) {
+  font-size: 17px;
+}
+
+.assistantBubble :global(h3) {
+  font-size: 15px;
+}
+
+.assistantBubble :global(ul),
+.assistantBubble :global(ol) {
+  margin: 6px 0 12px;
+  padding-left: 22px;
+}
+
+.assistantBubble :global(li + li) {
+  margin-top: 4px;
 }
 
 .thinkingIndicator {
@@ -144,6 +183,7 @@
   background: var(--ant-color-success-bg);
   border-radius: var(--ant-border-radius-lg) 4px var(--ant-border-radius-lg)
     var(--ant-border-radius-lg);
+  white-space: pre-wrap;
 }
 
 .userAvatar {

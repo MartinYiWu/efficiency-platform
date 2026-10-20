@@ -190,7 +190,7 @@ async def setup(*, responses=None, body=True, model_output=None, target=1, three
     )
     from efficiency_platform_agent.context.builder import ContextBuilder
 
-    model = Model(model_output or {})
+    model = Model(semantic_model if model_output is None else model_output)
     decisions = model_module.ResearchModelDecisions(
         model_runtime=model,
         context_builder=ContextBuilder(),
@@ -400,7 +400,7 @@ def semantic_model(demand, request):
                         for item in data["brief"]["hard_requirements"]
                     ],
                     "source_excerpt": doc["text"],
-                    "prompt_version": "research.v2.relevance@1.0.0",
+                    "prompt_version": "research.v2.relevance@1.1.0",
                 }
                 for doc in documents
             ]
@@ -408,7 +408,20 @@ def semantic_model(demand, request):
     if demand.demand_version == "research.v2.cluster":
         return []
     if demand.demand_version == "research.v2.replan":
-        return {"action_ids": [item["action_id"] for item in data["allowed_actions"]]}
+        round_number = data["history"]["rounds"]
+        return {
+            "proposals": [
+                {
+                    "gap_id": item["gap_id"],
+                    "source_id": item["source_id"],
+                    "action_kind": item["action_kind"],
+                    "query": f"{item['query']} evidence angle {round_number}",
+                    "cursor": item["cursor"],
+                }
+                for item in data["allowed_actions"]
+            ],
+            "stop_reason": None,
+        }
     evidence = data["evidence_context"]
     proposals = []
     for event in data["events"]:
@@ -453,6 +466,21 @@ def rss_response():
     )
 
 
+@pytest.mark.asyncio
+async def test_initial_collection_is_planned_by_model_before_source_calls():
+    runner, state, _, _, connector, model, _ = await setup(
+        model_output=semantic_model
+    )
+
+    update = await runner.run_stage("plan", state)
+
+    assert update.planned_action_ids
+    assert [call[0].demand_version for call in model.calls] == [
+        "research.v2.replan"
+    ]
+    assert connector.calls == []
+
+
 def body_response():
     from efficiency_platform_agent.providers.research.transport import PinnedResponse
 
@@ -492,10 +520,15 @@ async def test_real_component_chain_preserves_ids_and_records_http_and_models():
     )
     assert set(state["claim_ids"]).issubset(facts.claims)
     assert len(connector.calls) == 2
-    assert len(model.calls) == 3
+    assert [call[0].demand_version for call in model.calls] == [
+        "research.v2.replan",
+        "research.v2.relevance",
+        "research.v2.cluster",
+        "research.v2.claims",
+    ]
     assert facts.resources.http_requests == 2
     assert facts.resources.body_requests == 1
-    assert facts.resources.model_calls == 3
+    assert facts.resources.model_calls == 4
     ledger = await runner.binding.port.snapshot(runner.binding.scope)
     assert ledger.used.calls == 4
     assert facts.resources.downloaded_bytes == sum(
@@ -655,7 +688,7 @@ async def test_exact_shortfall_uses_bounded_graph_and_keeps_verified_partial():
     assert result["output_verified"]
     assert len(result["qualified_event_ids"]) == 1
     assert result["refill_rounds"] <= 2
-    assert len(connector.calls) == 3
+    assert len(connector.calls) == 4
 
 
 @pytest.mark.asyncio
@@ -777,7 +810,7 @@ async def test_exact_five_with_three_real_component_results_stays_partial():
     assert result["domain_status"] == "PARTIAL"
     assert len(result["qualified_event_ids"]) == 3
     assert result["output_verified"]
-    assert len(connector.calls) == 5
+    assert len(connector.calls) == 6
     assert all(
         action.time_window == runner.brief.time_window
         for plan in facts.plans.values()

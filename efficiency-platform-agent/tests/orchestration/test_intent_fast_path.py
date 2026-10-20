@@ -1,5 +1,7 @@
 """联网研究快速意图预判的单元测试。"""
 
+import pytest
+
 from efficiency_platform_agent.conversation.context import (
     ConversationContext,
     ConversationTurn,
@@ -27,6 +29,27 @@ def test_detects_research_and_multi_platform_request_without_model() -> None:
     assert intent.requirements.time_window == "下周"
     assert intent.requirements.topic == "AI 行业热点"
     assert intent.missing_fields == []
+
+
+@pytest.mark.parametrize(
+    ("message", "expected_window"),
+    (
+        ("小万，帮我收集整理一下上周AI热点数据，整理出最热的前10条", "上周"),
+        ("小万，帮我收集近3天AI热点前5条", "近3天"),
+        ("收集过去2周AI热点前5条", "过去2周"),
+    ),
+)
+def test_detects_vocative_and_dynamic_research_window(
+    message: str, expected_window: str
+) -> None:
+    intent = detect_fast_path_intent(message, ConversationContext())
+
+    assert intent is not None
+    assert intent.requirements.topic == (
+        "AI热点数据" if "数据" in message else "AI热点"
+    )
+    assert intent.requirements.time_window == expected_window
+    assert intent.needs_clarification is False
 
 
 def test_detects_today_industry_article_as_researched_wechat_content() -> None:

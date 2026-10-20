@@ -550,13 +550,13 @@ def _parse_absolute_calendar_reference(
 def _extract_quantities(text: str) -> list[int]:
     quantities = [int(match.group(1)) for match in _ARABIC_QUANTITY.finditer(text)]
     for match in _CHINESE_QUANTITY.finditer(text):
-        parsed = _parse_chinese_integer(match.group(0))
+        parsed = parse_chinese_integer(match.group(0))
         if parsed is not None:
             quantities.append(parsed)
     return quantities
 
 
-def _parse_chinese_integer(value: str) -> int | None:
+def parse_chinese_integer(value: str) -> int | None:
     digits = {
         "零": 0,
         "〇": 0,
@@ -592,4 +592,4 @@ def _parse_chinese_integer(value: str) -> int | None:
     return total + current
 
 
-__all__ = ["TemporalResolutionError", "TemporalResolver"]
+__all__ = ["TemporalResolutionError", "TemporalResolver", "parse_chinese_integer"]

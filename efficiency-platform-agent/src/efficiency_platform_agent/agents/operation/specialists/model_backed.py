@@ -309,6 +309,7 @@ class ModelBackedOperationSpecialist:
             "input_deliverables",
             "profile_reference_ids",
             "research",
+            "research_constraints",
         }
         if not isinstance(raw, dict) or set(raw) != expected:
             raise ValueError("SPECIALIST_INPUT_INVALID")
@@ -1179,6 +1180,7 @@ class ModelBackedOperationSpecialist:
                 ),
                 "citations": raw["citations"],
                 "input_deliverables": raw["input_deliverables"],
+                "research_constraints": raw["research_constraints"],
             },
         }
         if hasattr(executor, "generate_with_usage"):

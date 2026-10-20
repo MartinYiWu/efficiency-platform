@@ -35,6 +35,15 @@ from efficiency_platform_agent.conversation.context import ConversationContext
 from efficiency_platform_agent.orchestration.intent_fast_path import (
     detect_fast_path_intent,
 )
+from efficiency_platform_agent.orchestration.intent_v2.temporal import (
+    parse_chinese_integer,
+)
+
+_DYNAMIC_DURATION = re.compile(
+    r"(?:过去|最近|近|前)\s*"
+    r"(?P<amount>\d{1,5}|[零〇一二三四五六七八九十百两]+)\s*"
+    r"(?P<unit>小时|天|日|周|星期|个月|月)"
+)
 
 
 def resolve_explicit_research_patch(
@@ -147,7 +156,7 @@ def _set(field_name: FieldName, value: FieldPayload, span: SourceSpan) -> FieldO
 
 
 def _temporal(value: str | None) -> TemporalExpression:
-    if value in {"今天", "明天", "本周", "下周", "本月"}:
+    if value in {"今天", "明天", "上周", "本周", "下周", "本月"}:
         period: Literal["day", "week", "month"] = (
             "day" if value in {"今天", "明天"} else "week"
         )
@@ -156,8 +165,25 @@ def _temporal(value: str | None) -> TemporalExpression:
         return CalendarPeriodExpression(
             text=value,
             period=period,
-            offset=1 if value in {"明天", "下周"} else 0,
+            offset=(1 if value in {"明天", "下周"} else -1 if value == "上周" else 0),
         )
+    matched = _DYNAMIC_DURATION.search(value or "")
+    if matched is not None:
+        raw_amount = matched.group("amount")
+        amount = int(raw_amount) if raw_amount.isascii() else parse_chinese_integer(raw_amount)
+        if amount is not None and amount > 0:
+            unit = {
+                "小时": "hour",
+                "天": "day",
+                "日": "day",
+                "周": "week",
+                "星期": "week",
+                "个月": "month",
+                "月": "month",
+            }[matched.group("unit")]
+            return RollingDurationExpression(
+                text=value or matched.group(0), amount=amount, unit=unit
+            )
     return RollingDurationExpression(
         text=value or "最近7天",
         amount=7,

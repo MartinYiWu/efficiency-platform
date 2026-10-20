@@ -164,6 +164,7 @@ def task(
             "input_deliverables": input_deliverables or [],
             "profile_reference_ids": [],
             "research": capability.endswith("research.insight"),
+            "research_constraints": None,
         }
     )
     assert isinstance(value, JsonObject)

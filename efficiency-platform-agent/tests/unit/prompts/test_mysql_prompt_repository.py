@@ -332,6 +332,37 @@ def test_operation_prompt_seed_covers_all_agent_stages_and_role_boundaries() -> 
         assert "字段" in bundle.output_contract.field_description
 
 
+def test_research_plan_prompt_explains_dynamic_agent_action_fields() -> None:
+    _, _, _, _ = _modules()
+    seeds = importlib.import_module("efficiency_platform_agent.prompts.seeds")
+    package = seeds.build_operation_prompt_seed()
+    definition = next(
+        item for item in package.definitions if item.prompt_key == "research.plan"
+    )
+    version = next(
+        item for item in package.versions if item.prompt_definition_id == definition.id
+    )
+    developer = next(
+        item
+        for item in package.messages
+        if item.prompt_version_id == version.id and item.role == "developer"
+    )
+
+    assert version.semantic_version == "2.0.0"
+    for text in (
+        "proposals 字段表示",
+        "gap_id",
+        "source_id",
+        "action_kind",
+        "query",
+        "cursor",
+        "stop_reason",
+        "不得生成 URL",
+        "不得扩大时间范围",
+    ):
+        assert text in developer.content_template
+
+
 def test_operation_prompt_seed_embeds_complete_output_contract_for_the_model() -> None:
     seeds = importlib.import_module("efficiency_platform_agent.prompts.seeds")
     package = seeds.build_operation_prompt_seed()

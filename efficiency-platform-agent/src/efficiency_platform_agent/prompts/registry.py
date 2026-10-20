@@ -86,7 +86,7 @@ def register_research_v2_prompts(registry: PromptRegistry) -> None:
     specs = (
         PromptBundleSpec(
             prompt_id="research.v2.relevance",
-            semantic_version="1.0.0",
+            semantic_version="1.1.0",
             owner="research-v2",
             template_path="research/relevance_v2.j2",
             variable_schema_version="research-relevance-prompt-vars/1",
@@ -121,7 +121,7 @@ def register_research_v2_prompts(registry: PromptRegistry) -> None:
         ),
         PromptBundleSpec(
             prompt_id="research.v2.replan",
-            semantic_version="1.0.0",
+            semantic_version="1.1.0",
             owner="research-v2",
             template_path="research/replan_v2.j2",
             variable_schema_version="research-replan-prompt-vars/1",

@@ -187,6 +187,12 @@ class ScenarioModelExecutor:
                 raise ScenarioModelExecutionError(
                     "SCENARIO_OUTPUT_INVALID", "场景模型输出修复后仍不符合契约"
                 ) from final_error
+        content = _apply_authoritative_constraints(
+            run_id=run_id,
+            scenario=scenario,
+            content=content,
+            context=context,
+        )
         title = _title(content)
         return ScenarioGenerationResult(
             OperationDeliverableV3(
@@ -316,6 +322,43 @@ def _execution_content(execution: ModelExecutionResult) -> str:
             "SCENARIO_OUTPUT_EMPTY", "场景模型没有返回结构化内容"
         )
     return result.message.content
+
+
+def _apply_authoritative_constraints(
+    *,
+    run_id: str,
+    scenario: OperationScenario,
+    content: BaseModel,
+    context: Mapping[str, object],
+) -> BaseModel:
+    """模型负责内容表达，可信运行时负责不可猜测的时间边界。"""
+    if scenario != "industry_digest" or not isinstance(content, IndustryDigestV1):
+        return content
+    evidence = context.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return content
+    constraints = evidence.get("research_constraints")
+    if not isinstance(constraints, Mapping):
+        return content
+    start = constraints.get("start")
+    end = constraints.get("end")
+    original_text = constraints.get("original_text")
+    boundary = constraints.get("boundary")
+    if not all(isinstance(value, str) and value for value in (start, end)):
+        raise ScenarioModelExecutionError(
+            "SCENARIO_RESEARCH_CONSTRAINT_INVALID", "研究时间边界无效"
+        )
+    boundary_label = "左闭右开" if boundary == "left_closed_right_open" else str(boundary)
+    suffix = f"，{original_text}" if isinstance(original_text, str) and original_text else ""
+    authoritative = f"{start} 至 {end}（{boundary_label}{suffix}）"
+    if content.time_window != authoritative:
+        logger.warning(
+            "event=scenario_authority_field_corrected run_id=%s scenario=%s field=time_window",
+            run_id,
+            scenario,
+        )
+        return content.model_copy(update={"time_window": authoritative})
+    return content
 
 
 def _validation_errors(error: Exception) -> list[dict[str, object]]:

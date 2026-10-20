@@ -38,7 +38,7 @@ class Model:
         )
 
 
-def setup(output):
+def setup(output, *, prompt_assembler=None):
     brief, _, document, *_ = delivery_facts()
     remaining = RemainingBudget(50, 60, 100_000, 20_000, 100_000, 180_000)
     binding = build_local_research_binding(
@@ -57,8 +57,27 @@ def setup(output):
         binding=binding,
         brief=brief,
         remaining_budget=remaining,
+        prompt_assembler=prompt_assembler,
     )
     return decisions, model, binding, brief, document
+
+
+class DatabasePromptAssembler:
+    def __init__(self):
+        self.calls = []
+
+    async def assemble(self, **request):
+        self.calls.append(request)
+        return SimpleNamespace(
+            prompt_key=request["prompt_key"],
+            semantic_version="2.0.0",
+            messages=(
+                SimpleNamespace(role="system", content="research system"),
+                SimpleNamespace(role="developer", content="research contract"),
+                SimpleNamespace(role="user", content="research payload"),
+            ),
+            rendered_chars=48,
+        )
 
 
 def relevance_output():
@@ -70,7 +89,7 @@ def relevance_output():
         "outcome": "irrelevant",
         "requirement_ids": [],
         "source_excerpt": document.text,
-        "prompt_version": "research.v2.relevance@1.0.0",
+        "prompt_version": "research.v2.relevance@1.1.0",
     }
 
 
@@ -190,6 +209,33 @@ def test_relevance_candidate_limit_keeps_each_available_source_represented():
 
     assert len(selected) == 10
     assert {item.source_id for item in selected} == {"hot-source", "cold-source"}
+
+
+def test_relevance_candidate_limit_expands_for_top_ten_request():
+    brief, _, template, *_ = delivery_facts()
+    brief = brief.model_copy(
+        update={
+            "count_policy": brief.count_policy.model_copy(
+                update={"target": 10, "minimum": 10}
+            )
+        }
+    )
+    documents = tuple(
+        template.model_copy(
+            update={
+                "document_id": f"doc-{index:02d}",
+                "candidate_id": f"candidate-{index:02d}",
+                "source_item_id": f"item-{index:02d}",
+                "content_hash": f"{index:064x}",
+                "artifact_ref": f"artifact-{index:02d}",
+            }
+        )
+        for index in range(25)
+    )
+
+    selected = module()._select_relevance_candidates(brief, documents)
+
+    assert len(selected) == 15
 
 
 @pytest.mark.asyncio
@@ -432,6 +478,49 @@ async def test_claim_adapter_repairs_policy_invalid_first_response():
 
 
 @pytest.mark.asyncio
+async def test_claim_adapter_keeps_safe_items_from_mixed_policy_batch():
+    from efficiency_platform_agent.capabilities.research.v2.evidence import (
+        EvidenceContextV2,
+    )
+    from efficiency_platform_agent.capabilities.research.v2.source_families import (
+        SourceFamilyResolver,
+    )
+
+    brief, _, document, event, _, ref = delivery_facts()
+    proposal = {
+        "proposal_id": "safe",
+        "claim_key": "announcement",
+        "brief_digest": brief.canonical_digest(),
+        "prompt_version": "research.v2.claims@1.0.0",
+        "event_id": event.event_id,
+        "text": document.text,
+        "claim_type": "announcement",
+        "subject": "Acme",
+        "assertion_mode": "attributed",
+        "attributed_to": "Acme",
+        "support_refs": [ref.evidence_id],
+    }
+    decisions, model, *_ = setup(
+        {"proposals": [proposal, {**proposal, "proposal_id": "bad", "text": "https://invalid.example"}]}
+    )
+    context = EvidenceContextV2(
+        brief_digest=brief.canonical_digest(),
+        documents=(document,),
+        evidence_refs=(ref,),
+        source_families=SourceFamilyResolver().resolve((document,)),
+    )
+
+    result = await module().ResearchClaimModelAdapter(
+        decisions, minimum_valid_event_count=1
+    ).propose(
+        (event,), context, BudgetLeaseReferenceV2(lease_id="lease", version=0)
+    )
+
+    assert len(model.calls) == 1
+    assert [item.proposal_id for item in result] == ["safe"]
+
+
+@pytest.mark.asyncio
 async def test_claim_adapter_retries_invalid_model_claim_without_evidence_closure():
     from efficiency_platform_agent.capabilities.research.v2.evidence import (
         EvidenceContextV2,
@@ -534,6 +623,19 @@ async def test_claim_adapter_retries_invalid_model_claim_without_evidence_closur
         "model-proposal",
         "model-proposal-retry",
     ]
+
+    call_count = 0
+    calls_before = len(model.calls)
+    bounded = await module().ResearchClaimModelAdapter(
+        decisions, minimum_valid_event_count=1
+    ).propose(
+        (event, second_event),
+        context,
+        BudgetLeaseReferenceV2(lease_id="lease", version=0),
+    )
+
+    assert len(model.calls) == calls_before + 1
+    assert [item.proposal_id for item in bounded] == ["model-proposal"]
 
 
 @pytest.mark.asyncio
@@ -734,3 +836,161 @@ async def test_plan_adapter_cannot_invent_source_action_or_url():
                 ),
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_plan_adapter_materializes_model_query_with_server_owned_scope():
+    from efficiency_platform_agent.contracts.research_v2 import (
+        BudgetSnapshotV2,
+        CollectionActionV2,
+        CollectionHistoryV2,
+        QualityGapV2,
+        QualityReportV2,
+    )
+    from efficiency_platform_agent.orchestration.research_v2.planner import (
+        action_fingerprint,
+    )
+
+    decisions, _, _, brief, _ = setup(
+        {
+            "proposals": [
+                {
+                    "gap_id": "gap-count",
+                    "source_id": "source-1",
+                    "action_kind": "search_alternative",
+                    "query": "AI model release funding open source",
+                    "cursor": None,
+                }
+            ],
+            "stop_reason": None,
+        }
+    )
+    gap = QualityGapV2(
+        gap_id="gap-count",
+        requirement_id="count_policy",
+        code="COUNT_EXACT_UNMET",
+        detail="need more events",
+        recoverable=True,
+    )
+    template = CollectionActionV2(
+        action_id=action_fingerprint(
+            brief.intent_revision, gap, "source-1", brief.topic, None
+        ),
+        gap_id=gap.gap_id,
+        gap_code=gap.code,
+        action_kind="search_alternative",
+        source_id="source-1",
+        requirement_ids=(gap.requirement_id,),
+        query=brief.topic,
+        time_window=brief.time_window,
+        revision=brief.intent_revision,
+    )
+
+    plan = await module().ResearchPlanModelAdapter(decisions, (template,)).propose(
+        brief,
+        QualityReportV2(
+            report_id="q",
+            brief_digest=brief.canonical_digest(),
+            policy_version="v2",
+            hard_gates_passed=False,
+            gaps=(gap,),
+            coverage_ratio=0,
+        ),
+        CollectionHistoryV2(rounds=0, no_gain_rounds=0),
+        BudgetSnapshotV2(
+            lease_id="lease", version=0, remaining_calls=5, remaining_bytes=100
+        ),
+    )
+
+    assert len(plan.actions) == 1
+    action = plan.actions[0]
+    assert action.query == "AI model release funding open source"
+    assert action.time_window == brief.time_window
+    assert action.revision == brief.intent_revision
+    assert action.action_id == action_fingerprint(
+        brief.intent_revision, gap, "source-1", action.query, None
+    )
+
+
+def test_collection_history_carries_progress_and_failure_memory():
+    from efficiency_platform_agent.contracts.research_v2 import CollectionHistoryV2
+
+    history = CollectionHistoryV2(
+        rounds=2,
+        no_gain_rounds=1,
+        attempted_queries=("AI launch", "AI funding"),
+        failed_queries=("AI funding",),
+        failed_source_ids=("source-2",),
+        qualified_event_count=3,
+        remaining_target_count=7,
+    )
+
+    assert history.attempted_queries == ("AI launch", "AI funding")
+    assert history.failed_queries == ("AI funding",)
+    assert history.failed_source_ids == ("source-2",)
+    assert history.qualified_event_count == 3
+    assert history.remaining_target_count == 7
+
+
+@pytest.mark.asyncio
+async def test_replan_uses_database_multi_role_prompt_when_assembler_is_bound():
+    from efficiency_platform_agent.contracts.research_v2 import (
+        BudgetSnapshotV2,
+        CollectionActionV2,
+        CollectionHistoryV2,
+        QualityGapV2,
+        QualityReportV2,
+    )
+    from efficiency_platform_agent.orchestration.research_v2.planner import (
+        action_fingerprint,
+    )
+
+    assembler = DatabasePromptAssembler()
+    decisions, model, _, brief, _ = setup(
+        {"action_ids": [], "stop_reason": "PLAN_EXHAUSTED"},
+        prompt_assembler=assembler,
+    )
+    gap = QualityGapV2(
+        gap_id="gap-count",
+        requirement_id="count_policy",
+        code="COUNT_EXACT_UNMET",
+        detail="need more events",
+        recoverable=True,
+    )
+    template = CollectionActionV2(
+        action_id=action_fingerprint(
+            brief.intent_revision, gap, "source-1", brief.topic, None
+        ),
+        gap_id=gap.gap_id,
+        gap_code=gap.code,
+        action_kind="search_alternative",
+        source_id="source-1",
+        requirement_ids=(gap.requirement_id,),
+        query=brief.topic,
+        time_window=brief.time_window,
+        revision=brief.intent_revision,
+    )
+
+    await module().ResearchPlanModelAdapter(decisions, (template,)).propose(
+        brief,
+        QualityReportV2(
+            report_id="q",
+            brief_digest=brief.canonical_digest(),
+            policy_version="v2",
+            hard_gates_passed=False,
+            gaps=(gap,),
+            coverage_ratio=0,
+        ),
+        CollectionHistoryV2(rounds=0, no_gain_rounds=0),
+        BudgetSnapshotV2(
+            lease_id="lease", version=0, remaining_calls=5, remaining_bytes=100
+        ),
+    )
+
+    assert assembler.calls[0]["prompt_key"] == "research.plan"
+    _, request, _ = model.calls[0]
+    assert [message.role for message in request.messages] == [
+        "system",
+        "developer",
+        "user",
+    ]

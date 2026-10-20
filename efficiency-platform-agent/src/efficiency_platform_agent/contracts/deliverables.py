@@ -685,18 +685,29 @@ def render_operation_content_v3(content: OperationContentV3) -> str:
             parts.append(" ".join(f"#{item.lstrip('#')}" for item in content.hashtags))
         return "\n\n".join(parts)
     if isinstance(content, IndustryDigestV1):
+        window_label = content.time_window
+        authoritative_window = re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T.+[（(][^）)]*[，,]\s*([^）)]+)[）)]",
+            window_label,
+        )
+        if authoritative_window:
+            window_label = authoritative_window.group(1).strip()
         items = [
-            "\n\n".join(
+            " ".join(
                 (
-                    f"## {item.rank}. {item.title}",
-                    f"**事实**\n\n{item.event_summary}",
-                    f"**影响**\n\n{item.why_it_matters}",
-                    f"**运营观察**\n\n{item.operator_insight}",
+                    f"{item.rank}. **{item.title}：**",
+                    item.event_summary,
+                    item.why_it_matters,
+                    item.operator_insight,
                 )
             )
             for item in content.items
         ]
-        return "\n\n".join((f"# {content.topic}", f"时间范围：{content.time_window}", *items))
+        lead = (
+            f"{window_label}，{content.topic}已整理完成，"
+            f"共 {content.actual_count} 条，按重要性排序："
+        )
+        return "\n\n".join((lead, *items))
     title = {
         "brand_plan": "品牌运营方案",
         "ip_plan": "IP 运营方案",

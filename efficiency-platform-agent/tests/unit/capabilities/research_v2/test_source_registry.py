@@ -94,14 +94,21 @@ def test_verified_free_source_is_available_after_all_filters() -> None:
     assert registry().list_available(context(), brief())[0].source_id == "source-1"
 
 
-def test_unknown_adapter_user_scope_and_history_are_rejected_before_provider() -> None:
+def test_unknown_adapter_and_user_scope_are_rejected_before_provider() -> None:
     assert (
         registry(adapters=frozenset({"other"})).list_available(context(), brief()) == ()
     )
     assert (
         registry().list_available(context(allowed_source_ids=("other",)), brief()) == ()
     )
-    assert registry().list_available(context(), brief(start_days=31)) == ()
+
+
+def test_admitted_latest_only_source_is_not_rejected_by_requested_window() -> None:
+    """来源准入与本次时间覆盖必须分离，覆盖事实由执行结果报告。"""
+
+    available = registry().list_available(context(), brief(start_days=31))
+
+    assert tuple(item.source_id for item in available) == ("source-1",)
 
 
 def test_authenticated_quota_source_requires_credential_and_real_remaining_snapshot() -> (

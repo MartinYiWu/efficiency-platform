@@ -154,3 +154,50 @@ async def test_industry_digest_ignores_internal_research_platform_for_prompt_rou
     )
 
     assert assembler.calls[0]["prompt_key"] == "industry_digest.compose"
+
+
+@pytest.mark.asyncio
+async def test_industry_digest_uses_authoritative_research_window() -> None:
+    assembler = _Assembler()
+    output = {
+        "kind": "ranked_digest",
+        "topic": "AI 行业热点",
+        "time_window": "最近7天",
+        "items": [
+            {
+                "rank": 1,
+                "title": "事件",
+                "event_summary": "事实",
+                "why_it_matters": "影响",
+                "operator_insight": "观察",
+                "occurred_at": None,
+            }
+        ],
+        "actual_count": 1,
+    }
+    model = _Model([json.dumps(output, ensure_ascii=False)])
+    executor = ScenarioModelExecutor(model, assembler)
+    constraints = {
+        "start": "2026-10-05T03:00:00+00:00",
+        "end": "2026-10-19T03:00:00+00:00",
+        "timezone": "Asia/Shanghai",
+        "boundary": "left_closed_right_open",
+        "original_text": "近2周",
+    }
+
+    result = await executor.generate(
+        run_id="run-research-window",
+        scenario="industry_digest",
+        stage="compose",
+        platform=None,
+        user_request="收集近2周 AI 热点",
+        input_artifact_ids=(),
+        evidence={"research_constraints": constraints},
+    )
+
+    assert result.content.time_window == (
+        "2026-10-05T03:00:00+00:00 至 2026-10-19T03:00:00+00:00"
+        "（左闭右开，近2周）"
+    )
+    assembled_context = assembler.calls[0]["variables"]["context_payload"].value
+    assert assembled_context["evidence"]["research_constraints"] == constraints

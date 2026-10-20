@@ -160,6 +160,18 @@ async def build_case(monkeypatch, *, admitted=True):
         monkeypatch.setattr(
             factory, "load_local_source_descriptors", lambda path: (descriptor,)
         )
+    else:
+        descriptor = source(body=True)
+        descriptor = descriptor.model_copy(
+            update={
+                "admission": descriptor.admission.model_copy(
+                    update={"status": "UNVERIFIED"}
+                )
+            }
+        )
+        monkeypatch.setattr(
+            factory, "load_local_source_descriptors", lambda path: (descriptor,)
+        )
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: pytest.fail("真实网络被禁止"))
     )
@@ -251,15 +263,8 @@ async def test_chat_and_clarification_keep_existing_conversation_paths(
 
 
 async def test_unadmitted_source_cannot_produce_fabricated_research(monkeypatch):
-    bundle, connector, _model, client = await build_case(monkeypatch, admitted=False)
-    try:
-        run = await post(bundle, "研究最近7天AI动态", "denied")
-        assert run.status.value == "failed"
-        assert run.output is None
-        assert not connector.calls
-    finally:
-        await bundle.close()
-        await client.aclose()
+    with pytest.raises(ValueError, match="SOURCE_UNVERIFIED"):
+        await build_case(monkeypatch, admitted=False)
 
 
 @pytest.mark.parametrize("invalid", ["user", "tenant", "conversation", "rank"])

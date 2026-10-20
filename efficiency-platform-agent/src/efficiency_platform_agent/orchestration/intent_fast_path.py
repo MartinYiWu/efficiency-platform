@@ -46,10 +46,16 @@ _TIME_WINDOWS: tuple[tuple[str, str], ...] = (
     ("最近一周", "最近一周"),
     ("近7天", "近7天"),
     ("本周", "本周"),
+    ("上周", "上周"),
     ("下周", "下周"),
     ("本月", "本月"),
     ("今天", "今天"),
     ("明天", "明天"),
+)
+_DURATION_WINDOW = re.compile(
+    r"(?:过去|最近|近|前)\s*"
+    r"(?:\d{1,5}|[零〇一二三四五六七八九十百两]+)\s*"
+    r"(?:小时|天|日|周|星期|个月|月)"
 )
 _GENERIC_TOPICS = frozenset(
     {
@@ -77,6 +83,7 @@ _CONTENT_MARKERS = (
 )
 _FOLLOW_UP_MARKERS = ("上一版", "刚才", "前面", "原有", "保留")
 _TOPIC_PREFIXES = (
+    "小万",
     "收集",
     "搜索",
     "搜一下",
@@ -124,6 +131,9 @@ def _extract_time_window(text: str) -> str | None:
     for marker, value in _TIME_WINDOWS:
         if marker in text:
             return value
+    matched = _DURATION_WINDOW.search(text)
+    if matched is not None:
+        return matched.group(0)
     return None
 
 
@@ -144,6 +154,8 @@ def _clean_topic(value: str) -> str | None:
         topic = topic.removesuffix(suffix).strip()
     topic = re.sub(r"^为(.+?)(?:写|编写|撰写)$", r"\1", topic).strip()
     topic = re.sub(r"^(最新|近期|最近|下周|本周|本月|今天|明天)\s*", "", topic)
+    topic = re.sub(r"^一下\s*", "", topic)
+    topic = re.sub(r"(?:最热的)?(?:前|top\s*)\d{1,4}条$", "", topic, flags=re.IGNORECASE)
     topic = re.sub(r"(公众号|小红书|今日头条|头条|三种版本|多平台)\s*$", "", topic)
     topic = topic.strip("的 ")
     topic = topic.strip(" ，。！？、；：:,.!?()（）\"'")
@@ -160,6 +172,7 @@ def _extract_topic(text: str, context: ConversationContext) -> str | None:
     current = text
     for marker, _ in _TIME_WINDOWS:
         current = current.replace(marker, " ")
+    current = _DURATION_WINDOW.sub(" ", current)
     for alias, _ in _PLATFORM_ALIASES:
         current = re.sub(re.escape(alias), " ", current, flags=re.IGNORECASE)
     current = re.sub(r"(三种|多个|多平台)\s*版本", " ", current)
@@ -167,6 +180,8 @@ def _extract_topic(text: str, context: ConversationContext) -> str | None:
     parts = [part for part in current.split("|") if part.strip()]
     for part in parts:
         cleaned = _clean_topic(part)
+        if cleaned == "小万":
+            continue
         if cleaned is not None and not any(
             marker in cleaned for marker in ("整理成", "生成", "版本")
         ):

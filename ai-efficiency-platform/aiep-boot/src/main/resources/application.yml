@@ -8,9 +8,9 @@ spring:
   datasource:
     type: com.alibaba.druid.pool.DruidDataSource
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${TODAYLIGHT_DB_URL:}
-    username: ${TODAYLIGHT_DB_USERNAME:}
-    password: ${TODAYLIGHT_DB_PASSWORD:}
+    url: ${TODAYLIGHT_DB_URL:jdbc:mysql://10.13.3.227:3306/ai_efficiency_platform?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
+    username: ${TODAYLIGHT_DB_USERNAME:admin}
+    password: ${TODAYLIGHT_DB_PASSWORD:XE9MlzEgoMwCajZIYNEP}
     druid:
       initial-size: ${AIEP_DATASOURCE_INITIAL_SIZE:5}
       min-idle: ${AIEP_DATASOURCE_MIN_IDLE:5}
@@ -23,10 +23,10 @@ spring:
   # Redis 的地址与凭据按环境注入；缓存 Key、TTL 与一致性语义由具体业务模块定义。
   data:
     redis:
-      host: ${REDIS_HOST:}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      database: ${AIEP_REDIS_DATABASE:0}
+      host: ${REDIS_HOST:10.13.3.227}
+      port: ${REDIS_PORT:6001}
+      password: "Myjjcy#redis"
+      database: ${REDIS_DATABASE:0}
       timeout: ${AIEP_REDIS_TIMEOUT:10000ms}
       lettuce:
         pool:
@@ -69,3 +69,15 @@ management:
     health:
       probes:
         enabled: true
+# 向量数据库（PostgreSQL + pgvector）
+vector:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://10.13.3.235:5432/jjcy_ai_vector
+    username: jjcypgadmin
+    password: jjcyPlatform@ABC123
+  embedding:
+    model: text-embedding-v4
+    api-key: sk-bc5653a0fe5549469537ce7aa25e03e7
+    url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    dimensions: 1024

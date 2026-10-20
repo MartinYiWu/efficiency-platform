@@ -8,10 +8,10 @@ import logging
 import re
 import time
 from dataclasses import replace
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from efficiency_platform_agent.capabilities.model.runtime import ModelLeaseContext
 from efficiency_platform_agent.context.builder import ContextBuilder, ContextBuildError
@@ -28,6 +28,7 @@ from efficiency_platform_agent.contracts.research_v2 import (
     CollectionPlanV2,
     QualityReportV2,
     ResearchBriefV2,
+    build_collection_action_id,
 )
 from efficiency_platform_agent.core.budget import RemainingBudget
 from efficiency_platform_agent.core.budget_execution import (
@@ -47,11 +48,12 @@ from efficiency_platform_agent.core.run import (
     RunContext,
     RunRequest,
 )
+from efficiency_platform_agent.prompts.contracts import PromptValue
 from efficiency_platform_agent.prompts.registry import (
     PromptRegistry,
     register_research_v2_prompts,
 )
-from efficiency_platform_agent.prompts.runtime import PromptRuntime
+from efficiency_platform_agent.prompts.runtime import PromptAssembler, PromptRuntime
 
 from .claims import ClaimProposalV2, _validate_proposal
 from .clustering import ClusterBucketV2, ClusterProposalV2
@@ -76,12 +78,42 @@ class ResearchModelRuntime(Protocol):
     ) -> ModelExecutionResult: ...
 
 
+class SearchActionProposalV2(BaseModel):
+    """模型只提出查询策略；范围、需求和动作标识由运行时注入。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    gap_id: str = Field(min_length=1, max_length=128)
+    source_id: str = Field(min_length=1, max_length=128)
+    action_kind: Literal[
+        "search_alternative",
+        "search_required_facet",
+        "locate_primary",
+        "fetch_content",
+        "verify_time",
+        "resolve_conflict",
+        "observe_heat",
+        "retry_or_alternate",
+        "switch_free_source",
+        "verify_history",
+        "rerender_only",
+    ]
+    query: str = Field(min_length=1, max_length=2_000)
+    cursor: str | None = Field(default=None, min_length=1, max_length=2_000)
+
+
 class PlanSelectionV2(BaseModel):
-    """只允许模型选择服务端生成的有限动作，不能生成 URL 或查询。"""
+    """兼容旧动作选择，同时允许模型提出经运行时重建的查询动作。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     action_ids: tuple[str, ...] = Field(default=(), max_length=128)
+    proposals: tuple[SearchActionProposalV2, ...] = Field(default=(), max_length=128)
     stop_reason: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> PlanSelectionV2:
+        if self.action_ids and self.proposals:
+            raise ValueError("PLAN_SELECTION_MODE_CONFLICT")
+        return self
 
 
 class RelevanceDecisionBatchV2(BaseModel):
@@ -89,7 +121,7 @@ class RelevanceDecisionBatchV2(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     decisions: tuple[SemanticRelevanceDecisionV2, ...] = Field(
-        default=(), max_length=10
+        default=(), max_length=20
     )
 
 
@@ -114,6 +146,7 @@ class ResearchModelDecisions:
         brief: ResearchBriefV2,
         remaining_budget: RemainingBudget,
         prompt_runtime: PromptRuntime | None = None,
+        prompt_assembler: PromptAssembler | None = None,
         deterministic_fallback: bool = False,
     ) -> None:
         if (run_context.tenant_id, run_context.run_id, binding.lease_id) != (
@@ -131,10 +164,12 @@ class ResearchModelDecisions:
         self.run_context, self.binding, self.brief = run_context, binding, brief
         self.remaining_budget = remaining_budget
         self.deterministic_fallback = deterministic_fallback
+        self.prompt_assembler = prompt_assembler
         registry = PromptRegistry()
         register_research_v2_prompts(registry)
         self.prompts = prompt_runtime or PromptRuntime(registry)
         self.model_calls = 0
+        self._prompt_invocations: dict[str, int] = {}
 
     async def invoke(
         self,
@@ -155,8 +190,32 @@ class ResearchModelDecisions:
             or lease.version > self.binding.version
         ):
             raise ValueError("RESEARCH_MODEL_SCOPE_MISMATCH")
-        prompt = self.prompts.render(prompt_id, variables)
         body = json.dumps(payload, ensure_ascii=False)
+        prompt_messages: tuple[ProviderMessage, ...]
+        if self.prompt_assembler is not None and prompt_id == "research.v2.replan":
+            invocation = self._prompt_invocations.get(prompt_id, 0) + 1
+            self._prompt_invocations[prompt_id] = invocation
+            assembled = await self.prompt_assembler.assemble(
+                run_id=self.run_context.run_id,
+                stage=f"{prompt_id}.{invocation}",
+                prompt_key="research.plan",
+                variables={
+                    "user_request": PromptValue(self.brief.topic, "user_input"),
+                    "context_payload": PromptValue(
+                        {"schemas": variables, "research_state": payload},
+                        "research_data",
+                    ),
+                },
+            )
+            prompt_messages = tuple(
+                ProviderMessage(message.role, message.content)
+                for message in assembled.messages
+            )
+            rendered_chars = assembled.rendered_chars
+        else:
+            prompt = self.prompts.render(prompt_id, variables)
+            prompt_messages = (*prompt.messages, ProviderMessage("user", body))
+            rendered_chars = prompt.rendered_chars
         snapshot = await self.binding.port.snapshot(self.binding.scope)
         self.binding.update_version(snapshot.version)
         remaining = replace(
@@ -215,7 +274,7 @@ class ResearchModelDecisions:
             pass
         if built is None:
             raise ValueError("RESEARCH_MODEL_CONTEXT_TOO_LARGE")
-        input_tokens = built.estimated_input_tokens + (prompt.rendered_chars + 3) // 4
+        input_tokens = built.estimated_input_tokens + (rendered_chars + 3) // 4
         if input_tokens > remaining.input_tokens:
             raise ValueError("RESEARCH_MODEL_CONTEXT_TOO_LARGE")
         prefix, version = await self.binding.next_invocation("research-model")
@@ -232,7 +291,7 @@ class ResearchModelDecisions:
         )
         request = ProviderRequest(
             "2",
-            (*prompt.messages, ProviderMessage("user", body)),
+            prompt_messages,
             JsonObject(
                 (
                     (
@@ -519,10 +578,12 @@ class ResearchModelDecisions:
 def _select_relevance_candidates(
     brief: ResearchBriefV2,
     documents: tuple[SourceDocumentV2, ...],
-    limit: int = 10,
+    limit: int | None = None,
 ) -> tuple[SourceDocumentV2, ...]:
     """先执行确定性门禁，再按来源轮询选择有界的模型复核集合。"""
 
+    if limit is None:
+        limit = max(10, min(20, brief.count_policy.target + 5))
     eligible = list(documents)
     by_source: dict[str, list[SourceDocumentV2]] = {}
     for document in eligible:
@@ -639,7 +700,12 @@ class ResearchPlanModelAdapter:
                 "brief_schema": _schema(ResearchBriefV2),
                 "quality_schema": _schema(QualityReportV2),
                 "plan_schema": _schema(PlanSelectionV2),
-                "action_policy": "仅选择 allowed_actions 中原样存在的 action_id；无动作返回 PLAN_EXHAUSTED。",
+                "action_policy": (
+                    "优先返回 proposals。每项只能使用 allowed_actions 中已有的 gap_id、"
+                    "source_id 和 action_kind，但 query 应根据当前缺口提出新的具体检索词；"
+                    "不得生成 URL，不得扩大时间范围。兼容模式可只返回 action_ids。"
+                    "无可执行动作时返回 PLAN_EXHAUSTED。"
+                ),
             },
             {
                 "brief": brief.model_dump(mode="json"),
@@ -654,14 +720,53 @@ class ResearchPlanModelAdapter:
         )
         selected = _parse(PlanSelectionV2, value)
         available = {item.action_id: item for item in self.actions}
-        if len(set(selected.action_ids)) != len(selected.action_ids) or not set(
-            selected.action_ids
-        ).issubset(available):
-            raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+        if selected.proposals:
+            templates = {
+                (item.gap_id, item.source_id, item.action_kind): item
+                for item in self.actions
+            }
+            gaps = {item.gap_id: item for item in quality.gaps}
+            materialized: list[CollectionActionV2] = []
+            for proposal in selected.proposals:
+                template = templates.get(
+                    (proposal.gap_id, proposal.source_id, proposal.action_kind)
+                )
+                gap = gaps.get(proposal.gap_id)
+                if (
+                    template is None
+                    or gap is None
+                    or re.search(r"(?:https?://|www\.)", proposal.query, re.IGNORECASE)
+                ):
+                    raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+                action_id = build_collection_action_id(
+                    brief.intent_revision,
+                    gap,
+                    proposal.source_id,
+                    proposal.query,
+                    proposal.cursor,
+                )
+                materialized.append(
+                    template.model_copy(
+                        update={
+                            "action_id": action_id,
+                            "query": proposal.query,
+                            "cursor": proposal.cursor,
+                        }
+                    )
+                )
+            if len({item.action_id for item in materialized}) != len(materialized):
+                raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+            actions = tuple(materialized)
+        else:
+            if len(set(selected.action_ids)) != len(selected.action_ids) or not set(
+                selected.action_ids
+            ).issubset(available):
+                raise ValueError("RESEARCH_MODEL_DECISION_INVALID")
+            actions = tuple(available[item] for item in selected.action_ids)
         return CollectionPlanV2(
-            actions=tuple(available[item] for item in selected.action_ids),
+            actions=actions,
             stop_reason=selected.stop_reason
-            or (None if selected.action_ids else "PLAN_EXHAUSTED"),
+            or (None if actions else "PLAN_EXHAUSTED"),
         )
 
 
@@ -735,8 +840,14 @@ def _contains_cluster_url(value: object) -> bool:
 
 
 class ResearchClaimModelAdapter:
-    def __init__(self, decisions: ResearchModelDecisions) -> None:
+    def __init__(
+        self,
+        decisions: ResearchModelDecisions,
+        *,
+        minimum_valid_event_count: int | None = None,
+    ) -> None:
         self.decisions = decisions
+        self.minimum_valid_event_count = minimum_valid_event_count
 
     async def propose(
         self,
@@ -754,10 +865,10 @@ class ResearchClaimModelAdapter:
 
         async def request(selected: tuple[EventClusterV2, ...]) -> tuple[ClaimProposalV2, ...]:
             payload: dict[str, object] = {
-                    "events": [item.model_dump(mode="json") for item in selected],
-                    "evidence_context": evidence_context.model_dump(mode="json"),
-                    "prompt_version": "research.v2.claims@1.0.0",
-                }
+                "events": [item.model_dump(mode="json") for item in selected],
+                "evidence_context": evidence_context.model_dump(mode="json"),
+                "prompt_version": "research.v2.claims@1.0.0",
+            }
             allowed_event_ids = {event.event_id for event in selected}
             for attempt in range(2):
                 value = await self.decisions.invoke(
@@ -768,32 +879,40 @@ class ResearchClaimModelAdapter:
                     if isinstance(value, dict) and "proposals" in value
                     else _parse_many(ClaimProposalV2, value)
                 )
-                unknown_events = sum(
-                    proposal.event_id not in allowed_event_ids for proposal in parsed
-                )
-                urls = sum(
-                    re.search(
-                        r"https?://",
-                        proposal.model_dump_json(),
-                        flags=re.IGNORECASE,
+                policy_results = tuple(
+                    (
+                        proposal.event_id in allowed_event_ids,
+                        re.search(
+                            r"https?://",
+                            proposal.model_dump_json(),
+                            flags=re.IGNORECASE,
+                        )
+                        is None,
+                        set(proposal.support_refs).issubset(evidence_ids),
                     )
-                    is not None
                     for proposal in parsed
                 )
-                unknown_refs = sum(
-                    not set(proposal.support_refs).issubset(evidence_ids)
-                    for proposal in parsed
-                )
+                unknown_events = sum(not result[0] for result in policy_results)
+                urls = sum(not result[1] for result in policy_results)
+                unknown_refs = sum(not result[2] for result in policy_results)
                 if unknown_events == 0 and urls == 0 and unknown_refs == 0:
                     return parsed
+                safe = tuple(
+                    proposal
+                    for proposal, result in zip(parsed, policy_results, strict=True)
+                    if all(result)
+                )
                 logger.warning(
-                    "event=research_claim_policy_rejected run_id=%s attempt=%s unknown_events=%s urls=%s unknown_refs=%s",
+                    "event=research_claim_policy_rejected run_id=%s attempt=%s unknown_events=%s urls=%s unknown_refs=%s retained=%s",
                     self.decisions.run_context.run_id,
                     attempt + 1,
                     unknown_events,
                     urls,
                     unknown_refs,
+                    len(safe),
                 )
+                if safe:
+                    return safe
                 payload = {
                     **payload,
                     "validation_feedback": (
@@ -825,7 +944,14 @@ class ResearchClaimModelAdapter:
         )
         valid_event_ids = {proposal.event_id for proposal in valid_proposals}
         missing = tuple(event for event in events if event.event_id not in valid_event_ids)
-        if missing:
+        required_count = min(
+            len(events),
+            self.minimum_valid_event_count
+            if self.minimum_valid_event_count is not None
+            else len(events),
+        )
+        if missing and len(valid_event_ids) < required_count:
+            missing = missing[: required_count - len(valid_event_ids)]
             logger.info(
                 "event=research_claim_model_retry_requested run_id=%s missing=%s events=%s",
                 self.decisions.run_context.run_id,

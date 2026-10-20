@@ -15,7 +15,7 @@ def test_relevance_prompt_is_explicitly_registered_and_versioned() -> None:
 
     spec = registry.get("research.v2.relevance")
 
-    assert spec.semantic_version == "1.0.0"
+    assert spec.semantic_version == "1.1.0"
     assert spec.output_schema_version == "semantic-relevance-decision/2"
     assert spec.required_variables == frozenset({"brief_schema", "decision_schema"})
     cluster = registry.get("research.v2.cluster")
@@ -39,6 +39,7 @@ def test_relevance_prompt_keeps_documents_out_of_system_template() -> None:
         "无法从规范正文得到可靠结论时输出 uncertain",
         "source_excerpt 必须逐字来自",
         "requirement_ids 只能选择",
+        "最多 20 篇文档",
         "唯一 ContextBuilder",
         "仅输出符合 decision_schema 的一个 JSON 对象",
     ):
@@ -113,7 +114,7 @@ def test_replan_prompt_limits_model_to_gap_action_proposals() -> None:
     register_research_v2_prompts(registry)
 
     spec = registry.get("research.v2.replan")
-    assert spec.semantic_version == "1.0.0"
+    assert spec.semantic_version == "1.1.0"
     assert spec.output_schema_version == "collection-plan/2"
     assert spec.required_variables == frozenset(
         {"action_policy", "brief_schema", "plan_schema", "quality_schema"}
@@ -143,6 +144,10 @@ def test_replan_prompt_limits_model_to_gap_action_proposals() -> None:
         "事实正确性、发布时间、原始来源、冲突或正文缺失",
         "不得返回 RESEARCH_COMPLETE 或 QUALITY_MET",
         "只由程序 QualityEvaluator 决定",
+        "优先输出 proposals",
+        "attempted_queries",
+        "failed_source_ids",
+        "remaining_target_count",
         "只输出符合 plan_schema 的 JSON",
         "ACTION_POLICY",
         "BRIEF_SCHEMA",

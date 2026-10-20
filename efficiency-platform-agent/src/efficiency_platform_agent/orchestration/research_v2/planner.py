@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import re
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -16,6 +14,7 @@ from efficiency_platform_agent.contracts.research_v2 import (
     QualityGapV2,
     QualityReportV2,
     ResearchBriefV2,
+    build_collection_action_id,
 )
 
 _GAP_ACTIONS: dict[str, frozenset[str]] = {
@@ -221,18 +220,9 @@ def action_fingerprint(
     query: str,
     cursor: str | None,
 ) -> str:
-    normalized_query = re.sub(r"\s+", " ", query).strip().casefold()
-    value = "\x00".join(
-        (
-            str(intent_revision),
-            gap.gap_id,
-            gap.code,
-            source_id,
-            normalized_query,
-            cursor or "",
-        )
+    return build_collection_action_id(
+        intent_revision, gap, source_id, query, cursor
     )
-    return "action-" + hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
 
 
 __all__ = [

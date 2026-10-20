@@ -113,7 +113,7 @@ from efficiency_platform_agent.prompts.registry import (
     PromptRegistry,
     register_intent_v2_prompts,
 )
-from efficiency_platform_agent.prompts.runtime import PromptRuntime
+from efficiency_platform_agent.prompts.runtime import PromptAssembler, PromptRuntime
 from efficiency_platform_agent.tools.runtime.service import (
     ToolLeaseContext,
     ToolRuntime,
@@ -433,6 +433,7 @@ def build_local_live_research_components(
     runtime: AgentRuntimeService,
     submissions: ConversationSubmissionStore,
     ranked_reference_repository: RankedReferenceRepository,
+    prompt_assembler: PromptAssembler | None = None,
 ) -> LocalLiveResearchComponents:
     """只装配显式 local_live；来源授权来自静态 TOML，禁用源保持不可用。"""
     if not settings.local_live_ready:
@@ -531,6 +532,7 @@ def build_local_live_research_components(
                 binding=execution.binding,
                 brief=execution.brief,
                 remaining_budget=available,
+                prompt_assembler=prompt_assembler,
                 deterministic_fallback=(
                     settings.research_decision_mode == "deterministic"
                 ),

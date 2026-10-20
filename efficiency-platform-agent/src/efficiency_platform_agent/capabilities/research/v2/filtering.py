@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from efficiency_platform_agent.contracts.research_evidence_v2 import SourceDocumentV2
 from efficiency_platform_agent.contracts.research_v2 import ResearchBriefV2
 
-RELEVANCE_PROMPT_VERSION = "research.v2.relevance@1.0.0"
+RELEVANCE_PROMPT_VERSION = "research.v2.relevance@1.1.0"
 
 
 class _FrozenContract(BaseModel):

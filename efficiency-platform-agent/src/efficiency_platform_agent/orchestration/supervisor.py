@@ -122,6 +122,15 @@ class _ScenarioDispatch:
             if isinstance(reference, ReferencedRankedInput)
             for citation in reference.citations
         )
+        research_constraints = next(
+            (
+                plain(condition.value)
+                for condition in request.task_spec.key_conditions
+                if condition.condition_id == "time-window"
+                and condition.value is not None
+            ),
+            None,
+        )
         value = freeze(
             {
                 "platform": platform,
@@ -138,6 +147,7 @@ class _ScenarioDispatch:
                 ],
                 "research": node.task_type == "operation.research"
                 or bool(getattr(request.task_spec, "requires_research", False)),
+                "research_constraints": research_constraints,
             }
         )
         kwargs["input_data"] = value

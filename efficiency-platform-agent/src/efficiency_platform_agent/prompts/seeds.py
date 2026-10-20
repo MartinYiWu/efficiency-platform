@@ -60,11 +60,12 @@ _CONTRACT_FIELDS: dict[str, dict[str, str]] = {
         "confidence": "0 到 1 的意图判断置信度",
     },
     "research-plan": {
-        "topic": "规范化研究主题",
-        "queries": "可执行检索词数组",
-        "source_types": "需要覆盖的一手或权威来源类型",
-        "freshness_days": "允许的信息时效窗口天数",
-        "coverage_requirements": "必须覆盖的事实维度数组",
+        "proposals": (
+            "结构化检索动作数组；每项的 gap_id 表示待修复质量缺口，source_id 表示"
+            "已准入来源，action_kind 表示受控动作类型，query 表示实际检索词，cursor "
+            "表示可选分页位置；时间范围、需求和动作 ID 由运行时注入"
+        ),
+        "stop_reason": "没有合法新动作时的受控停止原因；仍有动作时必须为 null",
     },
     "research-relevance": {
         "items": "逐条相关性判断，包含 item_id/relevant/score/reason",
@@ -208,6 +209,14 @@ _CONTRACT_RULES: dict[str, str] = {
         "修复阶段必须先读取 validation_errors 中的实际字符数：不足则有针对性扩写，超出则压缩，"
         "同时删除全部无证据细节；不得只在 JSON 外追加正文，也不得删除必填字段。"
     ),
+    "research-plan": (
+        "Agent 规划规则：必须读取 context_payload.research_state 中的 brief、quality、"
+        "history、budget 和 allowed_actions。proposals 每项只能组合 allowed_actions 中已有的 "
+        "gap_id、source_id、action_kind；query 必须围绕原 topic、实体、维度和当前缺口生成，"
+        "不得生成 URL、域名、凭据或未准入来源，不得扩大时间范围、来源范围、租户、"
+        "权限和预算。不得重复 history.attempted_queries 或失败后原样重试同一 query；"
+        "应优先换检索角度或换已准入来源。不能宣布研究已经完成，完成状态只由质量程序决定。"
+    ),
 }
 
 
@@ -268,15 +277,20 @@ def build_operation_prompt_seed() -> PromptSeedPackage:
         )
         contract = contract_by_key[spec.contract_key]
         upgraded = spec.scenario == "intent" or spec.contract_key == "content-draft"
+        dynamic_research_plan = spec.key == "research.plan"
         asset_generation = (
-            5
+            8
+            if dynamic_research_plan
+            else 5
             if spec.contract_key == "content-draft"
             else 7
             if spec.scenario == "intent"
             else 2
         )
         semantic_version = (
-            "1.5.0"
+            "2.0.0"
+            if dynamic_research_plan
+            else "1.5.0"
             if spec.scenario == "intent"
             else "1.3.0"
             if upgraded

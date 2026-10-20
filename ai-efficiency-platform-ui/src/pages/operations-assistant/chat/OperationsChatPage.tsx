@@ -8,7 +8,6 @@ import {
   StreamingAssistantContent,
   useOperationChat,
 } from '../../../features/operation-chat';
-import { OperationArtifactActions } from '../../../features/operation-artifact';
 import { OperationDelivery } from '../../../widgets/operation-delivery';
 import styles from './OperationsChatPage.module.css';
 
@@ -200,23 +199,6 @@ export function OperationsChatPage() {
               value={set}
             />
           ))}
-          {state.deliverableSets.length === 0 && artifacts.length > 0 && (
-            <section aria-label="历史制品">
-              <Typography.Title level={2}>已生成内容</Typography.Title>
-              {artifacts.map((artifact) => (
-                <Card key={artifact.artifactId} size="small" title={artifact.title}>
-                  <Typography.Paragraph type="secondary">
-                    {artifact.platform === 'wechat_official_account'
-                      ? '微信公众号成稿'
-                      : artifact.platform === 'xiaohongshu'
-                        ? '小红书成稿'
-                        : '运营内容'}
-                  </Typography.Paragraph>
-                  <OperationArtifactActions artifact={artifact} baseUrl={baseUrl} />
-                </Card>
-              ))}
-            </section>
-          )}
           {state.error && (
             <Typography.Text type="danger" role="alert">
               {state.error}

@@ -272,6 +272,13 @@ def build_local_agent_application(
         ranked_reference_repository = MySqlRankedReferenceRepository(
             runtime_database.engine
         )
+    prompt_assembler = (
+        PromptAssembler(
+            MySqlPromptRepository(runtime_database.engine), environment="dev"
+        )
+        if runtime_database is not None
+        else None
+    )
     resolved_research_v2 = research_v2_settings or (
         ResearchPipelineSettings()
         if test_mode
@@ -441,6 +448,7 @@ def build_local_agent_application(
             runtime=runtime,
             submissions=submissions,
             ranked_reference_repository=ranked_reference_repository,
+            prompt_assembler=prompt_assembler,
         )
         intent_v2_delegate = local_live_components.delegate
         research_service_v2 = local_live_components.research_service
@@ -475,13 +483,6 @@ def build_local_agent_application(
             research_provider = FreePublicResearchProvider(recorder=execution_logger)
     if research_provider is None and research_reason_code is None:
         research_reason_code = "RESEARCH_PROVIDER_NOT_CONFIGURED"
-    prompt_assembler = (
-        PromptAssembler(
-            MySqlPromptRepository(runtime_database.engine), environment="dev"
-        )
-        if runtime_database is not None
-        else None
-    )
     resolved_deliverable_set_contract_version = deliverable_set_contract_version or (
         "deliverable-set/3"
         if not test_mode

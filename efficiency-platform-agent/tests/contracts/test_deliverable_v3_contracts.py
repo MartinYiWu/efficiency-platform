@@ -36,6 +36,43 @@ def test_industry_digest_requires_closed_count_and_continuous_ranks() -> None:
         )
 
 
+def test_industry_digest_renders_as_compact_ranked_paragraphs() -> None:
+    digest = IndustryDigestV1(
+        topic="AI 热点",
+        time_window=(
+            "2026-10-16T08:10:03+00:00 至 2026-10-19T08:10:03+00:00"
+            "（左闭右开，最近3天）"
+        ),
+        actual_count=2,
+        items=[
+            {
+                "rank": 1,
+                "title": "OpenAI 发布新模型",
+                "event_summary": "模型能力获得提升。",
+                "why_it_matters": "内容生产门槛进一步降低。",
+                "operator_insight": "可优先验证选题生成效率。",
+            },
+            {
+                "rank": 2,
+                "title": "Meta 更新智能体产品",
+                "event_summary": "产品覆盖更多消费场景。",
+                "why_it_matters": "智能体开始进入大众应用。",
+                "operator_insight": "适合持续观察用户反馈。",
+            },
+        ],
+    )
+
+    markdown = render_operation_content_v3(digest)
+
+    assert markdown == (
+        "最近3天，AI 热点已整理完成，共 2 条，按重要性排序：\n\n"
+        "1. **OpenAI 发布新模型：** 模型能力获得提升。 "
+        "内容生产门槛进一步降低。 可优先验证选题生成效率。\n\n"
+        "2. **Meta 更新智能体产品：** 产品覆盖更多消费场景。 "
+        "智能体开始进入大众应用。 适合持续观察用户反馈。"
+    )
+
+
 def test_calendar_rejects_entry_outside_requested_period() -> None:
     with pytest.raises(ValidationError, match="CALENDAR_ENTRY_OUT_OF_RANGE"):
         ContentCalendarV1.model_validate(

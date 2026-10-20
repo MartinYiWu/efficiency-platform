@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger("efficiency_platform_agent.execution")
 
 from efficiency_platform_agent.agents.operation.contracts.task import (
     ConditionImportance,
@@ -292,6 +295,8 @@ class ResearchScenarioSubmissionBuilderV2:
                     ("start", brief.time_window.start.isoformat()),
                     ("end", brief.time_window.end.isoformat()),
                     ("timezone", brief.time_window.timezone),
+                    ("boundary", brief.time_window.boundary),
+                    ("original_text", brief.time_window.original_text),
                 )
             ),
         }
@@ -439,6 +444,17 @@ class IntentV2RunPreparationDelegate:
             raise HarnessError(
                 "INTENT_V2_RUN_MISMATCH", "运行身份不一致", category="runtime"
             )
+        logger.info(
+            "event=intent_v2_brief_ready run_id=%s revision=%s topic=%s "
+            "window_text=%s window_start=%s window_end=%s target=%s",
+            pipeline.run_id,
+            prepared.brief.intent_revision,
+            prepared.brief.topic,
+            prepared.brief.time_window.original_text,
+            prepared.brief.time_window.start.isoformat(),
+            prepared.brief.time_window.end.isoformat(),
+            prepared.brief.count_policy.target,
+        )
         operation, submission = self.submission_builder.build(
             prepared.brief,
             prepared.scenario_projection,

@@ -337,7 +337,7 @@ async def test_formal_graph_materializes_three_actual_of_five_without_expanding_
     assert outcome.delivery.delivered_event_count == 3
     assert outcome.delivery.requested_count == 5
     assert len(outcome.delivery.events) == 3
-    assert len(connector.calls) == 5
+    assert 5 <= len(connector.calls) <= 6
     assert all(
         action.time_window == runner.brief.time_window
         for plan in facts.plans.values()

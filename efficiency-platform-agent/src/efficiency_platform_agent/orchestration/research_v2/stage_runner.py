@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -367,6 +368,25 @@ class LocalLiveResearchStageRunner:
                 self.brief, documents, self._lease()
             )
             result = filter_documents(self.brief, documents, decisions)
+            logger.warning(
+                "event=research_relevance_evaluated run_id=%s inputs=%s decisions=%s "
+                "outcomes=%s accepted=%s rejected=%s uncertain=%s reasons=%s",
+                self.key.run_id,
+                len(documents),
+                len(decisions),
+                tuple(sorted(Counter(item.outcome for item in decisions).items())),
+                result.accepted_count,
+                result.rejected_count,
+                result.uncertain_count,
+                tuple(
+                    sorted(
+                        Counter(
+                            item.reason_code
+                            for item in (*result.rejected, *result.uncertain)
+                        ).items()
+                    )
+                ),
+            )
             await self._save(
                 facts,
                 stage_artifact_ids={
@@ -489,10 +509,36 @@ class LocalLiveResearchStageRunner:
                 gaps=(gap,),
                 coverage_ratio=0,
             )
+        historical_actions = {
+            action.action_id: action
+            for plan in facts.plans.values()
+            for action in plan.actions
+        }
+        failed_attempts = tuple(
+            item for item in facts.attempts.values() if item.status == "failed"
+        )
+        qualified_count = len(quality.usable_event_ids)
         history = CollectionHistoryV2(
             completed_action_ids=facts.stage_artifact_ids.get("discovered_actions", ()),
             attempted_source_ids=tuple(
                 sorted({x.source_id for x in facts.attempts.values()})
+            ),
+            attempted_queries=tuple(
+                dict.fromkeys(action.query for action in historical_actions.values())
+            ),
+            failed_queries=tuple(
+                dict.fromkeys(
+                    historical_actions[item.action_id].query
+                    for item in failed_attempts
+                    if item.action_id in historical_actions
+                )
+            ),
+            failed_source_ids=tuple(
+                sorted({item.source_id for item in failed_attempts})
+            ),
+            qualified_event_count=qualified_count,
+            remaining_target_count=max(
+                0, self.brief.count_policy.target - qualified_count
             ),
             rounds=state.get("refill_rounds", 0),
             no_gain_rounds=state.get("no_gain_rounds", 0),
@@ -515,8 +561,6 @@ class LocalLiveResearchStageRunner:
                 identifier = action_fingerprint(
                     self.brief.intent_revision, gap, source.source_id, query, None
                 )
-                if identifier in history.completed_action_ids:
-                    continue
                 actions.append(
                     CollectionActionV2(
                         action_id=identifier,
@@ -531,7 +575,18 @@ class LocalLiveResearchStageRunner:
                     )
                 )
         candidates = tuple(actions[: budget.remaining_calls])
-        if candidates and state.get("initial_collection_done"):
+        logger.info(
+            "event=research_plan_proposed run_id=%s round=%s gaps=%s templates=%s "
+            "qualified_events=%s remaining_target=%s remaining_calls=%s",
+            self.key.run_id,
+            history.rounds,
+            len(quality.gaps),
+            len(candidates),
+            history.qualified_event_count,
+            history.remaining_target_count,
+            budget.remaining_calls,
+        )
+        if candidates:
             proposed = await CollectionPlanner(
                 ResearchPlanModelAdapter(self.decisions, candidates)
             ).plan_gaps(self.brief, quality, history, budget)
@@ -558,6 +613,13 @@ class LocalLiveResearchStageRunner:
             history,
             budget,
         )
+        for rejected in validated.rejected:
+            logger.info(
+                "event=research_action_rejected run_id=%s action_id=%s reason=%s",
+                self.key.run_id,
+                rejected.action_id,
+                rejected.reason_code,
+            )
         plan = CollectionPlanV2(
             actions=validated.actions,
             stop_reason=validated.stop_reason
@@ -605,9 +667,12 @@ class LocalLiveResearchStageRunner:
                 self.context,
             )
             batch = result.batch
-            logger.warning(
-                "研究 V2 发现结果 source=%s batch=%s candidates=%s result_code=%s attempts=%s",
+            logger.info(
+                "event=research_source_attempted run_id=%s source_id=%s "
+                "query_digest=%s batch=%s candidates=%s result_code=%s attempts=%s",
+                self.key.run_id,
                 action.source_id,
+                hashlib.sha256(action.query.encode("utf-8")).hexdigest()[:16],
                 batch is not None,
                 len(batch.candidates) if batch is not None else 0,
                 result.error_code,
@@ -836,9 +901,12 @@ class LocalLiveResearchStageRunner:
             evidence_refs=refs,
             source_families=SourceFamilyResolver().resolve(documents),
         )
-        batch = await ClaimExtractor(ResearchClaimModelAdapter(self.decisions)).extract(
-            events, context, self._lease()
-        )
+        batch = await ClaimExtractor(
+            ResearchClaimModelAdapter(
+                self.decisions,
+                minimum_valid_event_count=self.brief.count_policy.target,
+            )
+        ).extract(events, context, self._lease())
         if batch.rejected:
             reason_counts: dict[str, int] = {}
             for rejected in batch.rejected:
@@ -955,6 +1023,22 @@ class LocalLiveResearchStageRunner:
                 truncated=bool(facts.stage_artifact_ids.get("incomplete_actions")),
                 historical_coverage="complete" if history_complete else "unknown",
             ),
+        )
+        logger.info(
+            "event=research_progress_evaluated run_id=%s round=%s "
+            "qualified_events=%s remaining_target=%s gaps=%s no_gain_rounds=%s "
+            "historical_coverage=%s",
+            self.key.run_id,
+            state.get("refill_rounds", 0),
+            len(result.report.usable_event_ids),
+            max(
+                0,
+                self.brief.count_policy.target
+                - len(result.report.usable_event_ids),
+            ),
+            len(result.report.gaps),
+            state.get("no_gain_rounds", 0),
+            "complete" if history_complete else "unknown",
         )
         await self._save(
             facts,
