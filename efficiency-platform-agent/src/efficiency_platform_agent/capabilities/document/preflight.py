@@ -34,6 +34,8 @@ def preflight_document(
         ".jpeg",
         ".md",
         ".txt",
+        ".html",
+        ".htm",
     }
     if extension not in allowed:
         reasons.append("UNSUPPORTED_EXTENSION")
@@ -54,6 +56,8 @@ def preflight_document(
         ".parquet": {"application/vnd.apache.parquet", "application/octet-stream"},
         ".md": {"text/markdown", "text/plain"},
         ".txt": {"text/plain"},
+        ".html": {"text/html"},
+        ".htm": {"text/html"},
     }
     if extension in expected_mimes and normalized_mime not in expected_mimes[extension]:
         reasons.append("MIME_EXTENSION_MISMATCH")
