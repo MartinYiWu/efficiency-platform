@@ -76,8 +76,12 @@ class CustomerServiceIngestService:
     async def get(self, task_id: UUID) -> IngestJobView | None:
         return await self.jobs.get(task_id)
 
-    async def verify_index(self, release_id: UUID):
-        return await self.vectors.verify_index_release(str(release_id))
+    async def verify_index(self, request: Any):
+        return await self.vectors.sync_and_verify_index_release(
+            str(request.release_id),
+            str(request.knowledge_base_id),
+            request.documents,
+        )
 
     async def _process(self, request: IngestJobRequest) -> None:
         try:

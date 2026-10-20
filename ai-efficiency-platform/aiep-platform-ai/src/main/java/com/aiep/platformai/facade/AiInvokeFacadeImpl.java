@@ -30,7 +30,7 @@ public class AiInvokeFacadeImpl implements AiInvokeFacade {
     @Override public CustomerServiceReleaseAck publishCustomerServiceRelease(String releaseId, CustomerServiceReleaseRequest request) { return customerServiceAgentClient.publishRelease(releaseId, request); }
     @Override public CustomerServiceIngestView submitCustomerServiceIngest(CustomerServiceIngestRequest request) { return customerServiceAgentClient.submitIngest(request); }
     @Override public CustomerServiceIngestView queryCustomerServiceIngest(String taskId) { return customerServiceAgentClient.getIngest(taskId); }
-    @Override public CustomerServiceIndexVerifyView verifyCustomerServiceIndex(String releaseId) { return customerServiceAgentClient.verifyIndex(releaseId); }
+    @Override public CustomerServiceIndexVerifyView verifyCustomerServiceIndex(CustomerServiceIndexVerifyRequest request) { return customerServiceAgentClient.verifyIndex(request); }
     @Override public CustomerServiceRunView submitCustomerServiceMessage(String conversationId, CustomerServiceRunRequest request) { return customerServiceAgentClient.submitMessage(conversationId, request); }
     @Override public Flux<CustomerServiceRunEvent> streamCustomerServiceRunEvents(String runId, long afterSequence) { return customerServiceAgentClient.streamRun(runId, afterSequence); }
     @Override public CustomerServiceRunView cancelCustomerServiceRun(String runId) { return customerServiceAgentClient.cancelRun(runId); }

@@ -37,4 +37,9 @@ public final class KnowledgeViews {
             String id, String documentVersionId, String agentTaskId, String stage,
             String status, int attemptNo, int progressPercent, String errorCode,
             String errorMessage, LocalDateTime startedAt, LocalDateTime finishedAt) { }
+    public record IndexReleaseView(
+            String id, String knowledgeBaseId, int releaseNo, String status,
+            int documentCount, int chunkCount, String embeddingModel,
+            int embeddingDimension, String checksum, String previousReleaseId,
+            LocalDateTime createdAt, LocalDateTime publishedAt) { }
 }

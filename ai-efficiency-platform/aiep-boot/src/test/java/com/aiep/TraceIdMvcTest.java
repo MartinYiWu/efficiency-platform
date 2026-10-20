@@ -8,6 +8,7 @@ import com.aiep.aihub.application.operation.OperationAssistantService;
 import com.aiep.knowledge.application.KnowledgeBaseService;
 import com.aiep.knowledge.application.KnowledgeDocumentService;
 import com.aiep.knowledge.application.KnowledgeImportService;
+import com.aiep.knowledge.application.KnowledgeReleaseService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -29,6 +30,9 @@ class TraceIdMvcTest {
 
     @MockBean
     private KnowledgeImportService knowledgeImportService;
+
+    @MockBean
+    private KnowledgeReleaseService knowledgeReleaseService;
 
     @Autowired
     private MockMvc mockMvc;

@@ -64,11 +64,21 @@ class IngestJobView(BaseModel):
     error_message: str | None = None
 
 
+class IndexDocumentMember(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    document_id: UUID
+    document_version_id: UUID
+    document_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class IndexVerifyRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     contract_version: Literal["customer-service-index-verify/1"]
     release_id: UUID
+    knowledge_base_id: UUID
+    documents: tuple[IndexDocumentMember, ...] = Field(min_length=1)
 
 
 class IndexVerifyView(BaseModel):
@@ -117,6 +127,7 @@ class IndexVerificationResult(BaseModel):
 
 __all__ = [
     "ChunkDraft",
+    "IndexDocumentMember",
     "IndexVerificationResult",
     "IndexVerifyRequest",
     "IndexVerifyView",

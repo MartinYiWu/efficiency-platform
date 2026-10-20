@@ -42,7 +42,7 @@ def build_customer_service_ingest_router(
         if request.release_id != release_id:
             raise HTTPException(status_code=422, detail="索引版本不一致")
         try:
-            result = await service.verify_index(release_id)
+            result = await service.verify_index(request)
             return IndexVerifyView(
                 release_id=release_id,
                 status="READY",

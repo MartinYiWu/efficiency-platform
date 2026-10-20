@@ -6,4 +6,5 @@ import com.aiep.knowledge.application.KnowledgeViews;
 public interface KnowledgeFacade {
     KnowledgeViews.KnowledgeBaseView getKnowledgeBase(String id);
     KnowledgeViews.DocumentVersionView getDocumentVersion(String id);
+    KnowledgeViews.IndexReleaseView resolvePublishedIndex(String knowledgeBaseId);
 }

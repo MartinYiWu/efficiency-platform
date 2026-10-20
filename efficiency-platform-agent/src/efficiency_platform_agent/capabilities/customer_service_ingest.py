@@ -19,7 +19,9 @@ class CustomerServiceIngestPort(Protocol):
 
     async def get(self, task_id: UUID) -> IngestJobView | None: ...
 
-    async def verify_index(self, release_id: UUID) -> IndexVerificationResult: ...
+    async def verify_index(
+        self, request: IndexVerifyRequest
+    ) -> IndexVerificationResult: ...
 
 
 __all__ = [

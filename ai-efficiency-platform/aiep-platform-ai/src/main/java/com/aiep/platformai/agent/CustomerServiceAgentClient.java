@@ -3,6 +3,7 @@ package com.aiep.platformai.agent;
 import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugView;
 import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyView;
+import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestView;
 import com.aiep.platformai.api.dto.CustomerServiceReleaseAck;
@@ -20,7 +21,7 @@ public interface CustomerServiceAgentClient {
 
     CustomerServiceIngestView getIngest(String taskId);
 
-    CustomerServiceIndexVerifyView verifyIndex(String releaseId);
+    CustomerServiceIndexVerifyView verifyIndex(CustomerServiceIndexVerifyRequest request);
 
     CustomerServiceRunView submitMessage(String conversationId, CustomerServiceRunRequest request);
 

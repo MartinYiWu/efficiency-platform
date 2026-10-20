@@ -3,6 +3,7 @@ package com.aiep.platformai.agent;
 import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugView;
 import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyView;
+import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestView;
 import com.aiep.platformai.api.dto.CustomerServiceReleaseAck;
@@ -89,13 +90,13 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
     }
 
     @Override
-    public CustomerServiceIndexVerifyView verifyIndex(String releaseId) {
+    public CustomerServiceIndexVerifyView verifyIndex(CustomerServiceIndexVerifyRequest request) {
         return exchange(webClient.post()
-                .uri(AgentEndpoints.CUSTOMER_SERVICE_INDEX_VERIFY, releaseId)
+                .uri(AgentEndpoints.CUSTOMER_SERVICE_INDEX_VERIFY, request.releaseId())
                 .header(TRACE_HEADER, traceId())
                 .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue(new IndexVerifyRequest("customer-service-index-verify/1", releaseId)),
-                CustomerServiceIndexVerifyView.class, "index_verify", releaseId);
+                .bodyValue(request), CustomerServiceIndexVerifyView.class,
+                "index_verify", request.releaseId());
     }
 
     @Override
@@ -215,11 +216,6 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
 
     private static long elapsedMillis(long startedAtNanos) {
         return (System.nanoTime() - startedAtNanos) / 1_000_000L;
-    }
-
-    private record IndexVerifyRequest(
-            @com.fasterxml.jackson.annotation.JsonProperty("contract_version") String contractVersion,
-            @com.fasterxml.jackson.annotation.JsonProperty("release_id") String releaseId) {
     }
 
     private record CancelRequest(

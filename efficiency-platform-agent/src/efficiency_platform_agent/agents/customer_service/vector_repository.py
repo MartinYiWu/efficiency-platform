@@ -10,7 +10,7 @@ from uuid import UUID, uuid5
 
 from pgvector import Vector
 
-from .contracts import ChunkDraft, IndexVerificationResult
+from .contracts import ChunkDraft, IndexDocumentMember, IndexVerificationResult
 
 _CHUNK_NAMESPACE = UUID("38e6afe9-28d1-46ef-b538-d59c74b4f6e9")
 
@@ -99,7 +99,45 @@ class DocumentChunkRepository:
                 )
             )
 
+    async def sync_and_verify_index_release(
+        self,
+        release_id: str,
+        knowledge_base_id: str,
+        documents: tuple[IndexDocumentMember, ...],
+    ) -> IndexVerificationResult:
+        if len({item.document_id for item in documents}) != len(documents):
+            raise IndexVerificationError()
+        async with self.connection.transaction():
+            await _await(
+                self.connection.execute(
+                    "DELETE FROM customer_service.index_release_document "
+                    "WHERE index_release_id = %s",
+                    (release_id,),
+                )
+            )
+            await _await(
+                self.connection.executemany(
+                    "INSERT INTO customer_service.index_release_document "
+                    "(index_release_id, knowledge_base_id, document_id, "
+                    "document_version_id, document_sha256) VALUES (%s, %s, %s, %s, %s)",
+                    tuple(
+                        (
+                            release_id,
+                            knowledge_base_id,
+                            str(item.document_id),
+                            str(item.document_version_id),
+                            item.document_sha256,
+                        )
+                        for item in documents
+                    ),
+                )
+            )
+            return await self._verify_index_release(release_id)
+
     async def verify_index_release(self, release_id: str) -> IndexVerificationResult:
+        return await self._verify_index_release(release_id)
+
+    async def _verify_index_release(self, release_id: str) -> IndexVerificationResult:
         member_rows = await _rows(
             await _await(
                 self.connection.execute(

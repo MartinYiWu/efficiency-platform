@@ -42,7 +42,9 @@ class _Vectors:
     async def replace_version_chunks(self, **values):
         self.writes.append(values)
 
-    async def verify_index_release(self, release_id):
+    async def sync_and_verify_index_release(
+        self, release_id, _knowledge_base_id, _documents
+    ):
         return SimpleNamespace(
             release_id=release_id,
             document_count=2,
@@ -162,6 +164,14 @@ async def test_index_verify_route_returns_stable_contract() -> None:
             json={
                 "contract_version": "customer-service-index-verify/1",
                 "release_id": "55555555-5555-5555-5555-555555555555",
+                "knowledge_base_id": "22222222-2222-2222-2222-222222222222",
+                "documents": [
+                    {
+                        "document_id": "33333333-3333-3333-3333-333333333333",
+                        "document_version_id": "44444444-4444-4444-4444-444444444444",
+                        "document_sha256": "a" * 64,
+                    }
+                ],
             },
         )
 

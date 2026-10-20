@@ -12,6 +12,7 @@ import com.aiep.platformai.api.dto.AiVectorDeleteRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugView;
 import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyView;
+import com.aiep.platformai.api.dto.CustomerServiceIndexVerifyRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestRequest;
 import com.aiep.platformai.api.dto.CustomerServiceIngestView;
 import com.aiep.platformai.api.dto.CustomerServiceReleaseAck;
@@ -40,7 +41,7 @@ public interface AiInvokeFacade {
     CustomerServiceReleaseAck publishCustomerServiceRelease(String releaseId, CustomerServiceReleaseRequest request);
     CustomerServiceIngestView submitCustomerServiceIngest(CustomerServiceIngestRequest request);
     CustomerServiceIngestView queryCustomerServiceIngest(String taskId);
-    CustomerServiceIndexVerifyView verifyCustomerServiceIndex(String releaseId);
+    CustomerServiceIndexVerifyView verifyCustomerServiceIndex(CustomerServiceIndexVerifyRequest request);
     CustomerServiceRunView submitCustomerServiceMessage(String conversationId, CustomerServiceRunRequest request);
     Flux<CustomerServiceRunEvent> streamCustomerServiceRunEvents(String runId, long afterSequence);
     CustomerServiceRunView cancelCustomerServiceRun(String runId);
