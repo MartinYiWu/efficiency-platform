@@ -134,10 +134,16 @@ class CustomerServiceAnswer(StrictModel):
             if self.company_sections or self.general_advice is None:
                 raise ValueError("通用建议回答区块无效")
         elif self.answer_mode is AnswerMode.CLARIFY:
-            if self.company_sections or self.general_advice or not self.clarification_question:
+            if (
+                self.company_sections
+                or self.general_advice
+                or not self.clarification_question
+            ):
                 raise ValueError("澄清回答必须且只能包含一个问题")
         elif self.answer_mode is AnswerMode.INSUFFICIENT_EVIDENCE and (
-            self.company_sections or self.general_advice or not self.insufficiency_reason
+            self.company_sections
+            or self.general_advice
+            or not self.insufficiency_reason
         ):
             raise ValueError("证据不足回答区块无效")
         return self
@@ -174,7 +180,9 @@ class RunStatus(StrEnum):
 
 
 class RunView(StrictModel):
-    contract_version: Literal["customer-service-run-view/1"] = "customer-service-run-view/1"
+    contract_version: Literal["customer-service-run-view/1"] = (
+        "customer-service-run-view/1"
+    )
     run_id: UUID
     request_id: str
     status: RunStatus
@@ -192,7 +200,9 @@ class RunEventPayload(StrictModel):
 
 
 class RunEvent(StrictModel):
-    contract_version: Literal["customer-service-run-event/1"] = "customer-service-run-event/1"
+    contract_version: Literal["customer-service-run-event/1"] = (
+        "customer-service-run-event/1"
+    )
     run_id: UUID
     sequence: int = Field(gt=0)
     event_type: str = Field(min_length=1)
@@ -210,6 +220,7 @@ class DebugRequest(StrictModel):
     contract_version: Literal["customer-service-rag-debug/1"]
     agent_key: Literal["customer-service"]
     question: str = Field(min_length=1)
+    agent_release_id: UUID
     agent_version_id: UUID
     rag_policy_version_id: UUID
     knowledge_bindings: tuple[DebugKnowledgeBinding, ...] = Field(min_length=1)

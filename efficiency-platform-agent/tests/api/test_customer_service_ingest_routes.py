@@ -75,6 +75,8 @@ def _payload() -> dict[str, object]:
         "knowledge_base_id": "22222222-2222-2222-2222-222222222222",
         "document_id": "33333333-3333-3333-3333-333333333333",
         "document_version_id": "44444444-4444-4444-4444-444444444444",
+        "document_title": "公司制度",
+        "version_no": 1,
         "file_name": "制度.md",
         "content_type": "text/markdown",
         "size_bytes": len(CONTENT),

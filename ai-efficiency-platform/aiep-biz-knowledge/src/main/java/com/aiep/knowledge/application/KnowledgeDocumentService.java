@@ -203,6 +203,7 @@ public class KnowledgeDocumentService {
             CustomerServiceIngestView accepted = ai.submitCustomerServiceIngest(new CustomerServiceIngestRequest(
                     "customer-service-ingest/1", prepared.task().id(), KnowledgeBaseService.TENANT_ID,
                     prepared.document().knowledgeBaseId(), prepared.document().id(), prepared.version().id(),
+                    prepared.document().title(), prepared.version().versionNo(),
                     prepared.file().originalName(), prepared.file().contentType(), prepared.file().sizeBytes(),
                     prepared.file().sha256(), readUrl.toString()));
             LocalDateTime now = LocalDateTime.now();

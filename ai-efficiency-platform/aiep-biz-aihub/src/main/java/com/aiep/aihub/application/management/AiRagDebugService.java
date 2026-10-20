@@ -1,6 +1,7 @@
 package com.aiep.aihub.application.management;
 
 import com.aiep.aihub.repository.management.AiManagementMappers;
+import com.aiep.aihub.repository.management.AiReleasePO;
 import com.aiep.platformai.api.AiInvokeFacade;
 import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugView;
@@ -29,11 +30,16 @@ public class AiRagDebugService {
         if (agent == null || version == null || !agent.id().equals(version.agentDefinitionId())
                 || rag == null || !agent.id().equals(rag.ownerAgentDefinitionId()))
             throw new IllegalArgumentException("AI_ASSET_OWNER_MISMATCH");
+        AiReleasePO release = repository.findActiveRelease(agent.id(), "dev");
+        var policyBinding = repository.findPolicyBinding(version.id());
+        if (release == null || !release.agentVersionId().equals(version.id())
+                || policyBinding == null || !request.ragPolicyVersionId().equals(policyBinding.ragPolicyId()))
+            throw new IllegalArgumentException("AI_RAG_DEBUG_ACTIVE_RELEASE_MISMATCH");
         if (request.knowledgeBindings() == null || request.knowledgeBindings().isEmpty()
                 || request.knowledgeBindings().stream().anyMatch(item -> !repository.isIndexReleaseReady(item.indexReleaseId())))
             throw new IllegalArgumentException("AI_RAG_DEBUG_INDEX_NOT_READY");
         CustomerServiceDebugRequest agentRequest = new CustomerServiceDebugRequest(
-                "customer-service-rag-debug/1", request.agentKey(), request.question(), request.agentVersionId(),
+                "customer-service-rag-debug/1", request.agentKey(), request.question(), release.id(), request.agentVersionId(),
                 request.ragPolicyVersionId(), request.knowledgeBindings().stream()
                         .map(item -> new CustomerServiceDebugRequest.KnowledgeBinding(item.knowledgeBaseId(), item.indexReleaseId())).toList());
         CustomerServiceDebugView response = ai.debugCustomerServiceRag(agentRequest);

@@ -32,6 +32,20 @@ export const agentVersionSchema = z
 export const agentDetailSchema = z
   .object({ definition: agentDefinitionSchema, versions: z.array(agentVersionSchema) })
   .strict();
+export const agentReleaseSchema = z
+  .object({
+    id: z.string(),
+    agentDefinitionId: z.string(),
+    agentVersionId: z.string(),
+    environment: z.string(),
+    releaseStatus: z.string(),
+    releaseSnapshotId: z.string(),
+    releasedBy: z.string(),
+    releasedAt: z.string(),
+    rolledBackFromReleaseId: z.string().nullable(),
+    createdAt: z.string(),
+  })
+  .strict();
 export const promptDefinitionSchema = z
   .object({
     id: z.string(),

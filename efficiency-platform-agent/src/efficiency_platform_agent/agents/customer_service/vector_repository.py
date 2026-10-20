@@ -47,6 +47,8 @@ class DocumentChunkRepository:
         knowledge_base_id: str,
         document_id: str,
         document_version_id: str,
+        document_title: str,
+        version_no: int,
         chunks: tuple[ChunkDraft, ...],
         embeddings: tuple[tuple[float, ...], ...],
     ) -> None:
@@ -68,6 +70,8 @@ class DocumentChunkRepository:
                 knowledge_base_id,
                 document_id,
                 document_version_id,
+                document_title,
+                version_no,
                 chunk.chunk_no,
                 chunk.section_path,
                 chunk.page_no,
@@ -92,10 +96,11 @@ class DocumentChunkRepository:
                 self.connection.executemany(
                     "INSERT INTO customer_service.document_chunk "
                     "(chunk_id, tenant_id, knowledge_base_id, document_id, "
-                    "document_version_id, chunk_no, section_path, page_no, content, "
+                    "document_version_id, document_title, version_no, chunk_no, "
+                    "section_path, page_no, content, "
                     "content_hash, token_count, embedding, embedding_model, "
                     "embedding_dimension) VALUES "
-                    "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     parameters,
                 )
             )
@@ -151,14 +156,21 @@ class DocumentChunkRepository:
         result = await _await(
             self.connection.execute(
                 "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
-                "c.document_version_id::text,m.index_release_id::text,c.section_path,"
-                "c.page_no,c.content,c.content_hash,1-(c.embedding <=> %s) AS score "
+                "c.document_version_id::text,m.index_release_id::text,c.document_title,"
+                "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
+                "1-(c.embedding <=> %s) AS score "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
                 "ON m.document_version_id=c.document_version_id "
                 "WHERE c.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
                 "ORDER BY c.embedding <=> %s LIMIT %s",
-                (Vector(list(vector)), tenant_id, [str(item) for item in index_release_ids], Vector(list(vector)), limit),
+                (
+                    Vector(list(vector)),
+                    tenant_id,
+                    [str(item) for item in index_release_ids],
+                    Vector(list(vector)),
+                    limit,
+                ),
             )
         )
         return self._evidence(await _rows(result))
@@ -176,8 +188,8 @@ class DocumentChunkRepository:
         result = await _await(
             self.connection.execute(
                 "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
-                "c.document_version_id::text,m.index_release_id::text,c.section_path,"
-                "c.page_no,c.content,c.content_hash,"
+                "c.document_version_id::text,m.index_release_id::text,c.document_title,"
+                "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
                 "ts_rank_cd(to_tsvector('simple',c.content), plainto_tsquery('simple',%s)) AS score "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
@@ -185,7 +197,13 @@ class DocumentChunkRepository:
                 "WHERE c.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
                 "AND to_tsvector('simple',c.content) @@ plainto_tsquery('simple',%s) "
                 "ORDER BY score DESC,c.chunk_id LIMIT %s",
-                (query, tenant_id, [str(item) for item in index_release_ids], query, limit),
+                (
+                    query,
+                    tenant_id,
+                    [str(item) for item in index_release_ids],
+                    query,
+                    limit,
+                ),
             )
         )
         return self._evidence(await _rows(result))
@@ -199,13 +217,13 @@ class DocumentChunkRepository:
                 document_id=UUID(str(row[2])),
                 document_version_id=UUID(str(row[3])),
                 index_release_id=UUID(str(row[4])),
-                section_path=None if row[5] is None else str(row[5]),
-                page_no=None if row[6] is None else int(row[6]),
-                content=str(row[7]),
-                content_hash=str(row[8]),
-                score=float(row[9]),
-                document_title=f"文档 {row[2]}",
-                version_no=1,
+                document_title=str(row[5]),
+                version_no=int(row[6]),
+                section_path=None if row[7] is None else str(row[7]),
+                page_no=None if row[8] is None else int(row[8]),
+                content=str(row[9]),
+                content_hash=str(row[10]),
+                score=float(row[11]),
             )
             for row in rows
         )

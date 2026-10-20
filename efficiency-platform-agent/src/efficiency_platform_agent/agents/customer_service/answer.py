@@ -54,7 +54,9 @@ async def generate_answer(
         "question": question,
         "intent": intent.model_dump(mode="json"),
         "evidence": [item.model_dump(mode="json") for item in evidence],
-        "sufficiency": None if sufficiency is None else sufficiency.model_dump(mode="json"),
+        "sufficiency": None
+        if sufficiency is None
+        else sufficiency.model_dump(mode="json"),
     }
     try:
         answer = await gateway.complete(stage, value, CustomerServiceAnswer)
@@ -66,11 +68,15 @@ async def generate_answer(
             "validation_error": str(first_error),
         }
         try:
-            answer = await gateway.complete("answer_repair", repair_input, CustomerServiceAnswer)
+            answer = await gateway.complete(
+                "answer_repair", repair_input, CustomerServiceAnswer
+            )
             validate_citation_closure(answer, evidence)
             return answer
         except (ValidationError, CitationGuardError, ValueError):
-            return insufficient_answer("模型回答未通过结构和引用校验，已停止输出公司事实。")
+            return insufficient_answer(
+                "模型回答未通过结构和引用校验，已停止输出公司事实。"
+            )
 
 
 __all__ = ["generate_answer", "insufficient_answer"]

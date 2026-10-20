@@ -31,9 +31,7 @@ class InMemoryReleaseRepository:
         self.values[release_id] = bundle
         return bundle
 
-    async def get(
-        self, release_id: UUID
-    ) -> CustomerServiceReleaseBundle | None:
+    async def get(self, release_id: UUID) -> CustomerServiceReleaseBundle | None:
         return self.values.get(release_id)
 
     async def get_active(self) -> tuple[UUID, CustomerServiceReleaseBundle] | None:
@@ -87,9 +85,7 @@ class MySqlReleaseRepository:
             )
         return bundle
 
-    async def get(
-        self, release_id: UUID
-    ) -> CustomerServiceReleaseBundle | None:
+    async def get(self, release_id: UUID) -> CustomerServiceReleaseBundle | None:
         async with self.engine.connect() as connection:
             result = await connection.execute(
                 text(
@@ -117,7 +113,9 @@ class MySqlReleaseRepository:
             row = result.first()
         if row is None:
             return None
-        return UUID(str(row.release_id)), CustomerServiceReleaseBundle.model_validate(row.snapshot_json)
+        return UUID(str(row.release_id)), CustomerServiceReleaseBundle.model_validate(
+            row.snapshot_json
+        )
 
 
 __all__ = [

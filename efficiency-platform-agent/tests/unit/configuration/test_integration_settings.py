@@ -48,6 +48,23 @@ def test_explicit_env_file_cannot_be_overridden_by_process_environment(monkeypat
     )
 
 
+def test_env_file_reads_spring_style_development_defaults():
+    with TemporaryDirectory() as folder:
+        path = Path(folder) / ".env"
+        path.write_text(
+            "AGENT_EMBEDDING_DASHSCOPE_BASE_URL=${vector.embedding.base-url:https://example.invalid/v1}\n"
+            "AGENT_EMBEDDING_DASHSCOPE_API_KEY=${vector.embedding.api-key:synthetic-key}\n"
+            "AGENT_EMBEDDING_DIMENSIONS=${vector.embedding.dimensions:1024}\n",
+            encoding="utf-8",
+        )
+        settings = S7IntegrationSettings.from_env_file(path)
+    assert settings.embedding_dashscope_base_url is not None
+    assert settings.embedding_dashscope_base_url.get_secret_value() == "https://example.invalid/v1"
+    assert settings.embedding_dashscope_api_key is not None
+    assert settings.embedding_dashscope_api_key.get_secret_value() == "synthetic-key"
+    assert settings.embedding_dimensions == 1024
+
+
 def test_secret_value_is_not_exposed_by_settings_rendering():
     secret = "synthetic-secret-value"
     settings = S7IntegrationSettings(deepseek_api_key=secret)

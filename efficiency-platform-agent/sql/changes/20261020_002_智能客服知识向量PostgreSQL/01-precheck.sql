@@ -1,4 +1,4 @@
--- 只读预检；目标数据库必须是 vector.datasource 当前指向的开发库 jjcy_ai_vector。
+-- 只读预检；目标数据库必须是开发库 vector。
 SELECT current_database() AS target_database,
        current_user AS current_user_name,
        current_setting('server_version') AS server_version,

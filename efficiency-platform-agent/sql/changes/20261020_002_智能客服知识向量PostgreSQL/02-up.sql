@@ -7,6 +7,8 @@ CREATE TABLE customer_service.document_chunk (
     knowledge_base_id UUID NOT NULL,
     document_id UUID NOT NULL,
     document_version_id UUID NOT NULL,
+    document_title TEXT NOT NULL CHECK (length(btrim(document_title)) > 0),
+    version_no INTEGER NOT NULL CHECK (version_no > 0),
     chunk_no INTEGER NOT NULL CHECK (chunk_no > 0),
     section_path TEXT,
     page_no INTEGER CHECK (page_no IS NULL OR page_no > 0),

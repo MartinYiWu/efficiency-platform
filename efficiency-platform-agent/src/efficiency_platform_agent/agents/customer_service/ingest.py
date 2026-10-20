@@ -102,7 +102,9 @@ class CustomerServiceIngestService:
 
             await self._progress(request.task_id, "PARSE", 20)
             parsed = await _maybe_await(self.parser.parse(content, request.file_name))
-            markdown = _markdown(parsed)
+            markdown = _markdown(
+                parsed, allow_empty=request.content_type == "application/pdf"
+            )
             if request.content_type == "application/pdf" and len(markdown.strip()) < 80:
                 if self.ocr is None:
                     raise _IngestFailure("KB_OCR_REQUIRED", "扫描文档需要 OCR")
@@ -121,6 +123,8 @@ class CustomerServiceIngestService:
                 knowledge_base_id=str(request.knowledge_base_id),
                 document_id=str(request.document_id),
                 document_version_id=str(request.document_version_id),
+                document_title=request.document_title,
+                version_no=request.version_no,
                 chunks=chunks,
                 embeddings=embeddings,
             )
@@ -198,14 +202,14 @@ async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
 
-def _markdown(parsed: Any) -> str:
+def _markdown(parsed: Any, *, allow_empty: bool = False) -> str:
     if isinstance(parsed, str):
         value = parsed
     elif isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
         value = parsed["text"]
     else:
         raise _IngestFailure("KB_PARSE_RESULT_INVALID", "文档解析结果无效")
-    if not value.strip():
+    if not value.strip() and not allow_empty:
         raise _IngestFailure("KB_PARSE_RESULT_EMPTY", "文档解析结果为空")
     return value
 

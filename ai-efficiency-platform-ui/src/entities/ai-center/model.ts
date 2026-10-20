@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   agentDefinitionSchema,
   agentDetailSchema,
+  agentReleaseSchema,
   debugViewSchema,
   feedbackSchema,
   modelPolicySchema,
@@ -14,6 +15,7 @@ import {
 
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type AgentDetail = z.infer<typeof agentDetailSchema>;
+export type AgentRelease = z.infer<typeof agentReleaseSchema>;
 export type PromptDefinition = z.infer<typeof promptDefinitionSchema>;
 export type PromptDetail = z.infer<typeof promptDetailSchema>;
 export type ModelPolicy = z.infer<typeof modelPolicySchema>;

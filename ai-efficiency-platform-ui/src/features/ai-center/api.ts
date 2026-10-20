@@ -1,6 +1,7 @@
 import {
   agentDefinitionSchema,
   agentDetailSchema,
+  agentReleaseSchema,
   debugViewSchema,
   feedbackSchema,
   modelPolicySchema,
@@ -47,6 +48,11 @@ const json = (method: string, value?: object): RequestInit => ({
 });
 export const listAgents = () => call('/api/aihub/agents', agentDefinitionSchema.array());
 export const getAgent = (id: string) => call(`/api/aihub/agents/${id}`, agentDetailSchema);
+export const listAgentReleases = (agentKey: string) =>
+  call(
+    `/api/aihub/agents/${encodeURIComponent(agentKey)}/releases?environment=dev`,
+    agentReleaseSchema.array(),
+  );
 export const createAgentVersion = (id: string, value: object) =>
   call(
     `/api/aihub/agents/${id}/versions`,

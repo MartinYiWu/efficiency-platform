@@ -4,10 +4,17 @@ import { useEffect, useState } from 'react';
 import type {
   AgentDefinition,
   AgentDetail,
+  AgentRelease,
   DebugView,
   RagPolicy,
 } from '../../entities/ai-center/model';
-import { executeRagDebug, getAgent, listAgents, listPolicies } from '../../features/ai-center/api';
+import {
+  executeRagDebug,
+  getAgent,
+  listAgentReleases,
+  listAgents,
+  listPolicies,
+} from '../../features/ai-center/api';
 import styles from './AiCenter.module.css';
 
 export function RagDebugPage() {
@@ -15,6 +22,8 @@ export function RagDebugPage() {
   const [agentId, setAgentId] = useState('');
   const [detail, setDetail] = useState<AgentDetail>();
   const [policies, setPolicies] = useState<RagPolicy[]>([]);
+  const [releases, setReleases] = useState<AgentRelease[]>([]);
+  const [agentReleaseId, setAgentReleaseId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [policyId, setPolicyId] = useState('');
   const [baseId, setBaseId] = useState('');
@@ -29,17 +38,33 @@ export function RagDebugPage() {
     setAgentId(id);
     setVersionId('');
     setPolicyId('');
+    setAgentReleaseId('');
     setResult(undefined);
     try {
-      const [nextDetail, nextPolicies] = await Promise.all([getAgent(id), listPolicies(id)]);
+      const agent = agents.find((item) => item.id === id);
+      if (!agent) return;
+      const [nextDetail, nextPolicies, nextReleases] = await Promise.all([
+        getAgent(id),
+        listPolicies(id),
+        listAgentReleases(agent.agentKey),
+      ]);
       setDetail(nextDetail);
       setPolicies(nextPolicies.ragPolicies);
+      setReleases(nextReleases);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载失败');
     }
   };
   const run = async () => {
-    if (!agentId || !versionId || !policyId || !baseId || !releaseId || !question.trim()) {
+    if (
+      !agentId ||
+      !agentReleaseId ||
+      !versionId ||
+      !policyId ||
+      !baseId ||
+      !releaseId ||
+      !question.trim()
+    ) {
       message.warning('请完整填写调试输入');
       return;
     }
@@ -51,6 +76,7 @@ export function RagDebugPage() {
         await executeRagDebug({
           agentKey: agent.agentKey,
           question,
+          agentReleaseId,
           agentVersionId: versionId,
           ragPolicyVersionId: policyId,
           knowledgeBindings: [{ knowledgeBaseId: baseId, indexReleaseId: releaseId }],
@@ -78,6 +104,18 @@ export function RagDebugPage() {
               value={agentId || undefined}
               onChange={(value) => void selectAgent(value)}
               options={agents.map((item) => ({ label: item.name, value: item.id }))}
+            />
+            <Select
+              placeholder="ACTIVE Release"
+              value={agentReleaseId || undefined}
+              onChange={(value) => {
+                setAgentReleaseId(value);
+                const release = releases.find((item) => item.id === value);
+                if (release) setVersionId(release.agentVersionId);
+              }}
+              options={releases
+                .filter((item) => item.releaseStatus === 'ACTIVE')
+                .map((item) => ({ label: `${item.environment} · ${item.id}`, value: item.id }))}
             />
             <Select
               placeholder="Agent 版本"

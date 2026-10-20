@@ -19,6 +19,8 @@ class IngestJobRequest(BaseModel):
     knowledge_base_id: UUID
     document_id: UUID
     document_version_id: UUID
+    document_title: str = Field(min_length=1, max_length=255)
+    version_no: int = Field(gt=0)
     file_name: str = Field(min_length=1, max_length=255)
     content_type: Literal[
         "application/pdf",

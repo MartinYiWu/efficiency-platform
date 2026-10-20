@@ -158,6 +158,15 @@ class S7IntegrationSettings(BaseModel):
     deepseek_fast_model: SecretStr | None = None
     deepseek_balanced_model: SecretStr | None = None
     deepseek_strong_model: SecretStr | None = None
+    embedding_dashscope_base_url: SecretStr | None = None
+    embedding_dashscope_api_key: SecretStr | None = None
+    embedding_model: str = "text-embedding-v4"
+    embedding_dimensions: int = 1024
+    rerank_dashscope_api_key: SecretStr | None = None
+    rerank_dashscope_base_url: str = (
+        "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
+    )
+    rerank_model: str = "qwen3-rerank"
     cos_secret_id: SecretStr | None = None
     cos_secret_key: SecretStr | None = None
     cos_region: SecretStr | None = None
@@ -236,7 +245,7 @@ class S7IntegrationSettings(BaseModel):
         for k, v in vals.items():
             if k.startswith("llm_deepseek_"):
                 k = k.removeprefix("llm_")
-            normalized[k] = v
+            normalized[k] = _spring_default(v)
         fields = {
             k: normalized.get(k.upper(), normalized.get(k))
             for k in cls.model_fields
@@ -274,6 +283,16 @@ class S7IntegrationSettings(BaseModel):
         return tuple(
             labels[k] for k in self._KEYS.get(g, ()) if getattr(self, k) is None
         )
+
+
+def _spring_default(value: str) -> str:
+    """读取开发配置中的 ${name:default}，不解析外部环境变量。"""
+    if value.startswith("${") and value.endswith("}"):
+        expression = value[2:-1]
+        if ":" not in expression:
+            return ""
+        return expression.split(":", 1)[1]
+    return value
 
 
 __all__ = [

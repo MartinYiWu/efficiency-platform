@@ -22,16 +22,31 @@ class RerankPort(Protocol):
 
 class RetrievalRepository(Protocol):
     async def vector_search(
-        self, *, tenant_id: str, index_release_ids: tuple[UUID, ...], vector: tuple[float, ...], limit: int
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        vector: tuple[float, ...],
+        limit: int,
     ) -> tuple[Evidence, ...]: ...
 
     async def fts_search(
-        self, *, tenant_id: str, index_release_ids: tuple[UUID, ...], query: str, limit: int
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        query: str,
+        limit: int,
     ) -> tuple[Evidence, ...]: ...
 
 
 class CustomerServiceRetrieval:
-    def __init__(self, repository: RetrievalRepository, embedding: EmbeddingPort, reranker: RerankPort) -> None:
+    def __init__(
+        self,
+        repository: RetrievalRepository,
+        embedding: EmbeddingPort,
+        reranker: RerankPort,
+    ) -> None:
         self.repository = repository
         self.embedding = embedding
         self.reranker = reranker
@@ -79,7 +94,10 @@ class CustomerServiceRetrieval:
             tuple(item.content for item in fused),
             top_n=min(policy.rerank_top_k, len(fused)),
         )
-        return tuple(fused[index].model_copy(update={"score": score}) for index, score in reranked)
+        return tuple(
+            fused[index].model_copy(update={"score": score})
+            for index, score in reranked
+        )
 
 
 def _rrf(rankings: list[tuple[Evidence, ...]], constant: int = 60) -> list[Evidence]:
@@ -88,8 +106,15 @@ def _rrf(rankings: list[tuple[Evidence, ...]], constant: int = 60) -> list[Evide
     for ranking in rankings:
         for rank, item in enumerate(ranking, 1):
             values[item.chunk_id] = item
-            scores[item.chunk_id] = scores.get(item.chunk_id, 0.0) + 1.0 / (constant + rank)
-    return [values[key].model_copy(update={"score": score}) for key, score in sorted(scores.items(), key=lambda pair: (-pair[1], str(pair[0])))]
+            scores[item.chunk_id] = scores.get(item.chunk_id, 0.0) + 1.0 / (
+                constant + rank
+            )
+    return [
+        values[key].model_copy(update={"score": score})
+        for key, score in sorted(
+            scores.items(), key=lambda pair: (-pair[1], str(pair[0]))
+        )
+    ]
 
 
 __all__ = ["CustomerServiceRetrieval", "RetrievalRepository"]

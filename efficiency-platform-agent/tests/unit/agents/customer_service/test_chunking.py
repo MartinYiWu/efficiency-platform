@@ -94,12 +94,16 @@ async def test_replace_chunks_is_one_transaction_and_validates_dimension() -> No
         knowledge_base_id="11111111-1111-1111-1111-111111111111",
         document_id="22222222-2222-2222-2222-222222222222",
         document_version_id="33333333-3333-3333-3333-333333333333",
+        document_title="测试文档",
+        version_no=2,
         chunks=(chunk,),
         embeddings=((0.0,) * 1024,),
     )
 
     assert "DELETE FROM customer_service.document_chunk" in connection.calls[0][0]
     assert "INSERT INTO customer_service.document_chunk" in connection.calls[1][0]
+    inserted = connection.calls[1][1][0]
+    assert inserted[5:7] == ("测试文档", 2)
 
     with pytest.raises(ValueError, match="EMBEDDING_DIMENSION_INVALID"):
         await repository.replace_version_chunks(
@@ -107,6 +111,8 @@ async def test_replace_chunks_is_one_transaction_and_validates_dimension() -> No
             knowledge_base_id="11111111-1111-1111-1111-111111111111",
             document_id="22222222-2222-2222-2222-222222222222",
             document_version_id="33333333-3333-3333-3333-333333333333",
+            document_title="测试文档",
+            version_no=2,
             chunks=(chunk,),
             embeddings=((0.0,) * 3,),
         )

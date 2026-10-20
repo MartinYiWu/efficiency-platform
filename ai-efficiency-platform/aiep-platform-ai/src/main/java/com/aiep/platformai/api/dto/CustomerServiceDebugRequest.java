@@ -10,6 +10,7 @@ public record CustomerServiceDebugRequest(
         @JsonProperty("contract_version") String contractVersion,
         @JsonProperty("agent_key") String agentKey,
         @JsonProperty("question") String question,
+        @JsonProperty("agent_release_id") String agentReleaseId,
         @JsonProperty("agent_version_id") String agentVersionId,
         @JsonProperty("rag_policy_version_id") String ragPolicyVersionId,
         @JsonProperty("knowledge_bindings") List<KnowledgeBinding> knowledgeBindings) {
@@ -20,6 +21,7 @@ public record CustomerServiceDebugRequest(
             throw new IllegalArgumentException("agent_key 必须为 customer-service");
         }
         CustomerServiceDtoSupport.requireText(question, "question");
+        CustomerServiceDtoSupport.requireText(agentReleaseId, "agent_release_id");
         CustomerServiceDtoSupport.requireText(agentVersionId, "agent_version_id");
         CustomerServiceDtoSupport.requireText(ragPolicyVersionId, "rag_policy_version_id");
         knowledgeBindings = CustomerServiceDtoSupport.immutableList(knowledgeBindings, "knowledge_bindings");
