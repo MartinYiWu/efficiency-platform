@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import runpy
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -39,17 +40,48 @@ def test_main_builds_application_and_starts_uvicorn_without_reading_env(
     def fail_if_read(*args: object, **kwargs: object) -> object:
         raise AssertionError("正式入口不应读取 .env 内容")
 
-    monkeypatch.setattr(application_main, "build_local_agent_application", build_application)
+    monkeypatch.setattr(
+        application_main, "build_local_agent_application", build_application
+    )
     monkeypatch.setattr(application_main.uvicorn, "run", run_server)
     monkeypatch.setattr(builtins, "open", fail_if_read)
 
-    application_main.main(["--env-file", "local.env", "--host", "0.0.0.0", "--port", "9090"])
+    application_main.main(
+        ["--env-file", "local.env", "--host", "0.0.0.0", "--port", "9090"]
+    )
 
     assert calls == {
         "env_file": "local.env",
         "app": "application",
         "server": {"host": "0.0.0.0", "port": 9090, "log_level": "info"},
     }
+
+
+def test_main_selects_psycopg_compatible_event_loop_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows 服务入口必须使用 psycopg 异步连接支持的 Selector 循环。"""
+    from efficiency_platform_agent import main as application_main
+
+    selected: list[object] = []
+    policy = object()
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        application_main.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy
+    )
+    monkeypatch.setattr(
+        application_main.asyncio, "set_event_loop_policy", selected.append
+    )
+    monkeypatch.setattr(
+        application_main,
+        "build_local_agent_application",
+        lambda **_: SimpleNamespace(app="application"),
+    )
+    monkeypatch.setattr(application_main.uvicorn, "run", lambda *_, **__: None)
+
+    application_main.main([])
+
+    assert selected == [policy]
 
 
 def test_legacy_script_forwards_to_package_main(

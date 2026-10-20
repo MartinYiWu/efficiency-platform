@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import sys
 from collections.abc import Sequence
 
 import uvicorn
@@ -24,6 +26,8 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> None:
     """装配本地服务并交由 Uvicorn 启动。"""
     arguments = parse_arguments(argv)
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     application = build_local_agent_application(env_file=arguments.env_file)
     uvicorn.run(
         application.app,
