@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
@@ -40,6 +41,17 @@ class RetrievalRepository(Protocol):
     ) -> tuple[Evidence, ...]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RetrievalTrace:
+    original_query: str
+    rewritten_queries: tuple[str, ...]
+    index_release_ids: tuple[UUID, ...]
+    vector_candidates: tuple[Evidence, ...]
+    fts_candidates: tuple[Evidence, ...]
+    fused_candidates: tuple[Evidence, ...]
+    reranked_evidence: tuple[Evidence, ...]
+
+
 class CustomerServiceRetrieval:
     def __init__(
         self,
@@ -58,7 +70,7 @@ class CustomerServiceRetrieval:
         question: str,
         gateway: StructuredStageGateway,
         bundle: CustomerServiceReleaseBundle,
-    ) -> tuple[Evidence, ...]:
+    ) -> RetrievalTrace:
         policy = bundle.rag_policy
         rewrite = await gateway.complete(
             "rewrite",
@@ -69,34 +81,52 @@ class CustomerServiceRetrieval:
         vectors = await self.embedding.embed(queries)
         release_ids = tuple(item.index_release_id for item in bundle.knowledge_bindings)
         rankings: list[tuple[Evidence, ...]] = []
+        vector_candidates: list[Evidence] = []
+        fts_candidates: list[Evidence] = []
         for query, vector in zip(queries, vectors, strict=True):
-            rankings.append(
-                await self.repository.vector_search(
-                    tenant_id=tenant_id,
-                    index_release_ids=release_ids,
-                    vector=vector,
-                    limit=policy.vector_top_k,
-                )
+            vector_items = await self.repository.vector_search(
+                tenant_id=tenant_id,
+                index_release_ids=release_ids,
+                vector=vector,
+                limit=policy.vector_top_k,
             )
-            rankings.append(
-                await self.repository.fts_search(
-                    tenant_id=tenant_id,
-                    index_release_ids=release_ids,
-                    query=query,
-                    limit=policy.fts_top_k,
-                )
+            fts_items = await self.repository.fts_search(
+                tenant_id=tenant_id,
+                index_release_ids=release_ids,
+                query=query,
+                limit=policy.fts_top_k,
             )
+            rankings.extend((vector_items, fts_items))
+            vector_candidates.extend(vector_items)
+            fts_candidates.extend(fts_items)
         fused = _rrf(rankings)[: policy.fusion_top_k]
         if not fused:
-            return ()
+            return RetrievalTrace(
+                question,
+                queries,
+                release_ids,
+                tuple(vector_candidates),
+                tuple(fts_candidates),
+                (),
+                (),
+            )
         reranked = await self.reranker.rerank(
             question,
             tuple(item.content for item in fused),
             top_n=min(policy.rerank_top_k, len(fused)),
         )
-        return tuple(
+        evidence = tuple(
             fused[index].model_copy(update={"score": score})
             for index, score in reranked
+        )
+        return RetrievalTrace(
+            question,
+            queries,
+            release_ids,
+            tuple(vector_candidates),
+            tuple(fts_candidates),
+            tuple(fused),
+            evidence,
         )
 
 
@@ -117,4 +147,8 @@ def _rrf(rankings: list[tuple[Evidence, ...]], constant: int = 60) -> list[Evide
     ]
 
 
-__all__ = ["CustomerServiceRetrieval", "RetrievalRepository"]
+__all__ = [
+    "CustomerServiceRetrieval",
+    "RetrievalRepository",
+    "RetrievalTrace",
+]

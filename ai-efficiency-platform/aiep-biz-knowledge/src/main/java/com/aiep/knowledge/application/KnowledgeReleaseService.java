@@ -20,12 +20,10 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
-@ConditionalOnBean({KnowledgeMappers.class, KnowledgeReleaseMappers.class})
 public class KnowledgeReleaseService {
     private final KnowledgeMappers knowledge;
     private final KnowledgeReleaseMappers releases;

@@ -29,12 +29,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.zip.ZipFile;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@ConditionalOnBean(FileObjectMapper.class)
 public class FileObjectService implements FileFacade {
     private static final long MAX_FILE_SIZE = 10L * 1024 * 1024;
     private static final Duration MAX_READ_URL_TTL = Duration.ofHours(1);

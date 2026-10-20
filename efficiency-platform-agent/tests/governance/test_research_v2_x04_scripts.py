@@ -22,6 +22,7 @@ from scripts.research_v2_acceptance import (
 from scripts.research_v2_preflight import build_preflight, create_live_probe
 
 ROOT = Path(__file__).parents[2]
+FIXTURE_NOW = datetime(2026, 9, 17, 8, tzinfo=UTC)
 
 
 def test_preflight_default_is_plan_only_and_never_calls_probe() -> None:
@@ -37,6 +38,7 @@ def test_preflight_default_is_plan_only_and_never_calls_probe() -> None:
         / "docs/superpowers/sdd/intent-research-v2/来源准入候选记录.json",
         execute=False,
         probe=forbidden_probe,
+        now=FIXTURE_NOW,
     )
 
     assert result["status"] == "PLAN_ONLY"
@@ -56,6 +58,7 @@ def test_preflight_execute_fails_closed_before_probe_for_unverified_sources() ->
         execute=True,
         authorization_file=None,
         probe=lambda url: calls.append(url) or {"status_code": 200},
+        now=FIXTURE_NOW,
     )
 
     assert result["status"] == "BLOCKED"
@@ -96,6 +99,7 @@ def test_admission_record_separates_live_verified_and_unprobed_sources() -> None
         source_config=ROOT / "config/research_sources.toml",
         admission_records=record_path,
         execute=False,
+        now=FIXTURE_NOW,
     )
 
     assert result["eligible_source_count"] == 3

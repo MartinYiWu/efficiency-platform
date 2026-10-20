@@ -5,7 +5,6 @@ import com.aiep.knowledge.application.KnowledgeImportService;
 import com.aiep.knowledge.application.KnowledgeViews;
 import com.aiep.platformcore.api.ApiResponse;
 import java.time.LocalDate;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -19,7 +18,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/knowledge")
-@ConditionalOnBean({KnowledgeDocumentService.class, KnowledgeImportService.class})
 public class KnowledgeDocumentController {
     private final KnowledgeDocumentService documents;
     private final KnowledgeImportService imports;

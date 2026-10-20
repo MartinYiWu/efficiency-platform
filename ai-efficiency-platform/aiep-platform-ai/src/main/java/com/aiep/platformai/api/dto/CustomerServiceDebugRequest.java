@@ -9,6 +9,7 @@ import java.util.List;
 public record CustomerServiceDebugRequest(
         @JsonProperty("contract_version") String contractVersion,
         @JsonProperty("agent_key") String agentKey,
+        @JsonProperty("tenant_id") String tenantId,
         @JsonProperty("question") String question,
         @JsonProperty("agent_release_id") String agentReleaseId,
         @JsonProperty("agent_version_id") String agentVersionId,
@@ -20,6 +21,7 @@ public record CustomerServiceDebugRequest(
         if (!"customer-service".equals(agentKey)) {
             throw new IllegalArgumentException("agent_key 必须为 customer-service");
         }
+        CustomerServiceDtoSupport.requireText(tenantId, "tenant_id");
         CustomerServiceDtoSupport.requireText(question, "question");
         CustomerServiceDtoSupport.requireText(agentReleaseId, "agent_release_id");
         CustomerServiceDtoSupport.requireText(agentVersionId, "agent_version_id");

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import text
@@ -14,6 +15,12 @@ from .release_bundle import CustomerServiceReleaseBundle
 
 class ReleaseConflictError(RuntimeError):
     code = "CS_AGENT_RELEASE_CONFLICT"
+
+
+def _decode_snapshot(value: Any) -> CustomerServiceReleaseBundle:
+    if isinstance(value, (str, bytes, bytearray)):
+        return CustomerServiceReleaseBundle.model_validate_json(value)
+    return CustomerServiceReleaseBundle.model_validate(value)
 
 
 class InMemoryReleaseRepository:
@@ -61,7 +68,7 @@ class MySqlReleaseRepository:
             if row is not None:
                 if row.checksum != bundle.snapshot_checksum:
                     raise ReleaseConflictError("Release ID 已绑定其他 checksum")
-                return CustomerServiceReleaseBundle.model_validate(row.snapshot_json)
+                return _decode_snapshot(row.snapshot_json)
             await connection.execute(
                 text(
                     "INSERT INTO agent_release_bundle "
@@ -98,7 +105,7 @@ class MySqlReleaseRepository:
         return (
             None
             if value is None
-            else CustomerServiceReleaseBundle.model_validate(value)
+            else _decode_snapshot(value)
         )
 
     async def get_active(self) -> tuple[UUID, CustomerServiceReleaseBundle] | None:
@@ -113,9 +120,7 @@ class MySqlReleaseRepository:
             row = result.first()
         if row is None:
             return None
-        return UUID(str(row.release_id)), CustomerServiceReleaseBundle.model_validate(
-            row.snapshot_json
-        )
+        return UUID(str(row.release_id)), _decode_snapshot(row.snapshot_json)
 
 
 __all__ = [

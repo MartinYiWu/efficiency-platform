@@ -50,38 +50,45 @@ def test_main_builds_application_and_starts_uvicorn_without_reading_env(
         ["--env-file", "local.env", "--host", "0.0.0.0", "--port", "9090"]
     )
 
+    expected_server: dict[str, object] = {
+        "host": "0.0.0.0",
+        "port": 9090,
+        "log_level": "info",
+    }
+    expected_server["loop"] = (
+        "efficiency_platform_agent.main:selector_loop_factory"
+        if sys.platform == "win32"
+        else "auto"
+    )
     assert calls == {
         "env_file": "local.env",
         "app": "application",
-        "server": {"host": "0.0.0.0", "port": 9090, "log_level": "info"},
+        "server": expected_server,
     }
 
 
-def test_main_selects_psycopg_compatible_event_loop_on_windows(
+def test_main_passes_psycopg_compatible_loop_to_uvicorn_on_windows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Windows 服务入口必须使用 psycopg 异步连接支持的 Selector 循环。"""
     from efficiency_platform_agent import main as application_main
 
     selected: list[object] = []
-    policy = object()
     monkeypatch.setattr(sys, "platform", "win32")
-    monkeypatch.setattr(
-        application_main.asyncio, "WindowsSelectorEventLoopPolicy", lambda: policy
-    )
-    monkeypatch.setattr(
-        application_main.asyncio, "set_event_loop_policy", selected.append
-    )
     monkeypatch.setattr(
         application_main,
         "build_local_agent_application",
         lambda **_: SimpleNamespace(app="application"),
     )
-    monkeypatch.setattr(application_main.uvicorn, "run", lambda *_, **__: None)
+    monkeypatch.setattr(
+        application_main.uvicorn,
+        "run",
+        lambda *_, **options: selected.append(options["loop"]),
+    )
 
     application_main.main([])
 
-    assert selected == [policy]
+    assert selected == ["efficiency_platform_agent.main:selector_loop_factory"]
 
 
 def test_legacy_script_forwards_to_package_main(

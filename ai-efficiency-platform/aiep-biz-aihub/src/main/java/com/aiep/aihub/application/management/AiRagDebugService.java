@@ -39,7 +39,7 @@ public class AiRagDebugService {
                 || request.knowledgeBindings().stream().anyMatch(item -> !repository.isIndexReleaseReady(item.indexReleaseId())))
             throw new IllegalArgumentException("AI_RAG_DEBUG_INDEX_NOT_READY");
         CustomerServiceDebugRequest agentRequest = new CustomerServiceDebugRequest(
-                "customer-service-rag-debug/1", request.agentKey(), request.question(), release.id(), request.agentVersionId(),
+                "customer-service-rag-debug/1", request.agentKey(), "dev", request.question(), release.id(), request.agentVersionId(),
                 request.ragPolicyVersionId(), request.knowledgeBindings().stream()
                         .map(item -> new CustomerServiceDebugRequest.KnowledgeBinding(item.knowledgeBaseId(), item.indexReleaseId())).toList());
         CustomerServiceDebugView response = ai.debugCustomerServiceRag(agentRequest);

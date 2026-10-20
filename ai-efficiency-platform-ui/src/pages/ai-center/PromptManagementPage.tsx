@@ -11,7 +11,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import type { PromptDefinition, PromptDetail } from '../../entities/ai-center/model';
@@ -37,21 +37,25 @@ export function PromptManagementPage() {
       .then(setPrompts)
       .catch((error: Error) => message.error(error.message));
   }, [agentId]);
-  const roleMessage = useMemo(
-    () => detail?.messages.find((item) => item.role === role),
-    [detail, role],
-  );
-  useEffect(() => {
-    setContent(roleMessage?.contentTemplate ?? '');
-    setTrusted(roleMessage?.trustedInstruction ?? false);
-  }, [roleMessage]);
+  const roleMessage = detail?.messages.find((item) => item.role === role);
+  const showRole = (
+    nextRole: 'SYSTEM' | 'USER' | 'ASSISTANT',
+    nextDetail: PromptDetail | undefined = detail,
+  ) => {
+    const messageTemplate = nextDetail?.messages.find((item) => item.role === nextRole);
+    setRole(nextRole);
+    setContent(messageTemplate?.contentTemplate ?? '');
+    setTrusted(messageTemplate?.trustedInstruction ?? false);
+  };
   const select = async (prompt: PromptDefinition) => {
     try {
       const version = await createPromptVersion(prompt.id, {
-        semanticVersion: `draft-${Date.now()}`,
+        semanticVersion: `draft-${crypto.randomUUID()}`,
         changeSummary: '后台编辑草稿',
       });
-      setDetail(await getPromptVersion(version.id));
+      const nextDetail = await getPromptVersion(version.id);
+      setDetail(nextDetail);
+      showRole('SYSTEM', nextDetail);
     } catch (error) {
       message.error(error instanceof Error ? error.message : '无法创建草稿');
     }
@@ -135,7 +139,7 @@ export function PromptManagementPage() {
             <Space direction="vertical" size={16} style={{ width: '100%' }}>
               <Select
                 value={role}
-                onChange={setRole}
+                onChange={(value) => showRole(value)}
                 options={['SYSTEM', 'USER', 'ASSISTANT'].map((value) => ({
                   value,
                   label: `${value} 消息`,

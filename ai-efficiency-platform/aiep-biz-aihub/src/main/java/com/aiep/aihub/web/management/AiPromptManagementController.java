@@ -9,7 +9,6 @@ import com.aiep.aihub.repository.management.AiManagementPOs.PromptVersionPO;
 import com.aiep.platformcore.api.ApiResponse;
 import java.util.List;
 import java.util.Map;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,7 +20,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/aihub/prompts")
-@ConditionalOnBean(AiPromptManagementService.class)
 public class AiPromptManagementController {
     private final AiPromptManagementService service;
 

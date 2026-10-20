@@ -8,7 +8,6 @@ import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledg
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.platformcore.api.ApiResponse;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,7 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/aihub/agents")
-@ConditionalOnBean(AiAgentManagementService.class)
 public class AiAgentManagementController {
     private final AiAgentManagementService service;
 
@@ -48,7 +46,7 @@ public class AiAgentManagementController {
             @PathVariable String id, @RequestBody VersionRequest request) {
         return ApiResponse.success(service.createVersion(
                 id, request.semanticVersion(), request.graphKey(),
-                request.graphVersion(), request.changeSummary()));
+                request.graphVersion(), request.changeSummary(), request.sourceVersionId()));
     }
 
     @PutMapping("/versions/{id}")
@@ -85,7 +83,8 @@ public class AiAgentManagementController {
 
     public record AgentRequest(String agentKey, String name, String description, String agentType) { }
     public record VersionRequest(
-            String semanticVersion, String graphKey, String graphVersion, String changeSummary) { }
+            String semanticVersion, String graphKey, String graphVersion,
+            String changeSummary, String sourceVersionId) { }
     public record TransitionRequest(String status) { }
     public record AssetIdRequest(String assetId) { }
     public record KnowledgeBindingRequest(

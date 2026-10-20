@@ -36,11 +36,10 @@ export function RagPolicyPage() {
     void listAgents().then(setAgents);
   }, []);
   useEffect(() => {
-    if (agentId)
-      void listPolicies(agentId)
-        .then((value) => setItems(value.ragPolicies))
-        .catch((error: Error) => message.error(error.message));
-    else setItems([]);
+    if (!agentId) return;
+    void listPolicies(agentId)
+      .then((value) => setItems(value.ragPolicies))
+      .catch((error: Error) => message.error(error.message));
   }, [agentId]);
   const save = async () => {
     const value = await form.validateFields();

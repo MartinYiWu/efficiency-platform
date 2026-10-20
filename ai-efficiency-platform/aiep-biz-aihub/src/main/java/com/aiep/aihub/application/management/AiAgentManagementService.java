@@ -6,18 +6,16 @@ import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.PromptBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.RagPolicyPO;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnBean(JdbcTemplate.class)
 public class AiAgentManagementService {
     private static final String USER_ID = "1";
     private static final Map<String, String> NEXT_STATUS = Map.of(
@@ -52,6 +50,14 @@ public class AiAgentManagementService {
     public AgentVersionPO createVersion(
             String agentId, String semanticVersion, String graphKey,
             String graphVersion, String changeSummary) {
+        return createVersion(
+                agentId, semanticVersion, graphKey, graphVersion, changeSummary, null);
+    }
+
+    @Transactional
+    public AgentVersionPO createVersion(
+            String agentId, String semanticVersion, String graphKey,
+            String graphVersion, String changeSummary, String sourceVersionId) {
         requiredAgent(agentId);
         AgentVersionPO value = new AgentVersionPO(
                 UUID.randomUUID().toString(), agentId, required(semanticVersion, "版本号"),
@@ -59,7 +65,40 @@ public class AiAgentManagementService {
                 "DRAFT", required(changeSummary, "变更说明"), USER_ID,
                 LocalDateTime.now(), null);
         repository.insertAgentVersion(value);
+        if (sourceVersionId != null && !sourceVersionId.isBlank()) {
+            cloneBindings(value, sourceVersionId.strip());
+        }
         return value;
+    }
+
+    private void cloneBindings(AgentVersionPO target, String sourceVersionId) {
+        AgentVersionPO source = requiredVersion(sourceVersionId);
+        if (!target.agentDefinitionId().equals(source.agentDefinitionId())) {
+            throw new AiManagementException("AI_ASSET_OWNER_MISMATCH", "源 Agent 版本归属不匹配");
+        }
+        AgentVersionPolicyBindingPO policies = repository.findPolicyBinding(sourceVersionId);
+        if (policies != null) {
+            if (policies.modelPolicyId() != null) {
+                repository.upsertModelPolicyBinding(target.id(), policies.modelPolicyId());
+            }
+            if (policies.ragPolicyId() != null) {
+                repository.upsertRagPolicyBinding(target.id(), policies.ragPolicyId());
+            }
+        }
+        for (PromptBindingPO binding : repository.listPromptBindings(sourceVersionId)) {
+            repository.insertPromptBinding(new PromptBindingPO(
+                    target.id(), binding.stageKey(), binding.ordinal(),
+                    binding.promptDefinitionId(), binding.promptVersionId(), binding.required()));
+        }
+        List<AgentVersionKnowledgeBindingPO> knowledge = repository
+                .listKnowledgeBindings(sourceVersionId).stream()
+                .map(binding -> new AgentVersionKnowledgeBindingPO(
+                        target.id(), binding.knowledgeBaseId(), binding.indexReleaseId(),
+                        binding.priority(), binding.required()))
+                .toList();
+        if (!knowledge.isEmpty()) {
+            repository.replaceKnowledgeBindings(target.id(), knowledge);
+        }
     }
 
     @Transactional

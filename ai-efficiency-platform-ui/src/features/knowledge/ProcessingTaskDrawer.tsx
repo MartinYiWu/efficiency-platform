@@ -13,6 +13,7 @@ interface Props {
 
 export function ProcessingTaskDrawer({ taskId, open, onClose }: Props) {
   const [task, setTask] = useState<ProcessingTask>();
+  const taskStatus = task?.status;
   useEffect(() => {
     if (!open || !taskId) return;
     let active = true;
@@ -24,13 +25,13 @@ export function ProcessingTaskDrawer({ taskId, open, onClose }: Props) {
         .catch((error: Error) => message.error(error.message));
     refresh();
     const timer = window.setInterval(() => {
-      if (!task || !terminal.has(task.status)) refresh();
+      if (!taskStatus || !terminal.has(taskStatus)) refresh();
     }, 3000);
     return () => {
       active = false;
       window.clearInterval(timer);
     };
-  }, [open, task?.status, taskId]);
+  }, [open, taskId, taskStatus]);
   return (
     <Drawer title="处理任务" open={open} onClose={onClose} width={520}>
       {task && (

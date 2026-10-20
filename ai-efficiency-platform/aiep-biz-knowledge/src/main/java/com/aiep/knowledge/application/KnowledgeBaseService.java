@@ -9,12 +9,10 @@ import com.aiep.knowledge.repository.KnowledgeMappers;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-@ConditionalOnBean(KnowledgeMappers.class)
 public class KnowledgeBaseService {
     public static final String TENANT_ID = "dev";
     public static final String USER_ID = "1";

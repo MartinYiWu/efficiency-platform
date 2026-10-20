@@ -38,12 +38,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
-@ConditionalOnBean(JdbcTemplate.class)
 public class AiReleaseService {
     private static final String USER_ID = "1";
     private final AiManagementMappers repository;

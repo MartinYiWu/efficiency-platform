@@ -38,7 +38,15 @@ export function KnowledgeDocumentPage() {
     }
   };
   useEffect(() => {
-    void load();
+    let active = true;
+    void getDocument(documentId)
+      .then((value) => {
+        if (active) setDocument(value);
+      })
+      .catch((error: Error) => message.error(error.message));
+    return () => {
+      active = false;
+    };
   }, [documentId]);
   const upload = async () => {
     const file = files[0]?.originFileObj;

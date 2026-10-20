@@ -9,12 +9,10 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@ConditionalOnBean(KnowledgeMappers.class)
 public class KnowledgeImportService {
     private static final int MAX_FILES = 50;
     private static final long MAX_BATCH_SIZE = 200L * 1024 * 1024;

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -14,6 +16,8 @@ from efficiency_platform_agent.agents.customer_service.service import (
 from efficiency_platform_agent.agents.customer_service.state import (
     AnswerMode,
     CustomerServiceAnswer,
+    DebugKnowledgeBinding,
+    DebugRequest,
     GeneralAdvice,
 )
 from efficiency_platform_agent.api.customer_service_routes import (
@@ -92,3 +96,88 @@ async def test_unknown_fields_are_rejected() -> None:
             },
         )
         assert response.status_code == 422
+
+
+async def test_background_failure_writes_safe_diagnostic_log(caplog) -> None:
+    class FailingGraph:
+        async def run(self, request, bundle, gateway):
+            raise RuntimeError("provider-secret-must-not-be-logged")
+
+    service = CustomerServiceRunService(
+        FailingGraph(), Releases(), lambda _: object()  # type: ignore[arg-type]
+    )
+    request = {
+        "contract_version": "customer-service-run/1",
+        "request_id": "req-failure-log",
+        "conversation_id": str(CONVERSATION_ID),
+        "tenant_id": "tenant-1",
+        "user_id": "user-1",
+        "agent_release_id": str(RELEASE_ID),
+        "message": "问题",
+        "history": [],
+    }
+    failure_app = FastAPI()
+    failure_app.include_router(build_customer_service_router(service))
+    with caplog.at_level(logging.ERROR, logger="CustomerServiceRun"):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=failure_app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                f"/v1/customer-service/conversations/{CONVERSATION_ID}/messages",
+                json=request,
+            )
+            run_id = response.json()["run_id"]
+            await client.get(f"/v1/customer-service/runs/{run_id}/events")
+
+    log = caplog.text
+    assert "event=customer_service_run_failed" in log
+    assert "error_type=RuntimeError" in log
+    assert "provider-secret-must-not-be-logged" not in log
+
+
+async def test_rag_debug_uses_requested_tenant_for_retrieval() -> None:
+    knowledge_base_id = UUID("80000000-0000-0000-0000-000000000003")
+    index_release_id = UUID("80000000-0000-0000-0000-000000000004")
+
+    class DebugGraph(Graph):
+        request = None
+
+        async def run(self, request, bundle, gateway):
+            self.request = request
+            return await super().run(request, bundle, gateway)
+
+    class DebugReleases:
+        async def get(self, release_id):
+            return SimpleNamespace(
+                knowledge_bindings=(
+                    SimpleNamespace(
+                        knowledge_base_id=knowledge_base_id,
+                        index_release_id=index_release_id,
+                    ),
+                )
+            )
+
+    graph = DebugGraph()
+    service = CustomerServiceRunService(  # type: ignore[arg-type]
+        graph, DebugReleases(), lambda _: object()
+    )
+    await service.debug(
+        DebugRequest(
+            contract_version="customer-service-rag-debug/1",
+            agent_key="customer-service",
+            tenant_id="dev",
+            question="发布流程是什么？",
+            agent_release_id=RELEASE_ID,
+            agent_version_id=RELEASE_ID,
+            rag_policy_version_id=RELEASE_ID,
+            knowledge_bindings=(
+                DebugKnowledgeBinding(
+                    knowledge_base_id=knowledge_base_id,
+                    index_release_id=index_release_id,
+                ),
+            ),
+        )
+    )
+
+    assert graph.request is not None
+    assert graph.request.tenant_id == "dev"

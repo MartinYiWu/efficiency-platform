@@ -11,6 +11,7 @@ import com.aiep.platformai.agent.HttpCustomerServiceAgentClient;
 import com.aiep.platformai.api.dto.CustomerServiceRunEvent;
 import com.aiep.platformai.api.dto.CustomerServiceRunRequest;
 import com.aiep.platformai.api.dto.CustomerServiceRunView;
+import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -72,6 +73,18 @@ class CustomerServiceAgentContractTest {
                 """;
 
         assertThrows(Exception.class, () -> objectMapper.readValue(payload, CustomerServiceRunView.class));
+    }
+
+    @Test
+    void ragDebugContractCarriesTenantBoundary() throws Exception {
+        CustomerServiceDebugRequest request = new CustomerServiceDebugRequest(
+                "customer-service-rag-debug/1", "customer-service", "dev", "发布流程是什么？",
+                "release-1", "version-1", "rag-1",
+                List.of(new CustomerServiceDebugRequest.KnowledgeBinding("kb-1", "index-1")));
+
+        String json = objectMapper.writeValueAsString(request);
+
+        assertEquals("dev", objectMapper.readTree(json).get("tenant_id").asText());
     }
 
     @Test

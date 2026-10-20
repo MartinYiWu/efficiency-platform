@@ -11,7 +11,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import type { AgentDetail } from '../../entities/ai-center/model';
@@ -24,13 +24,14 @@ export function AgentDetailPage() {
   const [detail, setDetail] = useState<AgentDetail>();
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
-  const load = () =>
+  const load = useCallback(() =>
     getAgent(agentId)
       .then(setDetail)
-      .catch((error: Error) => message.error(error.message));
+      .catch((error: Error) => message.error(error.message)), [agentId]);
   useEffect(() => {
-    void load();
-  }, [agentId]);
+    const timer = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(timer);
+  }, [load]);
   const create = async () => {
     const value = await form.validateFields();
     await createAgentVersion(agentId, value);

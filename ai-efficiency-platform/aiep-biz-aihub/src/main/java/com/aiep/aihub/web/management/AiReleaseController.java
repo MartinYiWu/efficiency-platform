@@ -4,7 +4,6 @@ import com.aiep.aihub.application.management.AiReleaseService;
 import com.aiep.aihub.repository.management.AiReleasePO;
 import com.aiep.platformcore.api.ApiResponse;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/aihub/agents/{agentKey}")
-@ConditionalOnBean(AiReleaseService.class)
 public class AiReleaseController {
     private final AiReleaseService service;
 

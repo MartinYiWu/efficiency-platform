@@ -344,9 +344,15 @@ async def test_real_composition_root_registers_local_execution_logger(monkeypatc
         local_real_factory, "LocalExecutionLogger", lambda: execution_logger
     )
     settings = S7IntegrationSettings(
-            runtime_database_url=SecretStr(
-                "mysql+asyncmy://synthetic:synthetic@127.0.0.1:3306/ai_efficiency_platform_agent"
-            ),
+        runtime_database_url=SecretStr(
+            "mysql+asyncmy://synthetic:synthetic@127.0.0.1:3306/ai_efficiency_platform_agent"
+        ),
+        vector_database_url=SecretStr(
+            "postgresql://synthetic:synthetic@127.0.0.1:5432/jjcy_ai_vector"
+        ),
+        embedding_dashscope_base_url=SecretStr("https://synthetic.invalid/v1"),
+        embedding_dashscope_api_key=SecretStr("synthetic-embedding-key"),
+        rerank_dashscope_api_key=SecretStr("synthetic-rerank-key"),
         deepseek_base_url=SecretStr("https://synthetic.invalid"),
         deepseek_api_key=SecretStr("synthetic-key"),
         deepseek_fast_model=SecretStr("synthetic-fast"),

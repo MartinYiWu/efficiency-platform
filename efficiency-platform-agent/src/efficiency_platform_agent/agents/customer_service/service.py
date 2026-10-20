@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import traceback
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -12,6 +15,10 @@ from .graph import CustomerServiceGraph, GraphResult
 from .intent import StructuredStageGateway
 from .release_bundle import CustomerServiceReleaseBundle
 from .renderer import answer_deltas
+from .retrieval_snapshot_repository import (
+    InMemoryRetrievalSnapshotRepository,
+    RetrievalSnapshotRepository,
+)
 from .state import (
     CustomerServiceRunRequest,
     DebugRequest,
@@ -20,6 +27,8 @@ from .state import (
     RunStatus,
     RunView,
 )
+
+logger = logging.getLogger("CustomerServiceRun")
 
 
 class ReleaseRepositoryPort(Protocol):
@@ -48,10 +57,14 @@ class CustomerServiceRunService:
         gateway_factory: Callable[
             [CustomerServiceReleaseBundle], StructuredStageGateway
         ],
+        retrieval_snapshots: RetrievalSnapshotRepository | None = None,
     ) -> None:
         self.graph = graph
         self.releases = releases
         self.gateway_factory = gateway_factory
+        self.retrieval_snapshots = (
+            retrieval_snapshots or InMemoryRetrievalSnapshotRepository()
+        )
         self._runs: dict[UUID, _Run] = {}
         self._requests: dict[tuple[str, str], UUID] = {}
         self._lock = asyncio.Lock()
@@ -145,16 +158,18 @@ class CustomerServiceRunService:
             contract_version="customer-service-run/1",
             request_id=f"debug-{uuid4().hex}",
             conversation_id=uuid4(),
-            tenant_id="debug",
+            tenant_id=request.tenant_id,
             user_id="debug",
             agent_release_id=release_id,
             message=request.question,
             history=(),
         )
+        debug_run_id = uuid4()
         result = await self.graph.run(run_request, bundle, self.gateway_factory(bundle))
+        await self.retrieval_snapshots.save(debug_run_id, result)
         return {
             "contract_version": "customer-service-rag-debug-view/1",
-            "debug_run_id": str(uuid4()),
+            "debug_run_id": str(debug_run_id),
             "status": "SUCCEEDED",
             "stages": [
                 {
@@ -199,6 +214,7 @@ class CustomerServiceRunService:
             result = await self.graph.run(
                 run.request, bundle, self.gateway_factory(bundle)
             )
+            await self.retrieval_snapshots.save(run.view.run_id, result)
             self._publish_result(run, result)
         except asyncio.CancelledError:
             return
@@ -206,6 +222,19 @@ class CustomerServiceRunService:
             run.view = run.view.model_copy(update={"status": RunStatus.FAILED})
             code = str(getattr(error, "code", "CUSTOMER_SERVICE_RUN_FAILED"))
             message = str(getattr(error, "safe_message", "智能客服运行失败"))
+            frames = " > ".join(
+                f"{Path(frame.filename).name}:{frame.name}:{frame.lineno}"
+                for frame in traceback.extract_tb(error.__traceback__)
+            )
+            logger.error(
+                "event=customer_service_run_failed run_id=%s release_id=%s "
+                "error_code=%s error_type=%s frames=%s",
+                run.view.run_id,
+                run.request.agent_release_id,
+                code,
+                type(error).__name__,
+                frames,
+            )
             self._append(
                 run,
                 "run.failed",

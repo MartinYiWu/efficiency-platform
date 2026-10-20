@@ -11,13 +11,11 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@ConditionalOnBean(JdbcTemplate.class)
 public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     private final JdbcTemplate jdbc;
 
@@ -53,7 +51,7 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
 
     @Override public void insertMessage(MessagePO v) {
         jdbc.update("INSERT INTO ai_customer_service_message "
-                + "(id,conversation_id,tenant_id,role,content,status,answer_mode,run_id,client_request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                + "(id,conversation_id,tenant_id,role,content_markdown,status,answer_mode,run_id,client_request_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 v.id(), v.conversationId(), v.tenantId(), v.role(), v.content(), v.status(), v.answerMode(), v.runId(), v.clientRequestId(), ts(v.createdAt()));
     }
     @Override public MessagePO findMessage(String id, String tenantId) {
@@ -80,7 +78,7 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
                 JdbcCustomerServiceMappers::message, conversationId, tenantId, limit);
     }
     @Override public void completeAssistantMessage(String id, String content, String answerMode, String status) {
-        jdbc.update("UPDATE ai_customer_service_message SET content=?,answer_mode=?,status=? WHERE id=?", content, answerMode, status, id);
+        jdbc.update("UPDATE ai_customer_service_message SET content_markdown=?,answer_mode=?,status=? WHERE id=?", content, answerMode, status, id);
     }
 
     @Override public void insertRun(RunPO v) {
@@ -168,7 +166,7 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     private static Instant instant(ResultSet r, String name) throws SQLException { Timestamp v = r.getTimestamp(name); return v == null ? null : v.toInstant(); }
     private static Timestamp ts(Instant value) { return value == null ? null : Timestamp.from(value); }
     private static ConversationPO conversation(ResultSet r, int n) throws SQLException { return new ConversationPO(r.getString("id"),r.getString("tenant_id"),r.getString("user_id"),r.getString("title"),r.getString("status"),instant(r,"last_message_at"),instant(r,"created_at"),instant(r,"updated_at")); }
-    private static MessagePO message(ResultSet r, int n) throws SQLException { return new MessagePO(r.getString("id"),r.getString("conversation_id"),r.getString("tenant_id"),r.getString("role"),r.getString("content"),r.getString("status"),r.getString("answer_mode"),r.getString("run_id"),r.getString("client_request_id"),instant(r,"created_at")); }
+    private static MessagePO message(ResultSet r, int n) throws SQLException { return new MessagePO(r.getString("id"),r.getString("conversation_id"),r.getString("tenant_id"),r.getString("role"),r.getString("content_markdown"),r.getString("status"),r.getString("answer_mode"),r.getString("run_id"),r.getString("client_request_id"),instant(r,"created_at")); }
     private static RunPO run(ResultSet r, int n) throws SQLException { return new RunPO(r.getString("id"),r.getString("conversation_id"),r.getString("tenant_id"),r.getString("user_message_id"),r.getString("agent_run_id"),r.getString("agent_release_id"),r.getString("status"),r.getString("answer_mode"),r.getLong("last_event_sequence"),r.getString("failure_code"),r.getString("failure_message"),instant(r,"started_at"),instant(r,"finished_at"),instant(r,"created_at"),instant(r,"updated_at")); }
     private static RunStepPO step(ResultSet r, int n) throws SQLException { return new RunStepPO(r.getString("id"),r.getString("run_id"),r.getLong("sequence_no"),r.getString("stage"),r.getString("status"),r.getString("public_summary"),r.getString("internal_payload"),instant(r,"started_at"),instant(r,"finished_at")); }
     private static CitationPO citation(ResultSet r, int n) throws SQLException { return new CitationPO(r.getString("id"),r.getString("run_id"),r.getString("message_id"),r.getInt("citation_no"),r.getString("knowledge_base_id"),r.getString("document_id"),r.getString("document_version_id"),r.getString("index_release_id"),r.getString("chunk_id"),r.getString("document_title"),r.getInt("version_no"),r.getString("section_path"),(Integer)r.getObject("page_no"),r.getString("quoted_text"),r.getString("content_hash"),instant(r,"created_at")); }

@@ -42,6 +42,10 @@ from efficiency_platform_agent.agents.customer_service.release_repository import
 from efficiency_platform_agent.agents.customer_service.retrieval import (
     CustomerServiceRetrieval,
 )
+from efficiency_platform_agent.agents.customer_service.retrieval_snapshot_repository import (
+    InMemoryRetrievalSnapshotRepository,
+    MySqlRetrievalSnapshotRepository,
+)
 from efficiency_platform_agent.agents.customer_service.service import (
     CustomerServiceRunService,
     ReleaseRepositoryPort,
@@ -317,6 +321,7 @@ def build_local_agent_application(
         run_event_store = InMemoryRunEventStore()
         ranked_reference_repository = InMemoryRankedReferenceRepository()
         customer_service_release_repository = InMemoryReleaseRepository()
+        customer_service_retrieval_snapshots = InMemoryRetrievalSnapshotRepository()
     else:
         runtime_database = MySqlRuntimeDatabase(
             _secret(resolved, "runtime_database_url")
@@ -327,6 +332,9 @@ def build_local_agent_application(
             runtime_database.engine
         )
         customer_service_release_repository = MySqlReleaseRepository(
+            runtime_database.engine
+        )
+        customer_service_retrieval_snapshots = MySqlRetrievalSnapshotRepository(
             runtime_database.engine
         )
     resolved_research_v2 = research_v2_settings or (
@@ -687,6 +695,7 @@ def build_local_agent_application(
             customer_service_graph,
             customer_service_release_repository,
             customer_service_gateway,
+            customer_service_retrieval_snapshots,
         )
         customer_service_resources = (embedding_client, vector_connection)
 

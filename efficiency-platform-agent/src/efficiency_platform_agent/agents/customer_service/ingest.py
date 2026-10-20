@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import io
+import logging
+import traceback
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -16,6 +19,8 @@ from efficiency_platform_agent.capabilities.document.preflight import preflight_
 from .chunking import chunk_document
 from .contracts import IngestJobRequest, IngestJobView, IngestStage, ParsedDocument
 from .ingest_repository import InMemoryIngestJobRepository
+
+logger = logging.getLogger("CustomerServiceIngest")
 
 
 class HttpDocumentDownloader:
@@ -156,6 +161,19 @@ class CustomerServiceIngestService:
         except Exception as error:  # noqa: BLE001 - 后台任务必须归一化全部失败
             failure = _map_failure(error)
             current = await self.jobs.get(request.task_id)
+            frames = " > ".join(
+                f"{Path(frame.filename).name}:{frame.name}:{frame.lineno}"
+                for frame in traceback.extract_tb(error.__traceback__)
+            )
+            logger.error(
+                "event=customer_service_ingest_failed task_id=%s stage=%s "
+                "error_code=%s error_type=%s frames=%s",
+                request.task_id,
+                current.stage if current is not None else "PREFLIGHT",
+                failure.code,
+                type(error).__name__,
+                frames,
+            )
             await self.jobs.save(
                 IngestJobView(
                     task_id=request.task_id,

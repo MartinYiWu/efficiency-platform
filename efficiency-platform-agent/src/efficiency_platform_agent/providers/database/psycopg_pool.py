@@ -68,10 +68,14 @@ class PsycopgPoolConnection:
     ) -> Any:
         current = self._current.get()
         if current is not None:
-            return await current.executemany(sql, params)
+            async with current.cursor() as cursor:
+                return await cursor.executemany(sql, params)
         await self._open()
-        async with self.pool.connection() as connection:
-            return await connection.executemany(sql, params)
+        async with (
+            self.pool.connection() as connection,
+            connection.cursor() as cursor,
+        ):
+            return await cursor.executemany(sql, params)
 
     async def ping(self) -> None:
         await self.execute("SELECT 1")

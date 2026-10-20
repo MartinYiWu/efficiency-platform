@@ -54,33 +54,74 @@ class ReleaseStructuredModelGateway:
         )
         policy = self.bundle.model_policy
         schema = output_type.model_json_schema()
-        result = await self.provider.complete(
-            ProviderRequest(
-                contract_version="provider-request/1",
-                messages=messages,
-                options=JsonObject(
-                    (
-                        ("logical_model", policy.model_name),
-                        ("temperature", float(policy.temperature)),
-                        ("top_p", float(policy.top_p)),
-                        ("max_tokens", policy.max_output_tokens),
-                        ("response_format", JsonObject((("type", "json_object"),))),
-                        ("json_schema", _freeze(schema)),
+        messages += (
+            ProviderMessage(
+                role="developer",
+                content=(
+                    "[OUTPUT CONTRACT]\n"
+                    "只返回一个符合下列 JSON Schema 的 JSON 对象，不要输出 Markdown、解释或代码围栏。\n"
+                    "JSON Schema:\n"
+                    + json.dumps(
+                        schema,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
                     )
                 ),
-                timeout_ms=policy.read_timeout_ms,
+            ),
+        )
+        options = JsonObject(
+            (
+                ("logical_model", policy.model_name),
+                ("temperature", float(policy.temperature)),
+                ("top_p", float(policy.top_p)),
+                ("max_tokens", policy.max_output_tokens),
+                ("response_format", JsonObject((("type", "json_object"),))),
+                ("json_schema", _freeze(schema)),
             )
         )
-        if result.error is not None:
-            raise StructuredModelError(result.error.code, result.error.safe_message)
-        if result.message is None or not isinstance(result.message.content, str):
-            raise StructuredModelError("MODEL_RESPONSE_INVALID", "模型未返回结构化文本")
-        try:
-            return output_type.model_validate_json(result.message.content)
-        except ValueError as error:
-            raise StructuredModelError(
-                "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
-            ) from error
+        for attempt in range(policy.max_retries + 1):
+            attempt_messages = messages
+            if attempt:
+                attempt_messages += (
+                    ProviderMessage(
+                        role="developer",
+                        content=(
+                            "前一次输出未通过 JSON Schema 校验。重新生成完整 JSON 对象，"
+                            "严格遵守字段名、必填项、类型、枚举和额外字段限制。"
+                        ),
+                    ),
+                )
+            result = await self.provider.complete(
+                ProviderRequest(
+                    contract_version="provider-request/1",
+                    messages=attempt_messages,
+                    options=options,
+                    timeout_ms=policy.read_timeout_ms,
+                )
+            )
+            if result.error is not None:
+                if (
+                    result.error.code == "PROVIDER_SCHEMA_INVALID"
+                    and attempt < policy.max_retries
+                ):
+                    continue
+                raise StructuredModelError(
+                    result.error.code, result.error.safe_message
+                )
+            if result.message is None or not isinstance(result.message.content, str):
+                raise StructuredModelError(
+                    "MODEL_RESPONSE_INVALID", "模型未返回结构化文本"
+                )
+            try:
+                return output_type.model_validate_json(result.message.content)
+            except ValueError as error:
+                if attempt < policy.max_retries:
+                    continue
+                raise StructuredModelError(
+                    "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
+                ) from error
+        raise AssertionError("结构化模型重试循环未返回")
 
     def _stage_messages(self, stage_key: str) -> tuple[PromptMessage, ...]:
         shared = {"safety", "identity"}

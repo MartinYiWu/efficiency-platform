@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ from efficiency_platform_agent.core.budget import RemainingBudget
 from efficiency_platform_agent.core.budget_lease import (
     BudgetCharge as LeaseBudgetCharge,
 )
+
+logger = logging.getLogger(__name__)
 from efficiency_platform_agent.core.budget_lease import (
     BudgetLeaseError,
     BudgetLeasePort,
@@ -312,6 +315,12 @@ class SafeHttpTransport:
                 await _settle_http_request(context, reservation, None, "unknown")
             raise
         except Exception as exc:
+            logger.warning(
+                "研究 HTTP 请求预算结算失败 reason=%s exception_type=%s hop=%s",
+                getattr(exc, "reason_code", None),
+                type(exc).__name__,
+                hop,
+            )
             if context is not None and reservation is not None:
                 await _settle_http_request(context, reservation, None, "unknown")
             raise ResearchFetchError(

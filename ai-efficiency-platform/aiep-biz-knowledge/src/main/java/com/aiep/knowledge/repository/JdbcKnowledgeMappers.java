@@ -2,14 +2,12 @@ package com.aiep.knowledge.repository;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.DataClassRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@ConditionalOnBean(JdbcTemplate.class)
 public class JdbcKnowledgeMappers implements KnowledgeMappers {
     private static final DataClassRowMapper<KnowledgeBasePO> BASE_ROW = DataClassRowMapper.newInstance(KnowledgeBasePO.class);
     private static final DataClassRowMapper<KnowledgeDirectoryPO> DIRECTORY_ROW = DataClassRowMapper.newInstance(KnowledgeDirectoryPO.class);

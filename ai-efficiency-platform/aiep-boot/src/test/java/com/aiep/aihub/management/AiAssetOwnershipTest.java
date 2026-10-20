@@ -12,9 +12,12 @@ import com.aiep.aihub.application.management.AiPolicyManagementService;
 import com.aiep.aihub.application.management.AiPromptManagementService;
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptDefinitionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.PromptBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptVersionPO;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -84,6 +87,39 @@ class AiAssetOwnershipTest {
                 .isInstanceOf(AiManagementException.class)
                 .extracting("code")
                 .isEqualTo("AI_ASSET_OWNER_MISMATCH");
+    }
+
+    @Test
+    void newAgentVersionCanCloneAllBindingsFromSameAgent() {
+        when(repository.findAgent("agent-1"))
+                .thenReturn(new AgentDefinitionPO(
+                        "agent-1", "customer-service", "智能客服", null, "CHAT",
+                        "ACTIVE", "1", NOW, "1", NOW));
+        when(repository.findAgentVersion("source-version"))
+                .thenReturn(new AgentVersionPO(
+                        "source-version", "agent-1", "1.0.0", "customer-service", "1",
+                        "RELEASED", "初始版本", "1", NOW, NOW));
+        when(repository.findPolicyBinding("source-version"))
+                .thenReturn(new AgentVersionPolicyBindingPO(
+                        "source-version", "model-1", "rag-1"));
+        when(repository.listPromptBindings("source-version"))
+                .thenReturn(List.of(new PromptBindingPO(
+                        "source-version", "answer", 1, "prompt-1", "prompt-version-1", true)));
+        when(repository.listKnowledgeBindings("source-version"))
+                .thenReturn(List.of(new AgentVersionKnowledgeBindingPO(
+                        "source-version", "kb-1", "release-1", 1, true)));
+        AiAgentManagementService service = new AiAgentManagementService(repository);
+
+        AgentVersionPO created = service.createVersion(
+                "agent-1", "1.0.1", "customer-service", "1", "更新知识", "source-version");
+
+        verify(repository).upsertModelPolicyBinding(created.id(), "model-1");
+        verify(repository).upsertRagPolicyBinding(created.id(), "rag-1");
+        verify(repository).insertPromptBinding(new PromptBindingPO(
+                created.id(), "answer", 1, "prompt-1", "prompt-version-1", true));
+        verify(repository).replaceKnowledgeBindings(
+                created.id(), List.of(new AgentVersionKnowledgeBindingPO(
+                        created.id(), "kb-1", "release-1", 1, true)));
     }
 
     private static AgentVersionPO agentVersion(String owner, String status) {

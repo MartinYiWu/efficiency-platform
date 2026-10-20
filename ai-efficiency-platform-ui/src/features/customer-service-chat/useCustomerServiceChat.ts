@@ -183,23 +183,26 @@ export function useCustomerServiceChat() {
   );
   useEffect(() => {
     let active = true;
-    void refreshConversations()
-      .then(async (items) => {
-        if (!active) return;
-        let first = items[0];
-        if (!first) first = await createConversation('新对话');
-        if (active) await selectConversation(first.id);
-      })
-      .catch((error: Error & { traceId?: string }) =>
-        setState((value) => ({
-          ...value,
-          status: 'FAILED',
-          error: error.message,
-          traceId: error.traceId,
-        })),
-      );
+    const timer = window.setTimeout(() => {
+      void refreshConversations()
+        .then(async (items) => {
+          if (!active) return;
+          let first = items[0];
+          if (!first) first = await createConversation('新对话');
+          if (active) await selectConversation(first.id);
+        })
+        .catch((error: Error & { traceId?: string }) =>
+          setState((value) => ({
+            ...value,
+            status: 'FAILED',
+            error: error.message,
+            traceId: error.traceId,
+          })),
+        );
+    }, 0);
     return () => {
       active = false;
+      window.clearTimeout(timer);
       abortRef.current?.abort();
     };
   }, [refreshConversations, selectConversation]);

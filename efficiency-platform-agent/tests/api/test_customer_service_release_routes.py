@@ -7,10 +7,24 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from efficiency_platform_agent.agents.customer_service.model_gateway import (
+    ReleaseStructuredModelGateway,
+)
+from efficiency_platform_agent.agents.customer_service.release_bundle import (
+    CustomerServiceReleaseBundle,
+)
 from efficiency_platform_agent.agents.customer_service.release_repository import (
     InMemoryReleaseRepository,
+    _decode_snapshot,
 )
+from efficiency_platform_agent.agents.customer_service.state import IntentDecision
 from efficiency_platform_agent.api.app import create_app
+from efficiency_platform_agent.core.run import (
+    ProviderError,
+    ProviderMessage,
+    ProviderResult,
+    ProviderUsage,
+)
 
 
 def _payload() -> dict[str, object]:
@@ -66,6 +80,100 @@ def _rechecksum(value: dict[str, object]) -> None:
         content, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
     value["snapshot_checksum"] = sha256(canonical.encode()).hexdigest()
+
+
+def test_mysql_json_text_is_decoded_into_release_bundle() -> None:
+    decoded = _decode_snapshot(json.dumps(_payload(), ensure_ascii=False))
+    assert decoded.agent_key == "customer-service"
+    assert decoded.snapshot_checksum == _payload()["snapshot_checksum"]
+
+
+@pytest.mark.asyncio
+async def test_structured_gateway_appends_code_owned_json_contract() -> None:
+    class Provider:
+        request = None
+
+        async def complete(self, request):
+            self.request = request
+            return ProviderResult(
+                request.contract_version,
+                ProviderMessage(
+                    "assistant",
+                    json.dumps(
+                        {
+                            "intent_type": "GENERAL_QUERY",
+                            "requires_company_knowledge": False,
+                            "requires_general_advice": True,
+                            "missing_field": None,
+                            "normalized_question": "如何梳理问题？",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                ProviderUsage(1, 1, 0, 0, 0),
+            )
+
+    provider = Provider()
+    bundle = CustomerServiceReleaseBundle.model_validate(_payload())
+    gateway = ReleaseStructuredModelGateway(provider, bundle)  # type: ignore[arg-type]
+    await gateway.complete(
+        "identity", {"question": "如何梳理问题？"}, IntentDecision
+    )
+
+    assert provider.request is not None
+    contract = provider.request.messages[-1]
+    assert contract.role == "developer"
+    assert "JSON" in contract.content
+    assert '"intent_type"' in contract.content
+
+
+@pytest.mark.asyncio
+async def test_structured_gateway_retries_schema_invalid_response() -> None:
+    class Provider:
+        calls = 0
+
+        async def complete(self, request):
+            self.calls += 1
+            if self.calls == 1:
+                return ProviderResult(
+                    request.contract_version,
+                    None,
+                    ProviderUsage(1, 1, 0, 0, 0),
+                    ProviderError(
+                        "PROVIDER_SCHEMA_INVALID",
+                        "response",
+                        False,
+                        "响应不符合输出契约",
+                    ),
+                )
+            return ProviderResult(
+                request.contract_version,
+                ProviderMessage(
+                    "assistant",
+                    json.dumps(
+                        {
+                            "intent_type": "GENERAL_QUERY",
+                            "requires_company_knowledge": False,
+                            "requires_general_advice": True,
+                            "missing_field": None,
+                            "normalized_question": "如何梳理问题？",
+                        },
+                        ensure_ascii=False,
+                    ),
+                ),
+                ProviderUsage(1, 1, 0, 0, 0),
+            )
+
+    provider = Provider()
+    gateway = ReleaseStructuredModelGateway(  # type: ignore[arg-type]
+        provider, CustomerServiceReleaseBundle.model_validate(_payload())
+    )
+    result = await gateway.complete(
+        "identity", {"question": "如何梳理问题？"}, IntentDecision
+    )
+
+    assert provider.calls == 2
+    assert result.intent_type.value == "GENERAL_QUERY"
 
 
 @pytest.mark.asyncio

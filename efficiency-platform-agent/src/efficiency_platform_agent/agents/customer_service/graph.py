@@ -8,8 +8,14 @@ from .answer import generate_answer
 from .intent import StructuredStageGateway, classify_intent
 from .release_bundle import CustomerServiceReleaseBundle
 from .renderer import render_answer
-from .retrieval import CustomerServiceRetrieval
-from .state import CustomerServiceRunRequest, Evidence, IntentType, RenderedAnswer
+from .retrieval import CustomerServiceRetrieval, RetrievalTrace
+from .state import (
+    CustomerServiceRunRequest,
+    Evidence,
+    IntentType,
+    RenderedAnswer,
+    SufficiencyDecision,
+)
 from .sufficiency import judge_sufficiency
 
 
@@ -18,6 +24,8 @@ class GraphResult:
     rendered: RenderedAnswer
     stage_summaries: tuple[tuple[str, str], ...]
     evidence: tuple[Evidence, ...] = ()
+    retrieval_trace: RetrievalTrace | None = None
+    sufficiency: SufficiencyDecision | None = None
 
 
 class CustomerServiceGraph:
@@ -32,17 +40,19 @@ class CustomerServiceGraph:
     ) -> GraphResult:
         intent = await classify_intent(gateway, request)
         evidence: tuple[Evidence, ...] = ()
+        retrieval_trace = None
         sufficiency = None
         summaries: list[tuple[str, str]] = [
             ("intent", f"已识别 {intent.intent_type.value}")
         ]
         if intent.intent_type in {IntentType.COMPANY_QUERY, IntentType.MIXED_QUERY}:
-            evidence = await self.retrieval.search(
+            retrieval_trace = await self.retrieval.search(
                 tenant_id=request.tenant_id,
                 question=intent.normalized_question,
                 gateway=gateway,
                 bundle=bundle,
             )
+            evidence = retrieval_trace.reranked_evidence
             summaries.append(("retrieval", f"已重排 {len(evidence)} 条候选证据"))
             sufficiency = await judge_sufficiency(
                 gateway, intent.normalized_question, evidence
@@ -61,6 +71,8 @@ class CustomerServiceGraph:
             rendered=render_answer(answer, evidence),
             stage_summaries=tuple(summaries),
             evidence=evidence,
+            retrieval_trace=retrieval_trace,
+            sufficiency=sufficiency,
         )
 
 

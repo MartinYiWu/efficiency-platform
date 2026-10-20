@@ -7,7 +7,6 @@ import com.aiep.aihub.application.management.AiPolicyManagementService.RagPolicy
 import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.RagPolicyPO;
 import com.aiep.platformcore.api.ApiResponse;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/aihub")
-@ConditionalOnBean(AiPolicyManagementService.class)
 public class AiPolicyManagementController {
     private final AiPolicyManagementService service;
 

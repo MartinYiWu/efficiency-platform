@@ -13,7 +13,6 @@ import com.aiep.aihub.repository.management.AiManagementPOs.PromptVersionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.RagPolicyPO;
 import java.util.ArrayList;
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.DataClassRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-@ConditionalOnBean(JdbcTemplate.class)
 public class JdbcAiManagementMappers implements AiManagementMappers {
     private static final DataClassRowMapper<AgentDefinitionPO> AGENT = DataClassRowMapper.newInstance(AgentDefinitionPO.class);
     private static final DataClassRowMapper<AgentVersionPO> AGENT_VERSION = DataClassRowMapper.newInstance(AgentVersionPO.class);

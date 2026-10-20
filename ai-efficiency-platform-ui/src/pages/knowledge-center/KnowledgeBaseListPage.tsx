@@ -39,7 +39,18 @@ export function KnowledgeBaseListPage() {
     }
   };
   useEffect(() => {
-    void load();
+    let active = true;
+    void listKnowledgeBases('')
+      .then((result) => {
+        if (active) setItems(result.items);
+      })
+      .catch((error: Error) => message.error(error.message))
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
   const create = async () => {
     const value = await form.validateFields();

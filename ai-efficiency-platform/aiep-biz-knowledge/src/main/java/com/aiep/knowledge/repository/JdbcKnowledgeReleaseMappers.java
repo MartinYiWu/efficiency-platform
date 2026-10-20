@@ -1,14 +1,12 @@
 package com.aiep.knowledge.repository;
 
 import java.util.List;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.DataClassRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-@ConditionalOnBean(JdbcTemplate.class)
 public class JdbcKnowledgeReleaseMappers implements KnowledgeReleaseMappers {
     private static final DataClassRowMapper<KnowledgeIndexReleasePO> RELEASE_ROW =
             DataClassRowMapper.newInstance(KnowledgeIndexReleasePO.class);

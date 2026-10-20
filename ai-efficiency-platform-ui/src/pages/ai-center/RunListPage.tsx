@@ -24,7 +24,15 @@ export function RunListPage() {
     }
   };
   useEffect(() => {
-    void load();
+    let active = true;
+    void listRuns('')
+      .then((value) => {
+        if (active) setItems(value.items);
+      })
+      .catch((error: Error) => message.error(error.message));
+    return () => {
+      active = false;
+    };
   }, []);
   return (
     <section className={styles.page}>

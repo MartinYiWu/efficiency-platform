@@ -219,6 +219,7 @@ class DebugKnowledgeBinding(StrictModel):
 class DebugRequest(StrictModel):
     contract_version: Literal["customer-service-rag-debug/1"]
     agent_key: Literal["customer-service"]
+    tenant_id: str = Field(min_length=1, max_length=64)
     question: str = Field(min_length=1)
     agent_release_id: UUID
     agent_version_id: UUID
