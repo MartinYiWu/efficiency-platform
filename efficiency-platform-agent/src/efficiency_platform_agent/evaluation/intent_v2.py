@@ -124,7 +124,12 @@ def load_intent_dataset(
     for declared in manifest.files:
         path = root / declared.path
         payload = path.read_bytes()
-        if hashlib.sha256(payload).hexdigest() != declared.sha256:
+        normalized_payload = payload.replace(b"\r\n", b"\n")
+        accepted_hashes = {
+            hashlib.sha256(normalized_payload).hexdigest(),
+            hashlib.sha256(normalized_payload.replace(b"\n", b"\r\n")).hexdigest(),
+        }
+        if declared.sha256 not in accepted_hashes:
             raise ValueError(f"EVALUATION_HASH_MISMATCH:{declared.split}")
         parsed = tuple(
             IntentEvaluationCaseV2.model_validate_json(line)
