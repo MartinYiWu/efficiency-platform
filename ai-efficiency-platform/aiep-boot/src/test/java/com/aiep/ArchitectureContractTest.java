@@ -40,7 +40,15 @@ class ArchitectureContractTest {
                 "/text/generate", "/chat/stream", "/skill/execute", "/kb/qa",
                 "/kb/ingest", "/task/{task_id}", "/kb/vectors",
                 "/v1/conversations/{conversation_id}/messages",
-                "/v1/runs/{run_id}/events", "/v1/runs/{run_id}/cancel");
+                "/v1/runs/{run_id}/events", "/v1/runs/{run_id}/cancel",
+                "/internal/v1/customer-service/releases/{release_id}",
+                "/internal/v1/customer-service/ingest-jobs",
+                "/internal/v1/customer-service/ingest-jobs/{task_id}",
+                "/internal/v1/customer-service/index-releases/{release_id}/verify",
+                "/v1/customer-service/conversations/{conversation_id}/messages",
+                "/v1/customer-service/runs/{run_id}/events",
+                "/v1/customer-service/runs/{run_id}/cancel",
+                "/internal/v1/customer-service/rag-debug-runs");
     }
 
     @Test
@@ -53,7 +61,11 @@ class ArchitectureContractTest {
         assertThat(operationNames).containsExactlyInAnyOrder(
                 "generateText", "streamChat", "executeSkill", "streamKbQa",
                 "submitIngest", "queryTask", "deleteVectors",
-                "submitOperationMessage", "streamOperationRunEvents", "cancelOperationRun");
+                "submitOperationMessage", "streamOperationRunEvents", "cancelOperationRun",
+                "publishCustomerServiceRelease", "submitCustomerServiceIngest",
+                "queryCustomerServiceIngest", "verifyCustomerServiceIndex",
+                "submitCustomerServiceMessage", "streamCustomerServiceRunEvents",
+                "cancelCustomerServiceRun", "debugCustomerServiceRag");
     }
 
     @Test
