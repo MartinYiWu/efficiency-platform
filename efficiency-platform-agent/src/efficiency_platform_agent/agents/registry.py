@@ -12,6 +12,7 @@ from .errors import AgentNotFoundError, AgentRegistrationConflictError
 from .validation import AgentValidator
 
 type AgentBuilder = Callable[[], AgentPlugin]
+CUSTOMER_SERVICE_AGENT_ID = "customer-service"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,13 @@ class AgentRegistry:
         if spec.agent_id in self._registrations:
             raise AgentRegistrationConflictError(f"Agent ID 已注册: {spec.agent_id}")
         self._registrations[spec.agent_id] = RegisteredAgent(spec, builder)
+
+    def register_customer_service(self, spec: AgentSpec, builder: AgentBuilder) -> None:
+        """注册独立智能客服，防止被错误挂到其他 Agent 标识。"""
+
+        if spec.agent_id != CUSTOMER_SERVICE_AGENT_ID:
+            raise ValueError("智能客服 Agent ID 必须为 customer-service")
+        self.register(spec, builder)
 
     def get(self, agent_id: str) -> RegisteredAgent:
         """按 Agent ID 返回注册项；不存在时失败关闭。"""

@@ -36,6 +36,12 @@ class InMemoryReleaseRepository:
     ) -> CustomerServiceReleaseBundle | None:
         return self.values.get(release_id)
 
+    async def get_active(self) -> tuple[UUID, CustomerServiceReleaseBundle] | None:
+        if not self.values:
+            return None
+        release_id = next(reversed(self.values))
+        return release_id, self.values[release_id]
+
 
 class MySqlReleaseRepository:
     def __init__(self, engine: AsyncEngine) -> None:
@@ -98,6 +104,20 @@ class MySqlReleaseRepository:
             if value is None
             else CustomerServiceReleaseBundle.model_validate(value)
         )
+
+    async def get_active(self) -> tuple[UUID, CustomerServiceReleaseBundle] | None:
+        async with self.engine.connect() as connection:
+            result = await connection.execute(
+                text(
+                    "SELECT release_id,snapshot_json FROM agent_release_bundle "
+                    "WHERE agent_key='customer-service' AND status='ACTIVE' "
+                    "ORDER BY created_at_epoch_ms DESC LIMIT 1"
+                )
+            )
+            row = result.first()
+        if row is None:
+            return None
+        return UUID(str(row.release_id)), CustomerServiceReleaseBundle.model_validate(row.snapshot_json)
 
 
 __all__ = [

@@ -11,6 +11,7 @@ from uuid import UUID, uuid5
 from pgvector import Vector
 
 from .contracts import ChunkDraft, IndexDocumentMember, IndexVerificationResult
+from .state import Evidence
 
 _CHUNK_NAMESPACE = UUID("38e6afe9-28d1-46ef-b538-d59c74b4f6e9")
 
@@ -136,6 +137,78 @@ class DocumentChunkRepository:
 
     async def verify_index_release(self, release_id: str) -> IndexVerificationResult:
         return await self._verify_index_release(release_id)
+
+    async def vector_search(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        vector: tuple[float, ...],
+        limit: int,
+    ) -> tuple[Evidence, ...]:
+        if not index_release_ids or len(vector) != 1024 or limit < 1:
+            raise ValueError("VECTOR_SEARCH_INPUT_INVALID")
+        result = await _await(
+            self.connection.execute(
+                "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
+                "c.document_version_id::text,m.index_release_id::text,c.section_path,"
+                "c.page_no,c.content,c.content_hash,1-(c.embedding <=> %s) AS score "
+                "FROM customer_service.document_chunk c "
+                "JOIN customer_service.index_release_document m "
+                "ON m.document_version_id=c.document_version_id "
+                "WHERE c.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
+                "ORDER BY c.embedding <=> %s LIMIT %s",
+                (Vector(list(vector)), tenant_id, [str(item) for item in index_release_ids], Vector(list(vector)), limit),
+            )
+        )
+        return self._evidence(await _rows(result))
+
+    async def fts_search(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        query: str,
+        limit: int,
+    ) -> tuple[Evidence, ...]:
+        if not index_release_ids or not query.strip() or limit < 1:
+            raise ValueError("FTS_SEARCH_INPUT_INVALID")
+        result = await _await(
+            self.connection.execute(
+                "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
+                "c.document_version_id::text,m.index_release_id::text,c.section_path,"
+                "c.page_no,c.content,c.content_hash,"
+                "ts_rank_cd(to_tsvector('simple',c.content), plainto_tsquery('simple',%s)) AS score "
+                "FROM customer_service.document_chunk c "
+                "JOIN customer_service.index_release_document m "
+                "ON m.document_version_id=c.document_version_id "
+                "WHERE c.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
+                "AND to_tsvector('simple',c.content) @@ plainto_tsquery('simple',%s) "
+                "ORDER BY score DESC,c.chunk_id LIMIT %s",
+                (query, tenant_id, [str(item) for item in index_release_ids], query, limit),
+            )
+        )
+        return self._evidence(await _rows(result))
+
+    @staticmethod
+    def _evidence(rows: tuple[Any, ...]) -> tuple[Evidence, ...]:
+        return tuple(
+            Evidence(
+                chunk_id=UUID(str(row[0])),
+                knowledge_base_id=UUID(str(row[1])),
+                document_id=UUID(str(row[2])),
+                document_version_id=UUID(str(row[3])),
+                index_release_id=UUID(str(row[4])),
+                section_path=None if row[5] is None else str(row[5]),
+                page_no=None if row[6] is None else int(row[6]),
+                content=str(row[7]),
+                content_hash=str(row[8]),
+                score=float(row[9]),
+                document_title=f"文档 {row[2]}",
+                version_no=1,
+            )
+            for row in rows
+        )
 
     async def _verify_index_release(self, release_id: str) -> IndexVerificationResult:
         member_rows = await _rows(
