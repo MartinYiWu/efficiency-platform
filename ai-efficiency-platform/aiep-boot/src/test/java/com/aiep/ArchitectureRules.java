@@ -31,15 +31,21 @@ final class ArchitectureRules {
     }
 
     static ArchRule l2DependenciesAreRestricted() {
-        ArchRule knowledgeAssetSystemAreIsolated = noClasses()
-                .that().resideInAnyPackage("..knowledge..", "..asset..", "..system..")
-                .should().dependOnClassesThat().resideInAnyPackage(
-                        "..knowledge..", "..asset..", "..aihub..", "..system..")
-                .as("knowledge, asset, and system must not depend on another L2 business package");
+        ArchRule knowledgeIsIsolated = noClasses().that().resideInAnyPackage("..knowledge..")
+                .should().dependOnClassesThat().resideInAnyPackage("..asset..", "..aihub..", "..system..");
+        ArchRule assetIsIsolated = noClasses().that().resideInAnyPackage("..asset..")
+                .should().dependOnClassesThat().resideInAnyPackage("..knowledge..", "..aihub..", "..system..");
+        ArchRule systemIsIsolated = noClasses().that().resideInAnyPackage("..system..")
+                .should().dependOnClassesThat().resideInAnyPackage("..knowledge..", "..asset..", "..aihub..");
         ArchRule aihubOnlyDependsOnKnowledgeAtL2 = noClasses().that().resideInAnyPackage("..aihub..")
                 .should().dependOnClassesThat().resideInAnyPackage("..asset..", "..system..")
                 .as("aihub may only depend on knowledge among L2 business packages");
-        return CompositeArchRule.of(knowledgeAssetSystemAreIsolated).and(aihubOnlyDependsOnKnowledgeAtL2);
+        return CompositeArchRule.of(knowledgeIsIsolated)
+                .and(assetIsIsolated)
+                .and(systemIsIsolated)
+                .and(aihubOnlyDependsOnKnowledgeAtL2)
+                .as("knowledge, asset, and system must not depend on another L2 business package "
+                        + "and aihub may only depend on knowledge among L2 business packages");
     }
 
     static ArchRule controllersDoNotAccessRepositories() {

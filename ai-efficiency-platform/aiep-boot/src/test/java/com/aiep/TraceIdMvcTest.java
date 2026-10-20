@@ -5,6 +5,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.aiep.aihub.application.operation.OperationAssistantService;
+import com.aiep.knowledge.application.KnowledgeBaseService;
+import com.aiep.knowledge.application.KnowledgeDocumentService;
+import com.aiep.knowledge.application.KnowledgeImportService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,6 +20,15 @@ import org.springframework.test.web.servlet.MockMvc;
 class TraceIdMvcTest {
     @MockBean
     private OperationAssistantService operationAssistantService;
+
+    @MockBean
+    private KnowledgeBaseService knowledgeBaseService;
+
+    @MockBean
+    private KnowledgeDocumentService knowledgeDocumentService;
+
+    @MockBean
+    private KnowledgeImportService knowledgeImportService;
 
     @Autowired
     private MockMvc mockMvc;
