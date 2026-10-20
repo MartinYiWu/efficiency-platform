@@ -4,6 +4,8 @@ import com.aiep.aihub.application.management.AiAgentManagementService;
 import com.aiep.aihub.application.management.AiManagementViews;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.platformcore.api.ApiResponse;
 import java.util.List;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -63,8 +65,29 @@ public class AiAgentManagementController {
         return ApiResponse.success(service.transition(id, request.status()));
     }
 
+    @PutMapping("/versions/{id}/model-policy")
+    public ApiResponse<AgentVersionPolicyBindingPO> bindModelPolicy(
+            @PathVariable String id, @RequestBody AssetIdRequest request) {
+        return ApiResponse.success(service.bindModelPolicy(id, request.assetId()));
+    }
+
+    @PutMapping("/versions/{id}/rag-policy")
+    public ApiResponse<AgentVersionPolicyBindingPO> bindRagPolicy(
+            @PathVariable String id, @RequestBody AssetIdRequest request) {
+        return ApiResponse.success(service.bindRagPolicy(id, request.assetId()));
+    }
+
+    @PutMapping("/versions/{id}/knowledge-bindings")
+    public ApiResponse<List<AgentVersionKnowledgeBindingPO>> bindKnowledge(
+            @PathVariable String id, @RequestBody KnowledgeBindingRequest request) {
+        return ApiResponse.success(service.bindKnowledge(id, request.bindings()));
+    }
+
     public record AgentRequest(String agentKey, String name, String description, String agentType) { }
     public record VersionRequest(
             String semanticVersion, String graphKey, String graphVersion, String changeSummary) { }
     public record TransitionRequest(String status) { }
+    public record AssetIdRequest(String assetId) { }
+    public record KnowledgeBindingRequest(
+            List<AiAgentManagementService.KnowledgeBindingInput> bindings) { }
 }

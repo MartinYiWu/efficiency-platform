@@ -38,6 +38,7 @@ def create_app(
     conversation_service: ConversationService | None = None,
     live_acceptance_service: LiveAcceptanceService | None = None,
     customer_service_ingest_service: CustomerServiceIngestPort | None = None,
+    customer_service_release_repository: object | None = None,
     runtime_mode: str = "s2_fake_in_memory",
     dependency_probe: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -74,6 +75,19 @@ def create_app(
         app.state.customer_service_ingest_service = customer_service_ingest_service
         app.include_router(
             build_customer_service_ingest_router(customer_service_ingest_service)
+        )
+    if customer_service_release_repository is not None:
+        from .customer_service_release_routes import (
+            build_customer_service_release_router,
+        )
+
+        app.state.customer_service_release_repository = (
+            customer_service_release_repository
+        )
+        app.include_router(
+            build_customer_service_release_router(
+                customer_service_release_repository  # type: ignore[arg-type]
+            )
         )
     app.add_exception_handler(HarnessError, handle_harness_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

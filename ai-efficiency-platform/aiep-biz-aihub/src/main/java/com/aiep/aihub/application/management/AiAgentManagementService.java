@@ -3,6 +3,10 @@ package com.aiep.aihub.application.management;
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.RagPolicyPO;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -89,6 +93,56 @@ public class AiAgentManagementService {
         return value;
     }
 
+    @Transactional
+    public AgentVersionPolicyBindingPO bindModelPolicy(String versionId, String modelPolicyId) {
+        AgentVersionPO version = requiredVersion(versionId);
+        mutable(version.status());
+        ModelPolicyPO model = repository.findModelPolicy(modelPolicyId);
+        if (model == null || !version.agentDefinitionId().equals(model.ownerAgentDefinitionId())) {
+            throw new AiManagementException("AI_ASSET_OWNER_MISMATCH", "模型策略不属于该 Agent");
+        }
+        if (!"PUBLISHED".equals(model.status())) {
+            throw new AiManagementException("AI_POLICY_NOT_PUBLISHED", "只能绑定已发布策略");
+        }
+        repository.upsertModelPolicyBinding(versionId, modelPolicyId);
+        return repository.findPolicyBinding(versionId);
+    }
+
+    @Transactional
+    public AgentVersionPolicyBindingPO bindRagPolicy(String versionId, String ragPolicyId) {
+        AgentVersionPO version = requiredVersion(versionId);
+        mutable(version.status());
+        RagPolicyPO rag = repository.findRagPolicy(ragPolicyId);
+        if (rag == null || !version.agentDefinitionId().equals(rag.ownerAgentDefinitionId())) {
+            throw new AiManagementException("AI_ASSET_OWNER_MISMATCH", "RAG 策略不属于该 Agent");
+        }
+        if (!"PUBLISHED".equals(rag.status())) {
+            throw new AiManagementException("AI_POLICY_NOT_PUBLISHED", "只能绑定已发布策略");
+        }
+        repository.upsertRagPolicyBinding(versionId, ragPolicyId);
+        return repository.findPolicyBinding(versionId);
+    }
+
+    @Transactional
+    public List<AgentVersionKnowledgeBindingPO> bindKnowledge(
+            String versionId, List<KnowledgeBindingInput> inputs) {
+        AgentVersionPO version = requiredVersion(versionId);
+        mutable(version.status());
+        List<AgentVersionKnowledgeBindingPO> values = inputs.stream()
+                .map(input -> {
+                    if (!repository.isIndexReleaseReady(input.indexReleaseId())) {
+                        throw new AiManagementException(
+                                "AI_INDEX_RELEASE_NOT_READY", "知识索引未发布");
+                    }
+                    return new AgentVersionKnowledgeBindingPO(
+                            versionId, required(input.knowledgeBaseId(), "知识库 ID"),
+                            required(input.indexReleaseId(), "索引版本 ID"),
+                            input.priority(), input.required());
+                }).toList();
+        repository.replaceKnowledgeBindings(versionId, values);
+        return values;
+    }
+
     private AgentDefinitionPO requiredAgent(String id) {
         AgentDefinitionPO value = repository.findAgent(id);
         if (value == null) {
@@ -121,4 +175,7 @@ public class AiAgentManagementService {
     private static String optional(String value) {
         return value == null || value.isBlank() ? null : value.strip();
     }
+
+    public record KnowledgeBindingInput(
+            String knowledgeBaseId, String indexReleaseId, int priority, boolean required) { }
 }

@@ -2,6 +2,8 @@ package com.aiep.aihub.repository.management;
 
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptDefinitionPO;
@@ -16,6 +18,7 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.DataClassRowMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 @ConditionalOnBean(JdbcTemplate.class)
@@ -28,6 +31,11 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
     private static final DataClassRowMapper<PromptVariablePO> VARIABLE = DataClassRowMapper.newInstance(PromptVariablePO.class);
     private static final DataClassRowMapper<ModelPolicyPO> MODEL = DataClassRowMapper.newInstance(ModelPolicyPO.class);
     private static final DataClassRowMapper<RagPolicyPO> RAG = DataClassRowMapper.newInstance(RagPolicyPO.class);
+    private static final DataClassRowMapper<PromptBindingPO> PROMPT_BINDING = DataClassRowMapper.newInstance(PromptBindingPO.class);
+    private static final DataClassRowMapper<AgentVersionPolicyBindingPO> POLICY_BINDING = DataClassRowMapper.newInstance(AgentVersionPolicyBindingPO.class);
+    private static final DataClassRowMapper<AgentVersionKnowledgeBindingPO> KNOWLEDGE_BINDING = DataClassRowMapper.newInstance(AgentVersionKnowledgeBindingPO.class);
+    private static final DataClassRowMapper<AiReleasePO> RELEASE = DataClassRowMapper.newInstance(AiReleasePO.class);
+    private static final DataClassRowMapper<AiReleaseSnapshotPO> RELEASE_SNAPSHOT = DataClassRowMapper.newInstance(AiReleaseSnapshotPO.class);
     private final JdbcTemplate jdbc;
 
     public JdbcAiManagementMappers(JdbcTemplate jdbc) {
@@ -38,6 +46,7 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
         return jdbc.query("SELECT * FROM ai_agent_definition ORDER BY updated_at DESC", AGENT);
     }
     @Override public AgentDefinitionPO findAgent(String id) { return one("SELECT * FROM ai_agent_definition WHERE id=?", AGENT, id); }
+    @Override public AgentDefinitionPO findAgentByKey(String agentKey) { return one("SELECT * FROM ai_agent_definition WHERE agent_key=?", AGENT, agentKey); }
     @Override public void insertAgent(AgentDefinitionPO v) {
         jdbc.update("INSERT INTO ai_agent_definition (id,agent_key,name,description,agent_type,status,created_by,created_at,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 v.id(), v.agentKey(), v.name(), v.description(), v.agentType(), v.status(), v.createdBy(), v.createdAt(), v.updatedBy(), v.updatedAt());
@@ -106,6 +115,33 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
         jdbc.update("INSERT INTO ai_agent_version_prompt_binding (agent_version_id,stage_key,ordinal,prompt_definition_id,prompt_version_id,required) VALUES (?,?,?,?,?,?)",
                 v.agentVersionId(), v.stageKey(), v.ordinal(), v.promptDefinitionId(), v.promptVersionId(), v.required());
     }
+    @Override public List<PromptBindingPO> listPromptBindings(String agentVersionId) {
+        return jdbc.query("SELECT * FROM ai_agent_version_prompt_binding WHERE agent_version_id=? ORDER BY stage_key,ordinal", PROMPT_BINDING, agentVersionId);
+    }
+
+    @Override public AgentVersionPolicyBindingPO findPolicyBinding(String agentVersionId) {
+        return one("SELECT * FROM ai_agent_version_policy_binding WHERE agent_version_id=?", POLICY_BINDING, agentVersionId);
+    }
+    @Override public void upsertModelPolicyBinding(String agentVersionId, String modelPolicyId) {
+        jdbc.update("INSERT INTO ai_agent_version_policy_binding (agent_version_id,model_policy_id) VALUES (?,?) ON DUPLICATE KEY UPDATE model_policy_id=VALUES(model_policy_id)", agentVersionId, modelPolicyId);
+    }
+    @Override public void upsertRagPolicyBinding(String agentVersionId, String ragPolicyId) {
+        jdbc.update("INSERT INTO ai_agent_version_policy_binding (agent_version_id,rag_policy_id) VALUES (?,?) ON DUPLICATE KEY UPDATE rag_policy_id=VALUES(rag_policy_id)", agentVersionId, ragPolicyId);
+    }
+    @Override public List<AgentVersionKnowledgeBindingPO> listKnowledgeBindings(String agentVersionId) {
+        return jdbc.query("SELECT * FROM ai_agent_version_knowledge_binding WHERE agent_version_id=? ORDER BY priority,knowledge_base_id", KNOWLEDGE_BINDING, agentVersionId);
+    }
+    @Override public void replaceKnowledgeBindings(String agentVersionId, List<AgentVersionKnowledgeBindingPO> values) {
+        jdbc.update("DELETE FROM ai_agent_version_knowledge_binding WHERE agent_version_id=?", agentVersionId);
+        for (AgentVersionKnowledgeBindingPO v : values) {
+            jdbc.update("INSERT INTO ai_agent_version_knowledge_binding (agent_version_id,knowledge_base_id,index_release_id,priority,required) VALUES (?,?,?,?,?)",
+                    v.agentVersionId(), v.knowledgeBaseId(), v.indexReleaseId(), v.priority(), v.required());
+        }
+    }
+    @Override public boolean isIndexReleaseReady(String indexReleaseId) {
+        Long count = jdbc.queryForObject("SELECT COUNT(*) FROM kb_index_release WHERE id=? AND status='PUBLISHED'", Long.class, indexReleaseId);
+        return count != null && count == 1;
+    }
 
     @Override public List<ModelPolicyPO> listModelPolicies(String agentId) { return jdbc.query("SELECT * FROM ai_model_policy WHERE owner_agent_definition_id=? ORDER BY created_at DESC", MODEL, agentId); }
     @Override public ModelPolicyPO findModelPolicy(String id) { return one("SELECT * FROM ai_model_policy WHERE id=?", MODEL, id); }
@@ -126,6 +162,33 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
     @Override public void updateRagPolicy(RagPolicyPO v) {
         jdbc.update("UPDATE ai_rag_policy SET rewrite_query_limit=?,vector_top_k=?,fts_top_k=?,fusion_top_k=?,rerank_top_k=?,context_token_limit=?,citation_limit=?,status=?,checksum=?,published_at=? WHERE id=?",
                 v.rewriteQueryLimit(), v.vectorTopK(), v.ftsTopK(), v.fusionTopK(), v.rerankTopK(), v.contextTokenLimit(), v.citationLimit(), v.status(), v.checksum(), v.publishedAt(), v.id());
+    }
+
+    @Override public AiReleasePO findRelease(String id) {
+        return one("SELECT * FROM ai_agent_release WHERE id=?", RELEASE, id);
+    }
+    @Override public AiReleasePO findActiveRelease(String agentDefinitionId, String environment) {
+        return one("SELECT * FROM ai_agent_release WHERE agent_definition_id=? AND environment=? AND release_status='ACTIVE' ORDER BY released_at DESC LIMIT 1", RELEASE, agentDefinitionId, environment);
+    }
+    @Override public List<AiReleasePO> listReleases(String agentDefinitionId, String environment) {
+        return jdbc.query("SELECT * FROM ai_agent_release WHERE agent_definition_id=? AND environment=? ORDER BY created_at DESC", RELEASE, agentDefinitionId, environment);
+    }
+    @Override public AiReleaseSnapshotPO findReleaseSnapshot(String releaseId) {
+        return one("SELECT * FROM ai_agent_release_snapshot WHERE agent_release_id=?", RELEASE_SNAPSHOT, releaseId);
+    }
+    @Override @Transactional public void insertRelease(AiReleasePO release, AiReleaseSnapshotPO snapshot) {
+        jdbc.update("INSERT INTO ai_agent_release (id,agent_definition_id,agent_version_id,environment,release_status,release_snapshot_id,released_by,released_at,rolled_back_from_release_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                release.id(), release.agentDefinitionId(), release.agentVersionId(), release.environment(), release.releaseStatus(), release.releaseSnapshotId(), release.releasedBy(), release.releasedAt(), release.rolledBackFromReleaseId(), release.createdAt());
+        jdbc.update("INSERT INTO ai_agent_release_snapshot (id,agent_release_id,snapshot_json,checksum,agent_ack_status,agent_ack_at,created_at) VALUES (?,?,?,?,?,?,?)",
+                snapshot.id(), snapshot.agentReleaseId(), snapshot.snapshotJson(), snapshot.checksum(), snapshot.agentAckStatus(), snapshot.agentAckAt(), snapshot.createdAt());
+    }
+    @Override @Transactional public void acknowledgeAndActivateRelease(
+            String releaseId, String snapshotId, String agentDefinitionId,
+            String environment, String agentVersionId) {
+        jdbc.update("UPDATE ai_agent_release SET release_status='RETIRED' WHERE agent_definition_id=? AND environment=? AND release_status='ACTIVE'", agentDefinitionId, environment);
+        jdbc.update("UPDATE ai_agent_release_snapshot SET agent_ack_status='ACKNOWLEDGED',agent_ack_at=NOW(6) WHERE id=? AND agent_release_id=?", snapshotId, releaseId);
+        jdbc.update("UPDATE ai_agent_release SET release_status='ACTIVE',released_at=NOW(6) WHERE id=? AND release_status='PENDING'", releaseId);
+        jdbc.update("UPDATE ai_agent_version SET status='RELEASED',published_at=COALESCE(published_at,NOW(6)) WHERE id=? AND status='VALIDATED'", agentVersionId);
     }
 
     private <T> T one(String sql, DataClassRowMapper<T> mapper, Object... args) {

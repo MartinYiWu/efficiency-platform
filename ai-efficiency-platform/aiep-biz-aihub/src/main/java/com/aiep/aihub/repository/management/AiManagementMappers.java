@@ -2,6 +2,8 @@ package com.aiep.aihub.repository.management;
 
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionKnowledgeBindingPO;
+import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPolicyBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.ModelPolicyPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptBindingPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.PromptDefinitionPO;
@@ -14,6 +16,7 @@ import java.util.List;
 public interface AiManagementMappers {
     List<AgentDefinitionPO> listAgents();
     AgentDefinitionPO findAgent(String id);
+    AgentDefinitionPO findAgentByKey(String agentKey);
     void insertAgent(AgentDefinitionPO value);
     List<AgentVersionPO> listAgentVersions(String agentId);
     AgentVersionPO findAgentVersion(String id);
@@ -33,6 +36,15 @@ public interface AiManagementMappers {
             String promptVersionId, List<PromptMessageTemplatePO> messages,
             List<PromptVariablePO> variables);
     void insertPromptBinding(PromptBindingPO value);
+    List<PromptBindingPO> listPromptBindings(String agentVersionId);
+
+    AgentVersionPolicyBindingPO findPolicyBinding(String agentVersionId);
+    void upsertModelPolicyBinding(String agentVersionId, String modelPolicyId);
+    void upsertRagPolicyBinding(String agentVersionId, String ragPolicyId);
+    List<AgentVersionKnowledgeBindingPO> listKnowledgeBindings(String agentVersionId);
+    void replaceKnowledgeBindings(
+            String agentVersionId, List<AgentVersionKnowledgeBindingPO> values);
+    boolean isIndexReleaseReady(String indexReleaseId);
 
     List<ModelPolicyPO> listModelPolicies(String agentId);
     ModelPolicyPO findModelPolicy(String id);
@@ -42,4 +54,13 @@ public interface AiManagementMappers {
     RagPolicyPO findRagPolicy(String id);
     void insertRagPolicy(RagPolicyPO value);
     void updateRagPolicy(RagPolicyPO value);
+
+    AiReleasePO findRelease(String id);
+    AiReleasePO findActiveRelease(String agentDefinitionId, String environment);
+    List<AiReleasePO> listReleases(String agentDefinitionId, String environment);
+    AiReleaseSnapshotPO findReleaseSnapshot(String releaseId);
+    void insertRelease(AiReleasePO release, AiReleaseSnapshotPO snapshot);
+    void acknowledgeAndActivateRelease(
+            String releaseId, String snapshotId, String agentDefinitionId,
+            String environment, String agentVersionId);
 }

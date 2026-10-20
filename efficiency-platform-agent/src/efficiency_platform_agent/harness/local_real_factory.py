@@ -18,6 +18,10 @@ from fastapi import FastAPI
 from efficiency_platform_agent.agents.conversation.general_agent import (
     GeneralConversationAgent,
 )
+from efficiency_platform_agent.agents.customer_service.release_repository import (
+    InMemoryReleaseRepository,
+    MySqlReleaseRepository,
+)
 from efficiency_platform_agent.api.app import create_app
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
 from efficiency_platform_agent.capabilities.research.public_sources import (
@@ -263,6 +267,7 @@ def build_local_agent_application(
         run_repository = InMemoryRunRepository()
         run_event_store = InMemoryRunEventStore()
         ranked_reference_repository = InMemoryRankedReferenceRepository()
+        customer_service_release_repository = InMemoryReleaseRepository()
     else:
         runtime_database = MySqlRuntimeDatabase(
             _secret(resolved, "runtime_database_url")
@@ -270,6 +275,9 @@ def build_local_agent_application(
         run_repository = MySqlRunRepository(runtime_database.engine)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
         ranked_reference_repository = MySqlRankedReferenceRepository(
+            runtime_database.engine
+        )
+        customer_service_release_repository = MySqlReleaseRepository(
             runtime_database.engine
         )
     resolved_research_v2 = research_v2_settings or (
@@ -561,6 +569,7 @@ def build_local_agent_application(
         event_hub=event_hub,
         conversation_service=conversation,
         live_acceptance_service=resolved_live_acceptance_service,
+        customer_service_release_repository=customer_service_release_repository,
         runtime_mode="s2_fake_in_memory" if test_mode else "local_real_mysql",
         dependency_probe=(
             None if runtime_database is None else runtime_database.ping

@@ -41,6 +41,13 @@ public final class AiManagementPOs {
             String agentVersionId, String stageKey, int ordinal, String promptDefinitionId,
             String promptVersionId, boolean required) { }
 
+    public record AgentVersionPolicyBindingPO(
+            String agentVersionId, String modelPolicyId, String ragPolicyId) { }
+
+    public record AgentVersionKnowledgeBindingPO(
+            String agentVersionId, String knowledgeBaseId, String indexReleaseId,
+            int priority, boolean required) { }
+
     public record ModelPolicyPO(
             String id, String ownerAgentDefinitionId, String policyKey, String semanticVersion,
             String provider, String modelName, BigDecimal temperature, BigDecimal topP,

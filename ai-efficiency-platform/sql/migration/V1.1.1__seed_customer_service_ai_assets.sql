@@ -11,7 +11,7 @@ INSERT IGNORE INTO ai_agent_version
      change_summary, created_by, created_at, published_at)
 VALUES
     ('11000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
-     '1.0.0', 'customer-service', '1', 'RELEASED', '首个智能客服闭环版本', '1', NOW(6), NOW(6));
+     '1.0.0', 'customer-service', '1', 'VALIDATED', '首个智能客服闭环版本', '1', NOW(6), NULL);
 
 INSERT IGNORE INTO ai_prompt_definition
     (id, prompt_key, scope, owner_agent_definition_id, name, description, stage_key,
