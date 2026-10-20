@@ -212,6 +212,7 @@ _ALLOWED_LAYER_DEPENDENCIES: Mapping[str, frozenset[str]] = MappingProxyType(
                 "core",
                 "contracts",
                 "harness",
+                "agents",
                 "capabilities",
                 "conversation",
                 "runtime",

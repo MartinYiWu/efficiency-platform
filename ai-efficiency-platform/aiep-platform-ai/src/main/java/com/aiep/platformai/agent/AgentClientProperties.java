@@ -10,6 +10,8 @@ public class AgentClientProperties {
     private String baseUrl = "http://127.0.0.1:8090";
     private Duration connectTimeout = Duration.ofSeconds(5);
     private Duration responseTimeout = Duration.ofSeconds(30);
+    private Duration customerServiceResponseTimeout = Duration.ofSeconds(180);
+    private Duration customerServiceStreamIdleTimeout = Duration.ofSeconds(180);
 
     public String getBaseUrl() {
         return baseUrl;
@@ -33,5 +35,21 @@ public class AgentClientProperties {
 
     public void setResponseTimeout(Duration responseTimeout) {
         this.responseTimeout = responseTimeout;
+    }
+
+    public Duration getCustomerServiceResponseTimeout() {
+        return customerServiceResponseTimeout;
+    }
+
+    public void setCustomerServiceResponseTimeout(Duration customerServiceResponseTimeout) {
+        this.customerServiceResponseTimeout = customerServiceResponseTimeout;
+    }
+
+    public Duration getCustomerServiceStreamIdleTimeout() {
+        return customerServiceStreamIdleTimeout;
+    }
+
+    public void setCustomerServiceStreamIdleTimeout(Duration customerServiceStreamIdleTimeout) {
+        this.customerServiceStreamIdleTimeout = customerServiceStreamIdleTimeout;
     }
 }

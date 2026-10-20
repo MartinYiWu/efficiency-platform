@@ -15,6 +15,14 @@ class DocumentPreflightTests(unittest.TestCase):
             DocumentQualityStatus.ACCEPTED,
         )
 
+    def test_html_document_is_supported_by_customer_service_pipeline(self):
+        self.assertEqual(
+            preflight_document(
+                b"<h1>company policy</h1>", "policy.html", "text/html"
+            ).quality_status,
+            DocumentQualityStatus.ACCEPTED,
+        )
+
     def test_unsafe_or_oversized_rejected_before_processing(self):
         result = preflight_document(
             b"x" * 11, "../a.pdf", "application/pdf", max_bytes=10

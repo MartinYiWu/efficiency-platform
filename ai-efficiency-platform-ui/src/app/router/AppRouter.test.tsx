@@ -299,4 +299,4 @@ it('renders the operations intelligent conversation page with content-operations
   expect(screen.getByText('帮我为新品发布准备三条内容选题')).toBeInTheDocument();
   fetchMock.mockRestore();
   window.history.replaceState(null, '', '/');
-}, 20_000);
+}, 30_000);

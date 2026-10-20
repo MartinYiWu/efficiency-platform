@@ -18,8 +18,45 @@ from fastapi import FastAPI
 from efficiency_platform_agent.agents.conversation.general_agent import (
     GeneralConversationAgent,
 )
+from efficiency_platform_agent.agents.customer_service.graph import CustomerServiceGraph
+from efficiency_platform_agent.agents.customer_service.ingest import (
+    CustomerServiceIngestService,
+    HttpDocumentDownloader,
+)
+from efficiency_platform_agent.agents.customer_service.ingest_repository import (
+    InMemoryIngestJobRepository,
+)
+from efficiency_platform_agent.agents.customer_service.model_gateway import (
+    ReleaseStructuredModelGateway,
+)
+from efficiency_platform_agent.agents.customer_service.parsing import (
+    CustomerServiceDocumentParser,
+)
+from efficiency_platform_agent.agents.customer_service.release_bundle import (
+    CustomerServiceReleaseBundle,
+)
+from efficiency_platform_agent.agents.customer_service.release_repository import (
+    InMemoryReleaseRepository,
+    MySqlReleaseRepository,
+)
+from efficiency_platform_agent.agents.customer_service.retrieval import (
+    CustomerServiceRetrieval,
+)
+from efficiency_platform_agent.agents.customer_service.retrieval_snapshot_repository import (
+    InMemoryRetrievalSnapshotRepository,
+    MySqlRetrievalSnapshotRepository,
+)
+from efficiency_platform_agent.agents.customer_service.service import (
+    CustomerServiceRunService,
+    ReleaseRepositoryPort,
+)
+from efficiency_platform_agent.agents.customer_service.vector_repository import (
+    DocumentChunkRepository,
+)
 from efficiency_platform_agent.api.app import create_app
+from efficiency_platform_agent.capabilities.document.docling_parser import DoclingParser
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.capabilities.ocr.paddle import PaddleOCRAdapter
 from efficiency_platform_agent.capabilities.research.public_sources import (
     FreePublicResearchProvider,
 )
@@ -94,10 +131,20 @@ from efficiency_platform_agent.persistence.mysql_runtime import (
 )
 from efficiency_platform_agent.prompts.mysql_repository import MySqlPromptRepository
 from efficiency_platform_agent.prompts.runtime import PromptAssembler
+from efficiency_platform_agent.providers.database.psycopg_pool import (
+    PsycopgPoolConnection,
+)
 from efficiency_platform_agent.providers.deepseek_stream import (
     DeepSeekStreamingProvider,
 )
+from efficiency_platform_agent.providers.embedding.dashscope import (
+    DashScopeEmbeddingProvider,
+)
 from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+from efficiency_platform_agent.providers.rerank.dashscope import DashScopeRerankProvider
+from efficiency_platform_agent.providers.rerank.dashscope_http import (
+    DashScopeRerankHttpClient,
+)
 from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
 from efficiency_platform_agent.routing.strategy_router import StrategyRouter
 from efficiency_platform_agent.runtime.event_hub import EventHub
@@ -167,6 +214,7 @@ class LocalAgentApplication:
     http_client: Any | None = None
     research_client: Any | None = None
     runtime_database: MySqlRuntimeDatabase | None = None
+    customer_service_resources: tuple[Any, ...] = ()
 
     async def close(self) -> None:
         """等待后台任务并关闭组合根拥有的客户端。"""
@@ -181,6 +229,14 @@ class LocalAgentApplication:
                     await result
         if self.runtime_database is not None:
             await self.runtime_database.close()
+        for resource in self.customer_service_resources:
+            close = getattr(resource, "close", None) or getattr(
+                resource, "aclose", None
+            )
+            if close is not None:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
 
 
 def _secret(settings: S7IntegrationSettings, name: str) -> str:
@@ -259,10 +315,13 @@ def build_local_agent_application(
     run_repository: RunRepository
     run_event_store: RunEventStore
     ranked_reference_repository: RankedReferenceRepository
+    customer_service_release_repository: ReleaseRepositoryPort
     if test_mode:
         run_repository = InMemoryRunRepository()
         run_event_store = InMemoryRunEventStore()
         ranked_reference_repository = InMemoryRankedReferenceRepository()
+        customer_service_release_repository = InMemoryReleaseRepository()
+        customer_service_retrieval_snapshots = InMemoryRetrievalSnapshotRepository()
     else:
         runtime_database = MySqlRuntimeDatabase(
             _secret(resolved, "runtime_database_url")
@@ -270,6 +329,12 @@ def build_local_agent_application(
         run_repository = MySqlRunRepository(runtime_database.engine)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
         ranked_reference_repository = MySqlRankedReferenceRepository(
+            runtime_database.engine
+        )
+        customer_service_release_repository = MySqlReleaseRepository(
+            runtime_database.engine
+        )
+        customer_service_retrieval_snapshots = MySqlRetrievalSnapshotRepository(
             runtime_database.engine
         )
     prompt_assembler = (
@@ -357,6 +422,7 @@ def build_local_agent_application(
 
     provider_registry = ModelProviderRegistry()
     candidates: list[ModelCandidate] = []
+    customer_service_model_providers: dict[str, ModelProvider] = {}
     for tier, model in model_names.items():
         provider_id = f"deepseek_{tier.value}"
         current = provider
@@ -371,6 +437,7 @@ def build_local_agent_application(
             )
         provider_registry.register(provider_id, current)
         candidates.append(_candidate(provider_id, provider_id, model, tier))
+        customer_service_model_providers.setdefault(model, current)
 
     cancellation = InMemoryCancellationSignal()
     model_cancellation = _RunScopedModelCancellation(cancellation)
@@ -557,15 +624,92 @@ def build_local_agent_application(
             budget_binder=live_acceptance_budget_binder,
             runner=ConversationLiveAcceptanceRunner(conversation, runtime),
         )
+    customer_service_ingest_service = None
+    customer_service_run_service = None
+    customer_service_resources: tuple[Any, ...] = ()
+    if not test_mode:
+        from openai import AsyncOpenAI
+
+        vector_connection = PsycopgPoolConnection(
+            _secret(resolved, "vector_database_url")
+        )
+        vectors = DocumentChunkRepository(vector_connection)
+        embedding_client = AsyncOpenAI(
+            api_key=_secret(resolved, "embedding_dashscope_api_key"),
+            base_url=_secret(resolved, "embedding_dashscope_base_url"),
+        )
+        embedding = DashScopeEmbeddingProvider(
+            embedding_client,
+            model=resolved.embedding_model,
+            dimensions=resolved.embedding_dimensions,
+        )
+        assert client is not None
+        rerank = DashScopeRerankProvider(
+            DashScopeRerankHttpClient(
+                client,
+                api_key=_secret(resolved, "rerank_dashscope_api_key"),
+                base_url=resolved.rerank_dashscope_base_url,
+            ),
+            model=resolved.rerank_model,
+        )
+
+        def docling_factory() -> Any:
+            from docling.document_converter import DocumentConverter
+
+            return DocumentConverter()
+
+        def paddle_factory() -> Any:
+            from paddleocr import PaddleOCR  # type: ignore[import-untyped]
+
+            return PaddleOCR(
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+                lang="ch",
+            )
+
+        customer_service_ingest_service = CustomerServiceIngestService(
+            jobs=InMemoryIngestJobRepository(),
+            downloader=HttpDocumentDownloader(client),
+            parser=CustomerServiceDocumentParser(
+                DoclingParser(converter_factory=docling_factory)
+            ),
+            ocr=PaddleOCRAdapter(engine_factory=paddle_factory),
+            embedder=embedding,
+            vectors=vectors,
+        )
+        customer_service_graph = CustomerServiceGraph(
+            CustomerServiceRetrieval(vectors, embedding, rerank)
+        )
+
+        def customer_service_gateway(
+            bundle: CustomerServiceReleaseBundle,
+        ) -> ReleaseStructuredModelGateway:
+            selected = customer_service_model_providers.get(
+                bundle.model_policy.model_name
+            )
+            if selected is None:
+                raise RuntimeError("CUSTOMER_SERVICE_MODEL_PROVIDER_MISSING")
+            return ReleaseStructuredModelGateway(selected, bundle)
+
+        customer_service_run_service = CustomerServiceRunService(
+            customer_service_graph,
+            customer_service_release_repository,
+            customer_service_gateway,
+            customer_service_retrieval_snapshots,
+        )
+        customer_service_resources = (embedding_client, vector_connection)
+
     app = create_app(
         runtime,
         event_hub=event_hub,
         conversation_service=conversation,
         live_acceptance_service=resolved_live_acceptance_service,
+        customer_service_ingest_service=customer_service_ingest_service,
+        customer_service_release_repository=customer_service_release_repository,
+        customer_service_run_service=customer_service_run_service,
         runtime_mode="s2_fake_in_memory" if test_mode else "local_real_mysql",
-        dependency_probe=(
-            None if runtime_database is None else runtime_database.ping
-        ),
+        dependency_probe=(None if runtime_database is None else runtime_database.ping),
     )
     app.state.local_live_research_components = local_live_components
     app.state.ranked_reference_repository = ranked_reference_repository
@@ -573,7 +717,7 @@ def build_local_agent_application(
     app.state.research_v2_enabled = resolved_research_v2.v2_enabled
     app.state.research_v2_production_ready = resolved_research_v2.production_ready
     app.state.live_acceptance_enabled = resolved_live_acceptance_service is not None
-    return LocalAgentApplication(
+    application = LocalAgentApplication(
         app,
         runtime,
         conversation,
@@ -581,7 +725,10 @@ def build_local_agent_application(
         client if owns_client else None,
         research_client,
         runtime_database,
+        customer_service_resources,
     )
+    app.router.add_event_handler("shutdown", application.close)
+    return application
 
 
 build_local_real_app = build_local_agent_application

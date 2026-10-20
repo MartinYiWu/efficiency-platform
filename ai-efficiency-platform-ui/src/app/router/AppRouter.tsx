@@ -27,6 +27,20 @@ import { PositionPreviewPage } from '../../pages/hr-assistant/positions/Position
 import { PositionWizardPage } from '../../pages/hr-assistant/positions/PositionWizardPage';
 import { PositionWeightsPage } from '../../pages/hr-assistant/positions/PositionWeightsPage';
 import { NotFoundPage } from '../../pages/not-found/NotFoundPage';
+import { KnowledgeBaseListPage } from '../../pages/knowledge-center/KnowledgeBaseListPage';
+import { KnowledgeBaseDetailPage } from '../../pages/knowledge-center/KnowledgeBaseDetailPage';
+import { KnowledgeDocumentPage } from '../../pages/knowledge-center/KnowledgeDocumentPage';
+import { KnowledgeImportPage } from '../../pages/knowledge-center/KnowledgeImportPage';
+import { AgentListPage } from '../../pages/ai-center/AgentListPage';
+import { AgentDetailPage } from '../../pages/ai-center/AgentDetailPage';
+import { PromptManagementPage } from '../../pages/ai-center/PromptManagementPage';
+import { ModelPolicyPage } from '../../pages/ai-center/ModelPolicyPage';
+import { RagPolicyPage } from '../../pages/ai-center/RagPolicyPage';
+import { RagDebugPage } from '../../pages/ai-center/RagDebugPage';
+import { RunListPage } from '../../pages/ai-center/RunListPage';
+import { RunReplayPage } from '../../pages/ai-center/RunReplayPage';
+import { FeedbackPage } from '../../pages/ai-center/FeedbackPage';
+import { CustomerServiceChatPage } from '../../pages/customer-service/CustomerServiceChatPage';
 import { HrAssistantShell } from '../../widgets/hrAssistantShell';
 
 export function AppRouter() {
@@ -38,6 +52,118 @@ export function AppRouter() {
         element={
           <HrAssistantShell>
             <OperationsChatPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-assistants/customer-service/chat"
+        element={
+          <HrAssistantShell>
+            <CustomerServiceChatPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases"
+        element={
+          <HrAssistantShell>
+            <KnowledgeBaseListPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases/:baseId"
+        element={
+          <HrAssistantShell>
+            <KnowledgeBaseDetailPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/knowledge-bases/:baseId/imports"
+        element={
+          <HrAssistantShell>
+            <KnowledgeImportPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/knowledge-center/documents/:documentId"
+        element={
+          <HrAssistantShell>
+            <KnowledgeDocumentPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/agents"
+        element={
+          <HrAssistantShell>
+            <AgentListPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/agents/:agentId"
+        element={
+          <HrAssistantShell>
+            <AgentDetailPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/prompts"
+        element={
+          <HrAssistantShell>
+            <PromptManagementPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/model-policies"
+        element={
+          <HrAssistantShell>
+            <ModelPolicyPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/rag-policies"
+        element={
+          <HrAssistantShell>
+            <RagPolicyPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/rag-debug"
+        element={
+          <HrAssistantShell>
+            <RagDebugPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/runs"
+        element={
+          <HrAssistantShell>
+            <RunListPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/runs/:runId"
+        element={
+          <HrAssistantShell>
+            <RunReplayPage />
+          </HrAssistantShell>
+        }
+      />
+      <Route
+        path="/ai-center/feedback"
+        element={
+          <HrAssistantShell>
+            <FeedbackPage />
           </HrAssistantShell>
         }
       />

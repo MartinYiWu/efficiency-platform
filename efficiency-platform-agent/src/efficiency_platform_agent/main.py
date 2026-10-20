@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import sys
 from collections.abc import Sequence
 
 import uvicorn
@@ -21,6 +23,11 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def selector_loop_factory() -> asyncio.AbstractEventLoop:
+    """为 Windows 上的 psycopg 异步连接创建 Selector 事件循环。"""
+    return asyncio.SelectorEventLoop()
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     """装配本地服务并交由 Uvicorn 启动。"""
     arguments = parse_arguments(argv)
@@ -30,4 +37,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         host=arguments.host,
         port=arguments.port,
         log_level="info",
+        loop=(
+            "efficiency_platform_agent.main:selector_loop_factory"
+            if sys.platform == "win32"
+            else "auto"
+        ),
     )

@@ -16,6 +16,9 @@ from .routes import build_router, handle_harness_error, handle_unexpected_error
 from .uploads import build_upload_router
 
 if TYPE_CHECKING:
+    from efficiency_platform_agent.capabilities.customer_service_ingest import (
+        CustomerServiceIngestPort,
+    )
     from efficiency_platform_agent.capabilities.document.service import (
         DocumentIngestionService,
     )
@@ -34,6 +37,9 @@ def create_app(
     event_hub: EventHub | None = None,
     conversation_service: ConversationService | None = None,
     live_acceptance_service: LiveAcceptanceService | None = None,
+    customer_service_ingest_service: CustomerServiceIngestPort | None = None,
+    customer_service_release_repository: object | None = None,
+    customer_service_run_service: object | None = None,
     runtime_mode: str = "s2_fake_in_memory",
     dependency_probe: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -62,6 +68,35 @@ def create_app(
 
         app.state.live_acceptance_service = live_acceptance_service
         app.include_router(build_live_acceptance_router(live_acceptance_service))
+    if customer_service_ingest_service is not None:
+        from .customer_service_ingest_routes import (
+            build_customer_service_ingest_router,
+        )
+
+        app.state.customer_service_ingest_service = customer_service_ingest_service
+        app.include_router(
+            build_customer_service_ingest_router(customer_service_ingest_service)
+        )
+    if customer_service_release_repository is not None:
+        from .customer_service_release_routes import (
+            build_customer_service_release_router,
+        )
+
+        app.state.customer_service_release_repository = (
+            customer_service_release_repository
+        )
+        app.include_router(
+            build_customer_service_release_router(
+                customer_service_release_repository  # type: ignore[arg-type]
+            )
+        )
+    if customer_service_run_service is not None:
+        from .customer_service_routes import build_customer_service_router
+
+        app.state.customer_service_run_service = customer_service_run_service
+        app.include_router(
+            build_customer_service_router(customer_service_run_service)  # type: ignore[arg-type]
+        )
     app.add_exception_handler(HarnessError, handle_harness_error)
     app.add_exception_handler(Exception, handle_unexpected_error)
 

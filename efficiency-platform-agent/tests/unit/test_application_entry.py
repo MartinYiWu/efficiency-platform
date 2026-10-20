@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import builtins
 import runpy
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -39,17 +40,55 @@ def test_main_builds_application_and_starts_uvicorn_without_reading_env(
     def fail_if_read(*args: object, **kwargs: object) -> object:
         raise AssertionError("正式入口不应读取 .env 内容")
 
-    monkeypatch.setattr(application_main, "build_local_agent_application", build_application)
+    monkeypatch.setattr(
+        application_main, "build_local_agent_application", build_application
+    )
     monkeypatch.setattr(application_main.uvicorn, "run", run_server)
     monkeypatch.setattr(builtins, "open", fail_if_read)
 
-    application_main.main(["--env-file", "local.env", "--host", "0.0.0.0", "--port", "9090"])
+    application_main.main(
+        ["--env-file", "local.env", "--host", "0.0.0.0", "--port", "9090"]
+    )
 
+    expected_server: dict[str, object] = {
+        "host": "0.0.0.0",
+        "port": 9090,
+        "log_level": "info",
+    }
+    expected_server["loop"] = (
+        "efficiency_platform_agent.main:selector_loop_factory"
+        if sys.platform == "win32"
+        else "auto"
+    )
     assert calls == {
         "env_file": "local.env",
         "app": "application",
-        "server": {"host": "0.0.0.0", "port": 9090, "log_level": "info"},
+        "server": expected_server,
     }
+
+
+def test_main_passes_psycopg_compatible_loop_to_uvicorn_on_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows 服务入口必须使用 psycopg 异步连接支持的 Selector 循环。"""
+    from efficiency_platform_agent import main as application_main
+
+    selected: list[object] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(
+        application_main,
+        "build_local_agent_application",
+        lambda **_: SimpleNamespace(app="application"),
+    )
+    monkeypatch.setattr(
+        application_main.uvicorn,
+        "run",
+        lambda *_, **options: selected.append(options["loop"]),
+    )
+
+    application_main.main([])
+
+    assert selected == ["efficiency_platform_agent.main:selector_loop_factory"]
 
 
 def test_legacy_script_forwards_to_package_main(
