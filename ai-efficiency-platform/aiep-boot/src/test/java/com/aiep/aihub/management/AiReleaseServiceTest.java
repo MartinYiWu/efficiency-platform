@@ -168,13 +168,13 @@ class AiReleaseServiceTest {
         var mapper = new ObjectMapper();
         var checksum = AiReleaseService.class.getDeclaredMethod("checksum", CustomerServiceReleaseRequest.class);
         checksum.setAccessible(true);
-        for (int version : List.of(1, 2)) {
+        for (String version : List.of("1", "2", "2-precision")) {
             try (var stream = getClass().getResourceAsStream("/customer-service-release-v" + version + ".json")) {
                 var request = mapper.readValue(stream, CustomerServiceReleaseRequest.class);
                 assertThat(checksum.invoke(service, request)).isEqualTo(request.snapshotChecksum());
                 var restored = mapper.readValue(mapper.writeValueAsBytes(request), CustomerServiceReleaseRequest.class);
                 assertThat(checksum.invoke(service, restored)).isEqualTo(request.snapshotChecksum());
-                if (version == 1) {
+                if (version.equals("1")) {
                     assertThat(mapper.valueToTree(restored).has("large_context_model_policy")).isFalse();
                     assertThat(mapper.valueToTree(restored).path("rag_policy").has("final_evidence_top_k")).isFalse();
                 }

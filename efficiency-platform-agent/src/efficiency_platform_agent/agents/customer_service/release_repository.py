@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -19,7 +20,7 @@ class ReleaseConflictError(RuntimeError):
 
 def _decode_snapshot(value: Any) -> CustomerServiceReleaseBundle:
     if isinstance(value, (str, bytes, bytearray)):
-        return CustomerServiceReleaseBundle.model_validate_json(value)
+        value = json.loads(value, parse_float=Decimal)
     return CustomerServiceReleaseBundle.model_validate(value)
 
 
@@ -59,7 +60,7 @@ class MySqlReleaseRepository:
         async with self.engine.begin() as connection:
             result = await connection.execute(
                 text(
-                    "SELECT checksum,snapshot_json FROM agent_release_bundle "
+                    "SELECT checksum,CAST(snapshot_json AS CHAR) AS snapshot_json FROM agent_release_bundle "
                     "WHERE release_id=:release_id FOR UPDATE"
                 ),
                 {"release_id": release_key},
@@ -96,7 +97,7 @@ class MySqlReleaseRepository:
         async with self.engine.connect() as connection:
             result = await connection.execute(
                 text(
-                    "SELECT snapshot_json FROM agent_release_bundle "
+                    "SELECT CAST(snapshot_json AS CHAR) AS snapshot_json FROM agent_release_bundle "
                     "WHERE release_id=:release_id"
                 ),
                 {"release_id": str(release_id)},
@@ -108,7 +109,7 @@ class MySqlReleaseRepository:
         async with self.engine.connect() as connection:
             result = await connection.execute(
                 text(
-                    "SELECT release_id,snapshot_json FROM agent_release_bundle "
+                    "SELECT release_id,CAST(snapshot_json AS CHAR) AS snapshot_json FROM agent_release_bundle "
                     "WHERE agent_key='customer-service' AND status='ACTIVE' "
                     "ORDER BY created_at_epoch_ms DESC LIMIT 1"
                 )

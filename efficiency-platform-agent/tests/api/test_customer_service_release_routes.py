@@ -282,6 +282,135 @@ def test_v2_canonical_decimal_does_not_round_to_python_context_precision():
     )
 
 
+def _precise_v2_json():
+    payload = _v2_payload()
+    payload.pop("snapshot_checksum")
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    canonical = canonical.replace(
+        '"similarity_candidate_threshold":0.96',
+        '"similarity_candidate_threshold":0.960000000000000001',
+    )
+    checksum = sha256(canonical.encode()).hexdigest()
+    return canonical[:-1] + ',"snapshot_checksum":"' + checksum + '"}', checksum
+
+
+def test_precise_numeric_json_snapshot_read_keeps_decimal_and_checksum():
+    from decimal import Decimal
+
+    raw, checksum = _precise_v2_json()
+    for snapshot in (raw, raw.encode(), bytearray(raw.encode())):
+        bundle = _decode_snapshot(snapshot)
+        assert bundle.rag_policy.similarity_candidate_threshold == Decimal(
+            "0.960000000000000001"
+        )
+        bundle.assert_checksum()
+        assert bundle.snapshot_checksum == checksum
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["get", "get_active", "save"])
+async def test_mysql_snapshot_read_uses_text_before_driver_float_decoding(operation):
+    from contextlib import asynccontextmanager
+    from uuid import UUID
+
+    from efficiency_platform_agent.agents.customer_service.release_repository import (
+        MySqlReleaseRepository,
+    )
+
+    raw, checksum = _precise_v2_json()
+    release_id = UUID("11111111-1111-1111-1111-111111111111")
+
+    class Engine:
+        @asynccontextmanager
+        async def connect(self):
+            yield self
+
+        begin = connect
+
+        async def execute(self, statement, parameters=None):
+            assert "CAST(snapshot_json AS CHAR)" in str(statement)
+            return SimpleNamespace(
+                scalar_one_or_none=lambda: raw,
+                first=lambda: SimpleNamespace(
+                    snapshot_json=raw, checksum=checksum, release_id=release_id
+                ),
+            )
+
+    repository = MySqlReleaseRepository(Engine())
+    if operation == "get":
+        bundle = await repository.get(release_id)
+    elif operation == "get_active":
+        _, bundle = await repository.get_active()
+    else:
+        bundle = await repository.save(release_id, _decode_snapshot(raw))
+    bundle.assert_checksum()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw", ['{"invalid":', "{}"])
+async def test_release_json_adapter_preserves_invalid_body_422(raw):
+    app = create_app(
+        SimpleNamespace(event_hub=None),
+        customer_service_release_repository=InMemoryReleaseRepository(),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.put(
+            "/internal/v1/customer-service/releases/11111111-1111-1111-1111-111111111111",
+            content=raw,
+            headers={"content-type": "application/json"},
+        )
+    assert response.status_code == 422
+
+
+def test_release_openapi_keeps_typed_request_body():
+    app = create_app(
+        SimpleNamespace(event_hub=None),
+        customer_service_release_repository=InMemoryReleaseRepository(),
+    )
+    operation = app.openapi()["paths"][
+        "/internal/v1/customer-service/releases/{release_id}"
+    ]["put"]
+    assert operation["requestBody"]["required"] is True
+    assert operation["requestBody"]["content"]["application/json"]["schema"][
+        "$ref"
+    ].endswith("CustomerServiceReleaseBundle")
+
+
+@pytest.mark.asyncio
+async def test_http_precise_numeric_json_survives_repository_roundtrip():
+    from decimal import Decimal
+
+    class SnapshotRepository(InMemoryReleaseRepository):
+        async def save(self, release_id, bundle):
+            bundle = _decode_snapshot(bundle.model_dump_json())
+            bundle.assert_checksum()
+            return await super().save(release_id, bundle)
+
+    repository = SnapshotRepository()
+    app = create_app(
+        SimpleNamespace(event_hub=None), customer_service_release_repository=repository
+    )
+    raw, checksum = _precise_v2_json()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.put(
+            "/internal/v1/customer-service/releases/11111111-1111-1111-1111-111111111111",
+            content=raw,
+            headers={"content-type": "application/json"},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["checksum"] == checksum
+    stored = next(iter(repository.values.values()))
+    assert stored.rag_policy.similarity_candidate_threshold == Decimal(
+        "0.960000000000000001"
+    )
+
+
 @pytest.mark.asyncio
 async def test_structured_gateway_appends_code_owned_json_contract() -> None:
     class Provider:

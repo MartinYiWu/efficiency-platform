@@ -47,7 +47,11 @@ class AiEvidencePolicyContractTest {
         var repository = new com.aiep.aihub.repository.management.JdbcAiManagementMappers(jdbc);
         repository.insertRagPolicy(value);
         repository.updateRagPolicy(value);
-        for (var invocation : org.mockito.Mockito.mockingDetails(jdbc).getInvocations()) {
+        var invocations = org.mockito.Mockito.mockingDetails(jdbc).getInvocations();
+        assertThat(invocations).hasSize(2);
+        assertThat(invocations.stream().filter(invocation -> ((String) invocation.getArgument(0)).startsWith("INSERT ")).count()).isEqualTo(1);
+        assertThat(invocations.stream().filter(invocation -> ((String) invocation.getArgument(0)).startsWith("UPDATE ")).count()).isEqualTo(1);
+        for (var invocation : invocations) {
             assertThat((String) invocation.getArgument(0)).contains("final_evidence_top_k",
                     "similarity_candidate_threshold", "similarity_pair_limit", "adjacent_group_max_parents");
         }
