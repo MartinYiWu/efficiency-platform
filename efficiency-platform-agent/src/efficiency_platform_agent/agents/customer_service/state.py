@@ -16,6 +16,13 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class EvidenceContractError(ValueError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        self.safe_message = "索引或证据契约不一致"
+        super().__init__(code)
+
+
 class IntentType(StrEnum):
     COMPANY_QUERY = "COMPANY_QUERY"
     GENERAL_QUERY = "GENERAL_QUERY"
@@ -74,6 +81,8 @@ class QueryRewrite(StrictModel):
 
 
 class Evidence(StrictModel):
+    rank: int | None = Field(default=None, gt=0)
+    query_index: int | None = Field(default=None, gt=0)
     chunk_id: UUID
     parent_id: UUID | None = None
     knowledge_base_id: UUID

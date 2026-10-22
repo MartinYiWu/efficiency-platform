@@ -7,10 +7,11 @@ from typing import Protocol
 from uuid import UUID
 
 from .chunking import count_tokens
+from .equivalence import EquivalenceDecision, validate_parents, verify_equivalence
 from .evidence_assembly import EvidenceAssembly, assemble_evidence
 from .intent import StructuredStageGateway
 from .release_bundle import CustomerServiceReleaseBundle
-from .state import Evidence, ParentEvidence, QueryRewrite
+from .state import Evidence, EvidenceContractError, ParentEvidence, QueryRewrite
 
 
 class EmbeddingPort(Protocol):
@@ -24,6 +25,18 @@ class RerankPort(Protocol):
 
 
 class RetrievalRepository(Protocol):
+    async def get_index_members(
+        self, *, index_release_ids: tuple[UUID, ...]
+    ) -> tuple[tuple[UUID, UUID, UUID, UUID], ...]: ...
+
+    async def get_chunk_vectors(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        chunk_ids: tuple[UUID, ...],
+    ) -> dict[UUID, tuple[float, ...]]: ...
+
     async def get_parents(
         self,
         *,
@@ -61,6 +74,9 @@ class RetrievalTrace:
     fused_candidates: tuple[Evidence, ...]
     reranked_evidence: tuple[Evidence, ...]
     assembly: EvidenceAssembly | None = None
+    equivalence_decisions: tuple[EquivalenceDecision, ...] = ()
+    version_exclusions: tuple[Evidence, ...] = ()
+    equivalence_errors: tuple[str, ...] = ()
 
 
 class CustomerServiceRetrieval:
@@ -91,10 +107,34 @@ class CustomerServiceRetrieval:
         queries = rewrite.queries[: policy.rewrite_query_limit]
         vectors = await self.embedding.embed(queries)
         release_ids = tuple(item.index_release_id for item in bundle.knowledge_bindings)
+        enhanced = (
+            getattr(bundle, "contract_version", "customer-service-release/1")
+            == "customer-service-release/2"
+        )
+        members = set()
+        if enhanced:
+            members = set(
+                await self.repository.get_index_members(index_release_ids=release_ids)
+            )
+            bindings = {
+                (b.knowledge_base_id, b.index_release_id)
+                for b in bundle.knowledge_bindings
+            }
+            versions = {}
+            for kb, document, version, release in members:
+                if (kb, release) not in bindings:
+                    raise EvidenceContractError("INDEX_BINDING_MISMATCH")
+                key = (kb, document, release)
+                if key in versions and versions[key] != version:
+                    raise EvidenceContractError("INDEX_DOCUMENT_VERSION_CONFLICT")
+                versions[key] = version
+        exclusions: list[Evidence] = []
         rankings: list[tuple[Evidence, ...]] = []
         vector_candidates: list[Evidence] = []
         fts_candidates: list[Evidence] = []
-        for query, vector in zip(queries, vectors, strict=True):
+        for query_index, (query, vector) in enumerate(
+            zip(queries, vectors, strict=True), 1
+        ):
             vector_items = await self.repository.vector_search(
                 tenant_id=tenant_id,
                 index_release_ids=release_ids,
@@ -107,10 +147,54 @@ class CustomerServiceRetrieval:
                 query=query,
                 limit=policy.fts_top_k,
             )
-            rankings.extend((vector_items, fts_items))
+            if enhanced:
+                vector_items = tuple(
+                    item.model_copy(update={"rank": rank, "query_index": query_index})
+                    for rank, item in enumerate(vector_items, 1)
+                )
+                fts_items = tuple(
+                    item.model_copy(update={"rank": rank, "query_index": query_index})
+                    for rank, item in enumerate(fts_items, 1)
+                )
             vector_candidates.extend(vector_items)
             fts_candidates.extend(fts_items)
+            for items in (vector_items, fts_items):
+                if enhanced:
+                    eligible = []
+                    for item in items:
+                        if (
+                            item.knowledge_base_id,
+                            item.document_id,
+                            item.document_version_id,
+                            item.index_release_id,
+                        ) in members:
+                            eligible.append(item)
+                        else:
+                            exclusions.append(item)
+                    rankings.append(tuple(eligible))
+                else:
+                    rankings.append(items)
         fused: list[Evidence] = []
+        if enhanced:
+            canonical: dict[tuple[UUID, UUID, UUID, str, str], Evidence] = {}
+            deduplicated = []
+            for ranking in rankings:
+                seen_ids = set()
+                unique = []
+                for item in ranking:
+                    key = (
+                        item.knowledge_base_id,
+                        item.document_id,
+                        item.document_version_id,
+                        item.content_hash,
+                        item.content,
+                    )
+                    representative = canonical.setdefault(key, item)
+                    if representative.chunk_id not in seen_ids:
+                        unique.append(representative)
+                        seen_ids.add(representative.chunk_id)
+                deduplicated.append(tuple(unique))
+            rankings = deduplicated
         seen_content: set[tuple[UUID, str, str]] = set()
         for item in _rrf(rankings):
             content_key = (
@@ -124,6 +208,11 @@ class CustomerServiceRetrieval:
             fused.append(item)
             if len(fused) >= policy.fusion_top_k:
                 break
+        if enhanced:
+            fused = [
+                item.model_copy(update={"rank": rank, "query_index": None})
+                for rank, item in enumerate(fused, 1)
+            ]
         if not fused:
             return RetrievalTrace(
                 question,
@@ -133,6 +222,7 @@ class CustomerServiceRetrieval:
                 tuple(fts_candidates),
                 (),
                 (),
+                version_exclusions=tuple(exclusions),
             )
         reranked = await self.reranker.rerank(
             question,
@@ -140,10 +230,18 @@ class CustomerServiceRetrieval:
             top_n=min(policy.rerank_top_k, len(fused)),
         )
         evidence = tuple(
-            fused[index].model_copy(update={"score": score})
-            for index, score in reranked
+            fused[index].model_copy(
+                update={
+                    "score": score,
+                    **({"rank": rank, "query_index": None} if enhanced else {}),
+                }
+            )
+            for rank, (index, score) in enumerate(reranked, 1)
         )
         assembly = None
+        decisions = ()
+        equivalence_errors = ()
+        selected_evidence = evidence
         parent_ids = tuple(dict.fromkeys(item.parent_id for item in evidence))
         if parent_ids and all(item is not None for item in parent_ids):
             parents = await self.repository.get_parents(
@@ -151,6 +249,29 @@ class CustomerServiceRetrieval:
                 index_release_ids=release_ids,
                 parent_ids=parent_ids,
             )
+            if enhanced:
+                validate_parents(evidence, parents)
+                try:
+                    vectors = await self.repository.get_chunk_vectors(
+                        tenant_id=tenant_id,
+                        index_release_ids=release_ids,
+                        chunk_ids=tuple(item.chunk_id for item in evidence),
+                    )
+                    selected_evidence, decisions = await verify_equivalence(
+                        evidence,
+                        parents,
+                        vectors,
+                        question=question,
+                        threshold=float(policy.similarity_candidate_threshold),
+                        pair_limit=policy.similarity_pair_limit,
+                        gateway=gateway,
+                        stage_bound=any(
+                            b.stage_key == "equivalence" for b in bundle.prompt_bindings
+                        ),
+                    )
+                # 可选向量核验失败不丢候选，父原文校验和 Rerank 仍保持失败关闭。
+                except Exception as error:  # noqa: BLE001
+                    equivalence_errors = (getattr(error, "code", type(error).__name__),)
             shared_prompt_tokens = sum(
                 count_tokens(message.content_template)
                 for binding in bundle.prompt_bindings
@@ -197,7 +318,7 @@ class CustomerServiceRetrieval:
                 + max(256, limit // 10)
             )
             assembly = assemble_evidence(
-                evidence,
+                selected_evidence,
                 parents,
                 context_token_limit=limit,
                 reserved_tokens=reserve,
@@ -213,6 +334,9 @@ class CustomerServiceRetrieval:
             tuple(fused),
             evidence,
             assembly,
+            decisions,
+            tuple(exclusions),
+            equivalence_errors,
         )
 
 

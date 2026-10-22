@@ -209,6 +209,15 @@ class CustomerServiceRunService:
             else set()
         )
         return {
+            "equivalence_decisions": [
+                item.model_dump(mode="json")
+                for item in (trace.equivalence_decisions if trace else ())
+            ],
+            "equivalence_errors": list(trace.equivalence_errors if trace else ()),
+            "version_exclusions": [
+                row | {"reason": "NOT_BOUND_INDEX_MEMBER"}
+                for row in _candidate_rows(trace.version_exclusions if trace else ())
+            ],
             "vector_candidates": _candidate_rows(
                 trace.vector_candidates if trace else ()
             ),
@@ -384,14 +393,18 @@ class CustomerServiceRunService:
 def _candidate_rows(values: tuple[Any, ...]) -> list[dict[str, Any]]:
     return [
         {
+            "rank": item.rank or rank,
+            "query_index": item.query_index,
             "chunk_id": str(item.chunk_id),
+            "knowledge_base_id": str(item.knowledge_base_id),
+            "document_id": str(item.document_id),
             "parent_id": str(item.parent_id) if item.parent_id else None,
             "document_version_id": str(item.document_version_id),
             "index_release_id": str(item.index_release_id),
             "score": item.score,
             "excerpt": item.content[:500],
         }
-        for item in values
+        for rank, item in enumerate(values, 1)
     ]
 
 

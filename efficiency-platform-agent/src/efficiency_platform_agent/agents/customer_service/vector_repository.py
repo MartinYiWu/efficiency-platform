@@ -278,6 +278,50 @@ class DocumentChunkRepository:
             for row in await _rows(result)
         )
 
+    async def get_index_members(
+        self, *, index_release_ids: tuple[UUID, ...]
+    ) -> tuple[tuple[UUID, UUID, UUID, UUID], ...]:
+        result = await _await(
+            self.connection.execute(
+                "SELECT knowledge_base_id::text,document_id::text,document_version_id::text,"
+                "index_release_id::text FROM customer_service.index_release_document "
+                "WHERE index_release_id=ANY(%s::uuid[])",
+                ([str(item) for item in index_release_ids],),
+            )
+        )
+        return tuple(
+            tuple(UUID(str(value)) for value in row) for row in await _rows(result)
+        )
+
+    async def get_chunk_vectors(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        chunk_ids: tuple[UUID, ...],
+    ) -> dict[UUID, tuple[float, ...]]:
+        if not chunk_ids:
+            return {}
+        result = await _await(
+            self.connection.execute(
+                "SELECT c.chunk_id::text,c.embedding FROM customer_service.document_chunk c "
+                "JOIN customer_service.index_release_document m "
+                "ON m.document_version_id=c.document_version_id "
+                "AND m.document_id=c.document_id AND m.knowledge_base_id=c.knowledge_base_id "
+                "WHERE c.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
+                "AND c.chunk_id=ANY(%s::uuid[])",
+                (
+                    tenant_id,
+                    [str(item) for item in index_release_ids],
+                    [str(item) for item in chunk_ids],
+                ),
+            )
+        )
+        return {
+            UUID(str(row[0])): tuple(float(value) for value in Vector._from_db(row[1]))
+            for row in await _rows(result)
+        }
+
     async def vector_search(
         self,
         *,
