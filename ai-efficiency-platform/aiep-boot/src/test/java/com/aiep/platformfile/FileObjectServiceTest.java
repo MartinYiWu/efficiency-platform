@@ -38,6 +38,7 @@ class FileObjectServiceTest {
         mapper = mock(FileObjectMapper.class);
         objectStore = mock(CosObjectStore.class);
         CosFileProperties properties = new CosFileProperties();
+        properties.setBasePath("efficiency-platform");
         properties.setReadUrlTtl(Duration.ofMinutes(10));
         service = new FileObjectService(mapper, objectStore, properties, tempDirectory);
     }
@@ -60,7 +61,7 @@ class FileObjectServiceTest {
         assertThat(stored.id()).isNotBlank();
         assertThat(stored.sha256()).hasSize(64);
         assertThat(stored.contentType()).isEqualTo("text/markdown");
-        assertThat(metadata.getValue().getObjectKey()).startsWith("customer-service/dev/");
+        assertThat(metadata.getValue().getObjectKey()).startsWith("efficiency-platform/customer-service/dev/");
         assertThat(metadata.getValue().getObjectKey()).doesNotContain("guide");
     }
 
@@ -89,7 +90,7 @@ class FileObjectServiceTest {
 
         ArgumentCaptor<String> objectKey = ArgumentCaptor.forClass(String.class);
         verify(objectStore).delete(objectKey.capture());
-        assertThat(objectKey.getValue()).startsWith("customer-service/dev/");
+        assertThat(objectKey.getValue()).startsWith("efficiency-platform/customer-service/dev/");
     }
 
     @Test

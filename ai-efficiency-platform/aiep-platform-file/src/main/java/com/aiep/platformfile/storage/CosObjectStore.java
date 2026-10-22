@@ -17,7 +17,7 @@ import java.time.Instant;
 import java.util.Date;
 import org.springframework.stereotype.Component;
 
-/** 腾讯云 COS 的最小受控适配器。凭据只从进程环境读取。 */
+/** 腾讯云 COS 的最小受控适配器。 */
 @Component
 public class CosObjectStore {
     private final CosFileProperties properties;
@@ -76,8 +76,8 @@ public class CosObjectStore {
         }
         synchronized (this) {
             if (client == null) {
-                String secretId = required(System.getenv("AGENT_COS_SECRET_ID"), "secret id");
-                String secretKey = required(System.getenv("AGENT_COS_SECRET_KEY"), "secret key");
+                String secretId = required(properties.getSecretId(), "secret id");
+                String secretKey = required(properties.getSecretKey(), "secret key");
                 ClientConfig clientConfig = new ClientConfig(new Region(required(properties.getRegion(), "region")));
                 client = new COSClient(new BasicCOSCredentials(secretId, secretKey), clientConfig);
             }
@@ -86,7 +86,7 @@ public class CosObjectStore {
     }
 
     private void validateSignedUrl(URI signedUrl) {
-        URI configured = properties.getBaseUrl();
+        URI configured = properties.getDomain();
         if (configured == null) {
             return;
         }

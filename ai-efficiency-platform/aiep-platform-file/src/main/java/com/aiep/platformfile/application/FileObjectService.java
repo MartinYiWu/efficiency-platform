@@ -289,10 +289,10 @@ public class FileObjectService implements FileFacade {
         return contentType.split(";", 2)[0].strip().toLowerCase(Locale.ROOT);
     }
 
-    private static String objectKey(String tenantId, String id, String extension) {
+    private String objectKey(String tenantId, String id, String extension) {
         LocalDate date = LocalDate.now();
-        return "customer-service/%s/%04d/%02d/%s%s".formatted(
-                tenantId, date.getYear(), date.getMonthValue(), id, extension);
+        return "%s/customer-service/%s/%04d/%02d/%s%s".formatted(
+                properties.getBasePath(), tenantId, date.getYear(), date.getMonthValue(), id, extension);
     }
 
     private static void requireTenant(String tenantId) {
