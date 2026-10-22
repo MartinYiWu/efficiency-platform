@@ -158,7 +158,7 @@ def parent_child_document(
 
 
 def _block_kind(text: str) -> BlockKind:
-    if re.search(r"^(?:\s*(?:`{3,}|~{3,})| {4}\S|\t\S)", text, re.MULTILINE):
+    if re.search(r"^(?:\s*(?:`{3,}|~{3,})| {4,}\S|\t[ \t]*\S)", text, re.MULTILINE):
         return "CODE"
     if any(_NUMBERED_CLAUSE.match(line) for line in text.splitlines()):
         return "NUMBERED_RULE"
@@ -265,8 +265,8 @@ def _parent_blocks(
     def flush() -> None:
         nonlocal numbered
         raw = "\n".join(pending)
-        content = raw.strip("\n") if _block_kind(raw) == "CODE" else raw.strip()
-        if content:
+        content = raw.strip("\n")
+        if content.strip():
             content_start = pending_start + raw.find(content)
             blocks.append(
                 _Block(

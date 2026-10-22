@@ -55,6 +55,28 @@ def test_parent_freezes_explicit_evidence_mode():
     assert parents[0].evidence_mode == "EXTRACTIVE_NARRATIVE"
 
 
+@pytest.mark.parametrize(
+    ("content", "kind"),
+    [
+        ("  continuation text", "LIST"),
+        ("     print(1)", "CODE"),
+        ("\t print(1)", "CODE"),
+    ],
+)
+def test_extractive_parent_preserves_protected_indentation(content, kind):
+    parent = parent_child_document(
+        ParsedDocument(markdown=content), evidence_mode="EXTRACTIVE_NARRATIVE"
+    )[0]
+
+    assert parent.content == content
+    assert parent.block_kind == kind
+    assert parent.evidence_mode == "EXTRACTIVE_NARRATIVE"
+    assert parent.content_hash == sha256(content.encode()).hexdigest()
+    assert parent.children[0].content == content
+    assert parent.children[0].start_offset == 0
+    assert parent.children[0].end_offset == len(content)
+
+
 def test_chunking_preserves_heading_path_and_bounds() -> None:
     document = ParsedDocument(
         markdown="# 公司制度\n\n## 请假流程\n\n" + "申请人提交审批。" * 30,
