@@ -138,8 +138,8 @@ class DocumentChunkRepository:
                         "(parent_id, tenant_id, knowledge_base_id, document_id, "
                         "document_version_id, document_title, version_no, parent_no, "
                         "section_path, page_start, page_end, content, content_hash, "
-                        "token_count) VALUES "
-                        "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        "token_count, block_kind, evidence_mode) VALUES "
+                        "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                         tuple(
                             (
                                 parent_ids[parent.parent_no],
@@ -156,6 +156,8 @@ class DocumentChunkRepository:
                                 parent.content,
                                 parent.content_hash,
                                 parent.token_count,
+                                parent.block_kind,
+                                parent.evidence_mode,
                             )
                             for parent in parents
                         ),
@@ -243,7 +245,7 @@ class DocumentChunkRepository:
                 "SELECT p.parent_id::text,p.knowledge_base_id::text,p.document_id::text,"
                 "p.document_version_id::text,m.index_release_id::text,p.document_title,"
                 "p.version_no,p.section_path,p.page_start,p.page_end,p.content,p.content_hash,"
-                "p.token_count FROM customer_service.document_parent p "
+                "p.token_count,p.block_kind,p.evidence_mode FROM customer_service.document_parent p "
                 "JOIN customer_service.index_release_document m "
                 "ON m.document_version_id=p.document_version_id "
                 "WHERE p.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
@@ -270,6 +272,8 @@ class DocumentChunkRepository:
                 content=str(row[10]),
                 content_hash=str(row[11]),
                 token_count=int(row[12]),
+                block_kind=row[13] or "LIST",
+                evidence_mode=row[14] or "FULL_ONLY",
             )
             for row in await _rows(result)
         )

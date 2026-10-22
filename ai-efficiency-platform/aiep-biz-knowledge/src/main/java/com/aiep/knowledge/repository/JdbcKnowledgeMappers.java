@@ -96,8 +96,8 @@ public class JdbcKnowledgeMappers implements KnowledgeMappers {
     }
 
     @Override public void insertVersion(KnowledgeDocumentVersionPO v) {
-        jdbc.update("INSERT INTO kb_document_version (id,document_id,version_no,file_id,file_sha256,content_type,change_summary,effective_date,status,parse_metadata,error_code,error_message,created_by,created_at,published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                v.id(), v.documentId(), v.versionNo(), v.fileId(), v.fileSha256(), v.contentType(), v.changeSummary(), v.effectiveDate(), v.status(), v.parseMetadata(), v.errorCode(), v.errorMessage(), v.createdBy(), v.createdAt(), v.publishedAt());
+        jdbc.update("INSERT INTO kb_document_version (id,document_id,version_no,file_id,file_sha256,content_type,change_summary,effective_date,status,parse_metadata,error_code,error_message,created_by,created_at,published_at,evidence_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                v.id(), v.documentId(), v.versionNo(), v.fileId(), v.fileSha256(), v.contentType(), v.changeSummary(), v.effectiveDate(), v.status(), v.parseMetadata(), v.errorCode(), v.errorMessage(), v.createdBy(), v.createdAt(), v.publishedAt(), v.evidenceMode());
     }
     @Override public void updateVersionState(String id, String status, String errorCode, String errorMessage) {
         jdbc.update("UPDATE kb_document_version SET status=?,error_code=?,error_message=? WHERE id=?", status, errorCode, errorMessage, id);

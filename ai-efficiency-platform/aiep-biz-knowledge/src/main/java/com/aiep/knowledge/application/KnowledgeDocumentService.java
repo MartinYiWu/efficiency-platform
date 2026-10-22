@@ -49,7 +49,14 @@ public class KnowledgeDocumentService {
             String itemId,
             MultipartFile upload,
             String sourceType) {
+        return processNewDocument(baseId, directoryId, itemId, upload, sourceType, null);
+    }
+
+    public KnowledgeIngestItemPO processNewDocument(
+            String baseId, String directoryId, String itemId, MultipartFile upload,
+            String sourceType, String evidenceMode) {
         requireActiveBase(baseId);
+        String frozenMode = resolveEvidenceMode(requireBase(baseId), evidenceMode);
         requireActiveDirectory(baseId, directoryId);
         FileObjectView file = files.store(KnowledgeBaseService.TENANT_ID, upload);
         PreparedIngest prepared = transactions.execute(status -> {
@@ -65,7 +72,7 @@ public class KnowledgeDocumentService {
             KnowledgeDocumentVersionPO version = new KnowledgeDocumentVersionPO(
                     UUID.randomUUID().toString(), document.id(), 1, file.id(), file.sha256(),
                     file.contentType(), null, null, "PROCESSING", null, null, null,
-                    KnowledgeBaseService.USER_ID, now, null);
+                    KnowledgeBaseService.USER_ID, now, null, frozenMode);
             KnowledgeProcessingTaskPO task = task(version.id(), 1, null);
             KnowledgeIngestItemPO item = new KnowledgeIngestItemPO(
                     itemId, requiredItem(itemId).batchId(), file.id(), document.id(), version.id(),
@@ -86,11 +93,18 @@ public class KnowledgeDocumentService {
             MultipartFile upload,
             String changeSummary,
             LocalDate effectiveDate) {
+        return uploadVersion(documentId, upload, changeSummary, effectiveDate, null);
+    }
+
+    public KnowledgeViews.DocumentVersionView uploadVersion(
+            String documentId, MultipartFile upload, String changeSummary,
+            LocalDate effectiveDate, String evidenceMode) {
         String summary = requireChangeSummary(changeSummary);
         KnowledgeDocumentPO document = requiredDocument(documentId);
         if ("ARCHIVED".equals(document.status())) {
             throw new KnowledgeException("KB_DOCUMENT_ARCHIVED", "归档文档不能创建新版本");
         }
+        String frozenMode = resolveEvidenceMode(requireBase(document.knowledgeBaseId()), evidenceMode);
         FileObjectView file = files.store(KnowledgeBaseService.TENANT_ID, upload);
         String batchId = UUID.randomUUID().toString();
         String itemId = UUID.randomUUID().toString();
@@ -110,7 +124,7 @@ public class KnowledgeDocumentService {
             KnowledgeDocumentVersionPO version = new KnowledgeDocumentVersionPO(
                     UUID.randomUUID().toString(), document.id(), repository.nextVersionNo(document.id()),
                     file.id(), file.sha256(), file.contentType(), summary, effectiveDate,
-                    "PROCESSING", null, null, null, KnowledgeBaseService.USER_ID, now, null);
+                    "PROCESSING", null, null, null, KnowledgeBaseService.USER_ID, now, null, frozenMode);
             KnowledgeProcessingTaskPO task = task(version.id(), repository.nextAttemptNo(version.id()), null);
             KnowledgeIngestItemPO item = new KnowledgeIngestItemPO(
                     itemId, batchId, file.id(), document.id(), version.id(), "PROCESSING",
@@ -203,7 +217,7 @@ public class KnowledgeDocumentService {
                     prepared.document().knowledgeBaseId(), prepared.document().id(), prepared.version().id(),
                     prepared.document().title(), prepared.version().versionNo(),
                     prepared.file().originalName(), prepared.file().contentType(), prepared.file().sizeBytes(),
-                    prepared.file().sha256(), readUrl.toString()));
+                    prepared.file().sha256(), readUrl.toString(), prepared.version().evidenceMode()));
             LocalDateTime now = LocalDateTime.now();
             KnowledgeProcessingTaskPO updatedTask = new KnowledgeProcessingTaskPO(
                     prepared.task().id(), prepared.version().id(), accepted.taskId(), accepted.stage(),
@@ -318,7 +332,7 @@ public class KnowledgeDocumentService {
         return new KnowledgeViews.DocumentVersionView(
                 v.id(), v.documentId(), v.versionNo(), v.fileId(), v.fileSha256(), v.contentType(),
                 v.changeSummary(), v.effectiveDate(), v.status(), v.errorCode(), v.errorMessage(),
-                v.createdAt(), repository.listTasks(v.id()).stream().map(KnowledgeDocumentService::taskView).toList());
+                v.createdAt(), repository.listTasks(v.id()).stream().map(KnowledgeDocumentService::taskView).toList(), v.evidenceMode());
     }
     private static KnowledgeViews.DocumentView documentView(KnowledgeDocumentPO v, List<KnowledgeViews.DocumentVersionView> versions) {
         return new KnowledgeViews.DocumentView(v.id(), v.knowledgeBaseId(), v.directoryId(), v.title(),
@@ -334,6 +348,17 @@ public class KnowledgeDocumentService {
             throw new KnowledgeException("KB_CHANGE_SUMMARY_REQUIRED", "变更说明长度必须为 1 到 500 个字符");
         }
         return value.strip();
+    }
+    private static String resolveEvidenceMode(KnowledgeBasePO base, String requested) {
+        String mode = requested == null ? "FULL_ONLY" : requested;
+        if (!List.of("FULL_ONLY", "EXTRACTIVE_NARRATIVE").contains(mode)) {
+            throw new KnowledgeException("KB_EVIDENCE_MODE_INVALID", "证据处理模式无效");
+        }
+        if ("EXTRACTIVE_NARRATIVE".equals(mode)
+                && !List.of("PRODUCT_DOCUMENTATION", "TECHNICAL_DOCUMENTATION").contains(base.knowledgeType())) {
+            throw new KnowledgeException("KB_EVIDENCE_MODE_NOT_ALLOWED", "该知识库类型只能保留完整原文");
+        }
+        return mode;
     }
     private static String title(String fileName) {
         int index = fileName.lastIndexOf('.');

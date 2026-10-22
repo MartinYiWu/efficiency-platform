@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
+from efficiency_platform_agent.agents.customer_service.contracts import IngestJobRequest
 from efficiency_platform_agent.agents.customer_service.ingest import (
     CustomerServiceIngestService,
 )
@@ -125,6 +126,23 @@ async def test_ingest_route_processes_document_and_is_idempotent() -> None:
     assert len(write["parents"]) == 1
     assert write["parents"][0].content == "请按流程提交审批。"
     assert write["chunks"][0].parent_no == 1
+    assert write["parents"][0].evidence_mode == "FULL_ONLY"
+
+
+@pytest.mark.asyncio
+async def test_ingest_freezes_explicit_evidence_mode():
+    service = _service()
+    request = IngestJobRequest.model_validate(
+        _payload() | {"evidence_mode": "EXTRACTIVE_NARRATIVE"}
+    )
+    await service.submit(request)
+    for _ in range(50):
+        if service.vectors.writes:
+            break
+        await asyncio.sleep(0)
+    assert (
+        service.vectors.writes[0]["parents"][0].evidence_mode == "EXTRACTIVE_NARRATIVE"
+    )
 
 
 @pytest.mark.asyncio

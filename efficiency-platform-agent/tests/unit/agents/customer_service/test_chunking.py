@@ -23,6 +23,38 @@ from efficiency_platform_agent.providers.embedding.dashscope import (
 )
 
 
+@pytest.mark.parametrize(
+    ("content", "kind"),
+    [
+        ("第一条 员工应提交申请。", "NUMBERED_RULE"),
+        ("- 申请\n- 审批", "LIST"),
+        ("| 项目 | 值 |\n|---|---|\n| A | B |", "TABLE"),
+        ("```python\n# 不应识别为标题\nprint(1)\n```", "CODE"),
+        ("产品支持自动恢复。", "PARAGRAPH"),
+        ("> 引用内容", "LIST"),
+        ("    print('indented code')", "CODE"),
+        ("一、审批条件", "NUMBERED_RULE"),
+        ("（一）审批条件", "NUMBERED_RULE"),
+        ("(1) 提交申请", "NUMBERED_RULE"),
+        ("正文\n| A | B |\n|---|---|", "LIST"),
+    ],
+)
+def test_parent_classifies_structure_conservatively(content, kind):
+    parents = parent_child_document(ParsedDocument(markdown=content))
+    assert len(parents) == 1
+    assert parents[0].content == content
+    assert parents[0].block_kind == kind
+    assert parents[0].evidence_mode == "FULL_ONLY"
+
+
+def test_parent_freezes_explicit_evidence_mode():
+    parents = parent_child_document(
+        ParsedDocument(markdown="产品支持自动恢复。"),
+        evidence_mode="EXTRACTIVE_NARRATIVE",
+    )
+    assert parents[0].evidence_mode == "EXTRACTIVE_NARRATIVE"
+
+
 def test_chunking_preserves_heading_path_and_bounds() -> None:
     document = ParsedDocument(
         markdown="# 公司制度\n\n## 请假流程\n\n" + "申请人提交审批。" * 30,
@@ -267,6 +299,9 @@ async def test_replace_parent_child_chunks_writes_parent_before_children() -> No
     assert "DELETE FROM customer_service.document_parent" in statements[2]
     assert "INSERT INTO customer_service.document_parent" in statements[3]
     assert "INSERT INTO customer_service.document_chunk" in statements[4]
+    assert "block_kind" in statements[3]
+    assert "evidence_mode" in statements[3]
+    assert connection.calls[3][1][0][-2:] == ("NUMBERED_RULE", "FULL_ONLY")
 
 
 @pytest.mark.asyncio
@@ -296,7 +331,13 @@ async def test_published_document_version_cannot_be_replaced_in_place() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_parents_restricts_to_bound_index_version() -> None:
+@pytest.mark.parametrize(
+    ("block_kind", "evidence_mode"),
+    [(None, None), ("PARAGRAPH", "EXTRACTIVE_NARRATIVE")],
+)
+async def test_get_parents_restricts_to_bound_index_version(
+    block_kind, evidence_mode
+) -> None:
     class Connection(_Connection):
         async def execute(self, sql, params=()):
             self.calls.append((sql, params))
@@ -316,6 +357,8 @@ async def test_get_parents_restricts_to_bound_index_version() -> None:
                         "完整条款",
                         sha256("完整条款".encode()).hexdigest(),
                         4,
+                        block_kind,
+                        evidence_mode,
                     )
                 ]
             )
@@ -331,6 +374,8 @@ async def test_get_parents_restricts_to_bound_index_version() -> None:
     assert parents[0].content == "完整条款"
     assert parents[0].page_no == 1
     assert parents[0].page_end == 2
+    assert parents[0].block_kind == (block_kind or "LIST")
+    assert parents[0].evidence_mode == (evidence_mode or "FULL_ONLY")
     assert "index_release_document" in connection.calls[0][0]
     assert "p.tenant_id=%s" in connection.calls[0][0]
 

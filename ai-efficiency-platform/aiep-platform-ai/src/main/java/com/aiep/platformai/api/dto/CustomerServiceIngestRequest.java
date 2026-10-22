@@ -18,8 +18,21 @@ public record CustomerServiceIngestRequest(
         @JsonProperty("content_type") String contentType,
         @JsonProperty("size_bytes") long sizeBytes,
         @JsonProperty("sha256") String sha256,
-        @JsonProperty("download_url") String downloadUrl) {
+        @JsonProperty("download_url") String downloadUrl,
+        /** 文档版本冻结模式；缺省为 FULL_ONLY，另一允许值为 EXTRACTIVE_NARRATIVE。 */
+        @JsonProperty("evidence_mode") String evidenceMode) {
+    public CustomerServiceIngestRequest(String contractVersion, String taskId, String tenantId,
+            String knowledgeBaseId, String documentId, String documentVersionId, String documentTitle,
+            int versionNo, String fileName, String contentType, long sizeBytes, String sha256, String downloadUrl) {
+        this(contractVersion, taskId, tenantId, knowledgeBaseId, documentId, documentVersionId,
+                documentTitle, versionNo, fileName, contentType, sizeBytes, sha256, downloadUrl, "FULL_ONLY");
+    }
+
     public CustomerServiceIngestRequest {
+        evidenceMode = evidenceMode == null ? "FULL_ONLY" : evidenceMode;
+        if (!java.util.Set.of("FULL_ONLY", "EXTRACTIVE_NARRATIVE").contains(evidenceMode)) {
+            throw new IllegalArgumentException("evidence_mode 无效");
+        }
         CustomerServiceDtoSupport.requireContract(contractVersion, "customer-service-ingest/1");
         CustomerServiceDtoSupport.requireText(taskId, "task_id");
         CustomerServiceDtoSupport.requireText(tenantId, "tenant_id");

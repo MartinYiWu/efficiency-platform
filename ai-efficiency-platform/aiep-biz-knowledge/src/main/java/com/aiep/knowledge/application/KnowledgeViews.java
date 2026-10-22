@@ -24,7 +24,7 @@ public final class KnowledgeViews {
             String id, String documentId, int versionNo, String fileId, String fileSha256,
             String contentType, String changeSummary, LocalDate effectiveDate, String status,
             String errorCode, String errorMessage, LocalDateTime createdAt,
-            List<ProcessingTaskView> processingTasks) { }
+            List<ProcessingTaskView> processingTasks, String evidenceMode) { }
     public record IngestBatchView(
             String id, String knowledgeBaseId, String importMode, int totalCount,
             int succeededCount, int failedCount, String status,

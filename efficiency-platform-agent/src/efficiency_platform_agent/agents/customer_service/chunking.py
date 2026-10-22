@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from hashlib import sha256
 
-from .contracts import ChunkDraft, ParentDraft, ParsedDocument
+from .contracts import BlockKind, ChunkDraft, EvidenceMode, ParentDraft, ParsedDocument
 
 _TOKEN = re.compile(r"[A-Za-z0-9_]+|[\u3400-\u9fff]|[^\s]", re.UNICODE)
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
@@ -75,6 +75,7 @@ def parent_child_document(
     parent_max_tokens: int = 2400,
     child_max_tokens: int = 400,
     child_overlap_tokens: int = 40,
+    evidence_mode: EvidenceMode = "FULL_ONLY",
 ) -> tuple[ParentDraft, ...]:
     if (
         parent_max_tokens < child_max_tokens
@@ -140,6 +141,8 @@ def parent_child_document(
         parents.append(
             ParentDraft(
                 parent_no=parent_no,
+                block_kind=_block_kind(block.text),
+                evidence_mode=evidence_mode,
                 section_path=block.section_path,
                 page_start=block.page_no,
                 page_end=block.page_end,
@@ -152,6 +155,32 @@ def parent_child_document(
     if not parents:
         raise ValueError("DOCUMENT_HAS_NO_CHUNKS")
     return tuple(parents)
+
+
+def _block_kind(text: str) -> BlockKind:
+    if re.search(r"^(?:\s*(?:`{3,}|~{3,})| {4}\S|\t\S)", text, re.MULTILINE):
+        return "CODE"
+    if any(_NUMBERED_CLAUSE.match(line) for line in text.splitlines()):
+        return "NUMBERED_RULE"
+    if re.search(
+        r"^\s*(?:[（(][一二三四五六七八九十百千0-9]+[）)]|[一二三四五六七八九十百千]+[、.）]|\d+[）)])",
+        text,
+        re.MULTILINE,
+    ):
+        return "NUMBERED_RULE"
+    if _is_table(text):
+        return "TABLE"
+    # 不明确的 Markdown、缩进和混合结构均保持受保护。
+    if any(
+        re.match(
+            r"^(?:\s{2,}|\t|\s*[-+*>|#<`~{\[\\]|\s*[（(]?\d+[)）]|\s*[一二三四五六七八九十]+[、.）])",
+            line,
+        )
+        for line in text.splitlines()
+        if line.strip()
+    ):
+        return "LIST"
+    return "PARAGRAPH"
 
 
 def _expand_parent_blocks(
@@ -223,6 +252,7 @@ def _parent_blocks(
     numbered = False
     pending_start = 0
     pending_end = 0
+    fence: str | None = None
 
     def page_for(offset: int) -> int | None:
         page = None
@@ -235,7 +265,7 @@ def _parent_blocks(
     def flush() -> None:
         nonlocal numbered
         raw = "\n".join(pending)
-        content = raw.strip()
+        content = raw.strip("\n") if _block_kind(raw) == "CODE" else raw.strip()
         if content:
             content_start = pending_start + raw.find(content)
             blocks.append(
@@ -252,6 +282,27 @@ def _parent_blocks(
 
     position = 0
     for line in markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence is not None or fence_match:
+            if fence is None:
+                flush()
+                pending_start = position
+                fence = fence_match.group(1)
+            elif (
+                fence_match
+                and fence_match.group(1)[0] == fence[0]
+                and len(fence_match.group(1)) >= len(fence)
+            ):
+                pending.append(line)
+                pending_end = position + len(line)
+                flush()
+                fence = None
+                position += len(line) + 1
+                continue
+            pending.append(line)
+            pending_end = position + len(line)
+            position += len(line) + 1
+            continue
         heading = _HEADING.match(line)
         if heading:
             flush()

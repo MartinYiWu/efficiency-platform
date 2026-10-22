@@ -26,12 +26,17 @@ public class KnowledgeImportService {
 
     public KnowledgeViews.IngestBatchView uploadSingle(
             String baseId, String directoryId, MultipartFile file) {
-        return ingest(baseId, directoryId, List.of(file), "SINGLE", "UPLOAD");
+        return uploadSingle(baseId, directoryId, file, null);
+    }
+
+    public KnowledgeViews.IngestBatchView uploadSingle(
+            String baseId, String directoryId, MultipartFile file, String evidenceMode) {
+        return ingest(baseId, directoryId, List.of(file), "SINGLE", "UPLOAD", evidenceMode);
     }
 
     public KnowledgeViews.IngestBatchView importFiles(
             String baseId, String directoryId, List<? extends MultipartFile> files) {
-        return ingest(baseId, directoryId, files, "BATCH", "BATCH_UPLOAD");
+        return ingest(baseId, directoryId, files, "BATCH", "BATCH_UPLOAD", null);
     }
 
     public KnowledgeViews.IngestBatchView getBatch(String id) {
@@ -54,7 +59,7 @@ public class KnowledgeImportService {
             String directoryId,
             List<? extends MultipartFile> files,
             String importMode,
-            String sourceType) {
+            String sourceType, String evidenceMode) {
         requireActiveBase(baseId);
         validateBatch(files);
         String batchId = UUID.randomUUID().toString();
@@ -72,7 +77,11 @@ public class KnowledgeImportService {
                     itemId, batchId, null, null, null, "QUEUED", null, null,
                     null, now, now, null));
             try {
-                documents.processNewDocument(baseId, directoryId, itemId, file, sourceType);
+                if (evidenceMode == null) {
+                    documents.processNewDocument(baseId, directoryId, itemId, file, sourceType);
+                } else {
+                    documents.processNewDocument(baseId, directoryId, itemId, file, sourceType, evidenceMode);
+                }
                 succeeded++;
             } catch (RuntimeException exception) {
                 failed++;

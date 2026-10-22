@@ -42,8 +42,9 @@ public class KnowledgeDocumentController {
     public ApiResponse<KnowledgeViews.IngestBatchView> upload(
             @PathVariable String id,
             @RequestPart("file") MultipartFile file,
-            @RequestParam(required = false) String directoryId) {
-        return ApiResponse.success(imports.uploadSingle(id, directoryId, file));
+            @RequestParam(required = false) String directoryId,
+            @RequestParam(required = false) String evidenceMode) {
+        return ApiResponse.success(imports.uploadSingle(id, directoryId, file, evidenceMode));
     }
 
     @GetMapping("/documents/{id}")
@@ -61,7 +62,7 @@ public class KnowledgeDocumentController {
             @PathVariable String id,
             @RequestPart("file") MultipartFile file,
             @ModelAttribute NewVersionRequest request) {
-        return ApiResponse.success(documents.uploadVersion(id, file, request.changeSummary(), request.effectiveDate()));
+        return ApiResponse.success(documents.uploadVersion(id, file, request.changeSummary(), request.effectiveDate(), request.evidenceMode()));
     }
 
     @GetMapping("/processing-tasks/{id}")
@@ -76,5 +77,7 @@ public class KnowledgeDocumentController {
 
     public record NewVersionRequest(
             String changeSummary,
-            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate effectiveDate) { }
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate effectiveDate,
+            /** 可空时使用 FULL_ONLY；制度和流程不允许原文节选模式。 */
+            String evidenceMode) { }
 }

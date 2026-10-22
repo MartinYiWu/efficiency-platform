@@ -7,6 +7,9 @@ from uuid import UUID
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
+EvidenceMode = Literal["FULL_ONLY", "EXTRACTIVE_NARRATIVE"]
+BlockKind = Literal["NUMBERED_RULE", "LIST", "TABLE", "CODE", "PARAGRAPH"]
+
 
 class IngestJobRequest(BaseModel):
     """Java 提交的不可扩展文档摄取请求。"""
@@ -32,6 +35,7 @@ class IngestJobRequest(BaseModel):
     size_bytes: int = Field(ge=1, le=10 * 1024 * 1024)
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     download_url: AnyHttpUrl
+    evidence_mode: EvidenceMode = "FULL_ONLY"
 
     @field_validator("file_name")
     @classmethod
@@ -126,6 +130,8 @@ class ParentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     parent_no: int = Field(gt=0)
+    block_kind: BlockKind = "LIST"
+    evidence_mode: EvidenceMode = "FULL_ONLY"
     section_path: str | None
     page_start: int | None = Field(default=None, gt=0)
     page_end: int | None = Field(default=None, gt=0)

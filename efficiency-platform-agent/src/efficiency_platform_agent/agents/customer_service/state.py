@@ -9,6 +9,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .contracts import BlockKind, EvidenceMode
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -92,6 +94,8 @@ class Evidence(StrictModel):
 
 
 class ParentEvidence(StrictModel):
+    block_kind: BlockKind = "LIST"
+    evidence_mode: EvidenceMode = "FULL_ONLY"
     parent_id: UUID
     knowledge_base_id: UUID
     document_id: UUID

@@ -125,7 +125,7 @@ class CustomerServiceIngestService:
             document = ParsedDocument(markdown=markdown, page_markers=page_markers)
 
             await self._progress(request.task_id, "CHUNK", 55)
-            parents = parent_child_document(document)
+            parents = parent_child_document(document, evidence_mode=request.evidence_mode)
             chunks = tuple(child for parent in parents for child in parent.children)
             await self._progress(request.task_id, "EMBED", 75)
             embeddings = await self.embedder.embed(
