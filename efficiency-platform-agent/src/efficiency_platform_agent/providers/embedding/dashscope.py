@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+_MAX_INPUTS_PER_REQUEST = 10
+
 
 class EmbeddingProviderError(RuntimeError):
     code = "EMBEDDING_PROVIDER_FAILED"
@@ -28,24 +30,28 @@ class DashScopeEmbeddingProvider:
     async def embed(self, texts: tuple[str, ...]) -> tuple[tuple[float, ...], ...]:
         if not texts or any(not text.strip() for text in texts):
             raise ValueError("EMBEDDING_INPUT_INVALID")
-        try:
-            response = await self.client.embeddings.create(
-                model=self.model,
-                input=list(texts),
-                dimensions=self.dimensions,
-                encoding_format="float",
-            )
-            ordered = sorted(response.data, key=lambda item: item.index)
-            vectors = tuple(
-                tuple(float(value) for value in item.embedding) for item in ordered
-            )
-        except Exception as error:
-            raise EmbeddingProviderError("Embedding 服务调用失败") from error
-        if len(vectors) != len(texts):
-            raise EmbeddingProviderError("Embedding 返回数量不一致")
+        vectors: list[tuple[float, ...]] = []
+        for start in range(0, len(texts), _MAX_INPUTS_PER_REQUEST):
+            batch = texts[start : start + _MAX_INPUTS_PER_REQUEST]
+            try:
+                response = await self.client.embeddings.create(
+                    model=self.model,
+                    input=list(batch),
+                    dimensions=self.dimensions,
+                    encoding_format="float",
+                )
+                ordered = sorted(response.data, key=lambda item: item.index)
+                batch_vectors = tuple(
+                    tuple(float(value) for value in item.embedding) for item in ordered
+                )
+            except Exception as error:
+                raise EmbeddingProviderError("Embedding 服务调用失败") from error
+            if len(batch_vectors) != len(batch):
+                raise EmbeddingProviderError("Embedding 返回数量不一致")
+            vectors.extend(batch_vectors)
         if any(len(vector) != self.dimensions for vector in vectors):
             raise EmbeddingProviderError("Embedding 返回维度不一致")
-        return vectors
+        return tuple(vectors)
 
 
 __all__ = ["DashScopeEmbeddingProvider", "EmbeddingProviderError"]

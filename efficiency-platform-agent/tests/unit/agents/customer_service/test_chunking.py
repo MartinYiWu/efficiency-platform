@@ -162,3 +162,33 @@ async def test_embedding_provider_validates_return_count_and_dimension() -> None
 
     with pytest.raises(EmbeddingProviderError, match="数量"):
         await provider.embed(("制度", "流程"))
+
+
+@pytest.mark.asyncio
+async def test_embedding_provider_sends_at_most_ten_inputs_per_request() -> None:
+    class Embeddings:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        async def create(self, **kwargs):
+            inputs = kwargs["input"]
+            if len(inputs) > 10:
+                raise ValueError("batch size is invalid")
+            self.calls.append(inputs)
+            rows = [
+                type(
+                    "Item",
+                    (),
+                    {"index": index, "embedding": [float(text[5:])] + [0.0] * 1023},
+                )()
+                for index, text in reversed(tuple(enumerate(inputs)))
+            ]
+            return type("Response", (), {"data": rows})()
+
+    client = type("Client", (), {"embeddings": Embeddings()})()
+    provider = DashScopeEmbeddingProvider(client)
+
+    vectors = await provider.embed(tuple(f"part-{index}" for index in range(14)))
+
+    assert [len(call) for call in client.embeddings.calls] == [10, 4]
+    assert [vector[0] for vector in vectors] == [float(index) for index in range(14)]
