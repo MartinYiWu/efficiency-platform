@@ -126,6 +126,9 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
     @Override public void upsertRagPolicyBinding(String agentVersionId, String ragPolicyId) {
         jdbc.update("INSERT INTO ai_agent_version_policy_binding (agent_version_id,rag_policy_id) VALUES (?,?) ON DUPLICATE KEY UPDATE rag_policy_id=VALUES(rag_policy_id)", agentVersionId, ragPolicyId);
     }
+    @Override public void upsertLargeContextModelPolicyBinding(String agentVersionId, String modelPolicyId) {
+        jdbc.update("INSERT INTO ai_agent_version_policy_binding (agent_version_id,large_context_model_policy_id) VALUES (?,?) ON DUPLICATE KEY UPDATE large_context_model_policy_id=VALUES(large_context_model_policy_id)", agentVersionId, modelPolicyId);
+    }
     @Override public List<AgentVersionKnowledgeBindingPO> listKnowledgeBindings(String agentVersionId) {
         return jdbc.query("SELECT * FROM ai_agent_version_knowledge_binding WHERE agent_version_id=? ORDER BY priority,knowledge_base_id", KNOWLEDGE_BINDING, agentVersionId);
     }
@@ -154,12 +157,12 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
     @Override public List<RagPolicyPO> listRagPolicies(String agentId) { return jdbc.query("SELECT * FROM ai_rag_policy WHERE owner_agent_definition_id=? ORDER BY created_at DESC", RAG, agentId); }
     @Override public RagPolicyPO findRagPolicy(String id) { return one("SELECT * FROM ai_rag_policy WHERE id=?", RAG, id); }
     @Override public void insertRagPolicy(RagPolicyPO v) {
-        jdbc.update("INSERT INTO ai_rag_policy (id,owner_agent_definition_id,policy_key,semantic_version,rewrite_query_limit,vector_top_k,fts_top_k,fusion_top_k,rerank_top_k,context_token_limit,citation_limit,status,checksum,created_by,created_at,published_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                v.id(), v.ownerAgentDefinitionId(), v.policyKey(), v.semanticVersion(), v.rewriteQueryLimit(), v.vectorTopK(), v.ftsTopK(), v.fusionTopK(), v.rerankTopK(), v.contextTokenLimit(), v.citationLimit(), v.status(), v.checksum(), v.createdBy(), v.createdAt(), v.publishedAt());
+        jdbc.update("INSERT INTO ai_rag_policy (id,owner_agent_definition_id,policy_key,semantic_version,rewrite_query_limit,vector_top_k,fts_top_k,fusion_top_k,rerank_top_k,context_token_limit,citation_limit,status,checksum,created_by,created_at,published_at,final_evidence_top_k,similarity_candidate_threshold,similarity_pair_limit,adjacent_group_max_parents) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                v.id(), v.ownerAgentDefinitionId(), v.policyKey(), v.semanticVersion(), v.rewriteQueryLimit(), v.vectorTopK(), v.ftsTopK(), v.fusionTopK(), v.rerankTopK(), v.contextTokenLimit(), v.citationLimit(), v.status(), v.checksum(), v.createdBy(), v.createdAt(), v.publishedAt(), v.finalEvidenceTopK(), v.similarityCandidateThreshold(), v.similarityPairLimit(), v.adjacentGroupMaxParents());
     }
     @Override public void updateRagPolicy(RagPolicyPO v) {
-        jdbc.update("UPDATE ai_rag_policy SET rewrite_query_limit=?,vector_top_k=?,fts_top_k=?,fusion_top_k=?,rerank_top_k=?,context_token_limit=?,citation_limit=?,status=?,checksum=?,published_at=? WHERE id=?",
-                v.rewriteQueryLimit(), v.vectorTopK(), v.ftsTopK(), v.fusionTopK(), v.rerankTopK(), v.contextTokenLimit(), v.citationLimit(), v.status(), v.checksum(), v.publishedAt(), v.id());
+        jdbc.update("UPDATE ai_rag_policy SET rewrite_query_limit=?,vector_top_k=?,fts_top_k=?,fusion_top_k=?,rerank_top_k=?,context_token_limit=?,citation_limit=?,status=?,checksum=?,published_at=?,final_evidence_top_k=?,similarity_candidate_threshold=?,similarity_pair_limit=?,adjacent_group_max_parents=? WHERE id=?",
+                v.rewriteQueryLimit(), v.vectorTopK(), v.ftsTopK(), v.fusionTopK(), v.rerankTopK(), v.contextTokenLimit(), v.citationLimit(), v.status(), v.checksum(), v.publishedAt(), v.finalEvidenceTopK(), v.similarityCandidateThreshold(), v.similarityPairLimit(), v.adjacentGroupMaxParents(), v.id());
     }
 
     @Override public AiReleasePO findRelease(String id) {

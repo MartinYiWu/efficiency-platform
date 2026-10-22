@@ -151,6 +151,16 @@ public class AiReleaseService {
         ModelPolicyPO model = repository.findModelPolicy(policyBinding.modelPolicyId());
         RagPolicyPO rag = repository.findRagPolicy(policyBinding.ragPolicyId());
         validatePolicies(version.agentDefinitionId(), model, rag);
+        AiPolicyManagementService.validateEvidencePolicy(rag.finalEvidenceTopK(),
+                rag.similarityCandidateThreshold(), rag.similarityPairLimit(), rag.adjacentGroupMaxParents());
+        ModelPolicyPO large = null;
+        if (policyBinding.largeContextModelPolicyId() != null) {
+            large = repository.findModelPolicy(policyBinding.largeContextModelPolicyId());
+            validatePolicies(version.agentDefinitionId(), large, rag);
+            if (large.maxInputTokens() <= model.maxInputTokens()) {
+                throw new AiManagementException("AI_LARGE_MODEL_INPUT_INVALID", "备选模型输入上限必须严格大于主模型");
+            }
+        }
 
         List<PromptBinding> prompts = repository.listPromptBindings(version.id()).stream()
                 .map(value -> prompt(version.agentDefinitionId(), value))
@@ -169,18 +179,19 @@ public class AiReleaseService {
             throw new AiManagementException("AI_RELEASE_KNOWLEDGE_REQUIRED", "知识索引绑定为空");
         }
         CustomerServiceReleaseRequest provisional = new CustomerServiceReleaseRequest(
-                "customer-service-release/1", "customer-service", version.semanticVersion(),
+                "customer-service-release/2", "customer-service", version.semanticVersion(),
                 version.graphKey(), version.graphVersion(),
                 AiAgentManagementService.required(environment, "发布环境"), prompts,
                 model(model), rag(rag), knowledge, List.of(),
-                "customer-service-answer/1", "1", "0".repeat(64));
+                "customer-service-answer/1", "1", "0".repeat(64), large == null ? null : model(large));
         String checksum = checksum(provisional);
         return new CustomerServiceReleaseRequest(
                 provisional.contractVersion(), provisional.agentKey(), provisional.agentVersion(),
                 provisional.graphKey(), provisional.graphVersion(), provisional.environment(),
                 provisional.promptBindings(), provisional.modelPolicy(), provisional.ragPolicy(),
                 provisional.knowledgeBindings(), provisional.toolAllowlist(),
-                provisional.outputContractVersion(), provisional.safetyRuleVersion(), checksum);
+                provisional.outputContractVersion(), provisional.safetyRuleVersion(), checksum,
+                provisional.largeContextModelPolicy());
     }
 
     private PromptBinding prompt(String agentId, PromptBindingPO binding) {
@@ -188,6 +199,9 @@ public class AiReleaseService {
         PromptVersionPO version = repository.findPromptVersion(binding.promptVersionId());
         if (definition == null || version == null || !"PUBLISHED".equals(version.status())) {
             throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 版本未发布");
+        }
+        if (!definition.id().equals(version.promptDefinitionId()) || !definition.stageKey().equals(binding.stageKey())) {
+            throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 版本与阶段归属不匹配");
         }
         if ("PRIVATE".equals(definition.scope())
                 && !agentId.equals(definition.ownerAgentDefinitionId())) {
@@ -211,6 +225,16 @@ public class AiReleaseService {
                 .toList();
         if (messages.isEmpty()) {
             throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 消息为空");
+        }
+        var ordinals = new java.util.HashSet<Integer>();
+        for (PromptMessage message : messages) {
+            if (message.ordinal() < 1 || !ordinals.add(message.ordinal())
+                    || ("USER".equals(message.role()) && message.trustedInstruction())
+                    || (("SYSTEM".equals(message.role()) || "DEVELOPER".equals(message.role()))
+                        && (message.contentTemplate().contains("{{input_json}}")
+                            || message.variables().stream().anyMatch(PromptVariable::allowUntrustedContent)))) {
+                throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 消息顺序或信任边界无效");
+            }
         }
         return new PromptBinding(
                 binding.stageKey(), binding.ordinal(), definition.promptKey(),
@@ -248,7 +272,9 @@ public class AiReleaseService {
         return new RagPolicy(
                 value.policyKey(), value.semanticVersion(), value.rewriteQueryLimit(),
                 value.vectorTopK(), value.ftsTopK(), value.fusionTopK(), value.rerankTopK(),
-                value.contextTokenLimit(), value.citationLimit(), value.checksum());
+                value.contextTokenLimit(), value.citationLimit(), value.checksum(),
+                value.finalEvidenceTopK(), value.similarityCandidateThreshold(),
+                value.similarityPairLimit(), value.adjacentGroupMaxParents());
     }
 
     private AgentVersionPO requiredVersion(String id) {
@@ -263,7 +289,10 @@ public class AiReleaseService {
         JsonNode tree = objectMapper.valueToTree(request);
         ((com.fasterxml.jackson.databind.node.ObjectNode) tree).remove("snapshot_checksum");
         try {
-            byte[] canonical = objectMapper.writeValueAsBytes(canonical(tree));
+            byte[] canonical = request.contractVersion().endsWith("/2")
+                    ? objectMapper.writer().with(com.fasterxml.jackson.core.JsonGenerator.Feature.WRITE_BIGDECIMAL_AS_PLAIN)
+                        .writeValueAsBytes(canonical(tree))
+                    : objectMapper.writeValueAsBytes(canonical(tree));
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
         } catch (JsonProcessingException | NoSuchAlgorithmException exception) {
             throw new IllegalStateException("无法生成 Release checksum", exception);

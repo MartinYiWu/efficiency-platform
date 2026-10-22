@@ -1,6 +1,7 @@
 package com.aiep.platformai.api.dto;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.util.List;
@@ -21,10 +22,25 @@ public record CustomerServiceReleaseRequest(
         @JsonProperty("tool_allowlist") List<String> toolAllowlist,
         @JsonProperty("output_contract_version") String outputContractVersion,
         @JsonProperty("safety_rule_version") String safetyRuleVersion,
-        @JsonProperty("snapshot_checksum") String snapshotChecksum) {
+        @JsonProperty("snapshot_checksum") String snapshotChecksum,
+        // 旧 /1 快照缺少该字段，禁止序列化补 null 后改变其校验和。
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonProperty("large_context_model_policy") ModelPolicy largeContextModelPolicy) {
+
+    public CustomerServiceReleaseRequest(String contractVersion, String agentKey, String agentVersion,
+            String graphKey, String graphVersion, String environment, List<PromptBinding> promptBindings,
+            ModelPolicy modelPolicy, RagPolicy ragPolicy, List<KnowledgeBinding> knowledgeBindings,
+            List<String> toolAllowlist, String outputContractVersion, String safetyRuleVersion, String snapshotChecksum) {
+        this(contractVersion, agentKey, agentVersion, graphKey, graphVersion, environment,
+                promptBindings, modelPolicy, ragPolicy, knowledgeBindings, toolAllowlist,
+                outputContractVersion, safetyRuleVersion, snapshotChecksum, null);
+    }
 
     public CustomerServiceReleaseRequest {
-        CustomerServiceDtoSupport.requireContract(contractVersion, "customer-service-release/1");
+        if (!"customer-service-release/1".equals(contractVersion)
+                && !"customer-service-release/2".equals(contractVersion)) {
+            throw new IllegalArgumentException("Release 契约版本无效");
+        }
         if (!"customer-service".equals(agentKey)) {
             throw new IllegalArgumentException("agent_key 必须为 customer-service");
         }
@@ -41,6 +57,25 @@ public record CustomerServiceReleaseRequest(
         CustomerServiceDtoSupport.requireText(outputContractVersion, "output_contract_version");
         CustomerServiceDtoSupport.requireText(safetyRuleVersion, "safety_rule_version");
         CustomerServiceDtoSupport.requireText(snapshotChecksum, "snapshot_checksum");
+        if (contractVersion.endsWith("/1")) {
+            if (largeContextModelPolicy != null || ragPolicy.finalEvidenceTopK() != null
+                    || ragPolicy.similarityCandidateThreshold() != null || ragPolicy.similarityPairLimit() != null
+                    || ragPolicy.adjacentGroupMaxParents() != null) {
+                throw new IllegalArgumentException("旧版 Release 不接受证据策略扩展");
+            }
+        } else {
+            ragPolicy.validateEvidencePolicy();
+            if (largeContextModelPolicy != null && largeContextModelPolicy.maxInputTokens() <= modelPolicy.maxInputTokens()) {
+                throw new IllegalArgumentException("备选模型输入上限必须严格大于主模型");
+            }
+            for (String stage : List.of("equivalence", "conflict_screen", "evidence_extract")) {
+                var bindings = promptBindings.stream().filter(value -> stage.equals(value.stageKey())).toList();
+                if (bindings.size() != 1 || !bindings.getFirst().messages().stream().map(PromptMessage::role).toList()
+                        .equals(List.of("SYSTEM", "USER"))) {
+                    throw new IllegalArgumentException("证据阶段必须绑定独立 SYSTEM、USER 消息");
+                }
+            }
+        }
     }
 
     /** 一个执行阶段绑定的确切 Prompt 版本及其有序角色消息。 */
@@ -96,7 +131,7 @@ public record CustomerServiceReleaseRequest(
             @JsonProperty("checksum") String checksum) {
     }
 
-    /** 智能客服私有 RAG 策略的冻结快照。 */
+    /** 智能客服私有 RAG 策略的冻结快照；扩展字段仅 /2 必填，/1 保留缺省状态。 */
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record RagPolicy(
             @JsonProperty("policy_key") String policyKey,
@@ -108,7 +143,26 @@ public record CustomerServiceReleaseRequest(
             @JsonProperty("rerank_top_k") int rerankTopK,
             @JsonProperty("context_token_limit") int contextTokenLimit,
             @JsonProperty("citation_limit") int citationLimit,
-            @JsonProperty("checksum") String checksum) {
+            @JsonProperty("checksum") String checksum,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("final_evidence_top_k") Integer finalEvidenceTopK,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("similarity_candidate_threshold") BigDecimal similarityCandidateThreshold,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("similarity_pair_limit") Integer similarityPairLimit,
+            @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("adjacent_group_max_parents") Integer adjacentGroupMaxParents) {
+        public RagPolicy(String policyKey, String semanticVersion, int rewriteQueryLimit,
+                int vectorTopK, int ftsTopK, int fusionTopK, int rerankTopK, int contextTokenLimit,
+                int citationLimit, String checksum) {
+            this(policyKey, semanticVersion, rewriteQueryLimit, vectorTopK, ftsTopK, fusionTopK,
+                    rerankTopK, contextTokenLimit, citationLimit, checksum, null, null, null, null);
+        }
+        public void validateEvidencePolicy() {
+            if (finalEvidenceTopK == null || finalEvidenceTopK < 1 || finalEvidenceTopK > 20
+                    || similarityCandidateThreshold == null || similarityCandidateThreshold.compareTo(new BigDecimal("0.85")) < 0
+                    || similarityCandidateThreshold.compareTo(BigDecimal.ONE) > 0 || similarityPairLimit == null
+                    || similarityPairLimit < 1 || similarityPairLimit > 50 || adjacentGroupMaxParents == null
+                    || adjacentGroupMaxParents < 1 || adjacentGroupMaxParents > 5) {
+                throw new IllegalArgumentException("证据策略超出允许范围");
+            }
+        }
     }
 
     /** Release 可检索的知识库与确切索引版本。 */

@@ -1,0 +1,158 @@
+{
+  "contract_version": "customer-service-release/2",
+  "agent_key": "customer-service",
+  "agent_version": "1.0.0",
+  "graph_key": "customer-service",
+  "graph_version": "1",
+  "environment": "dev",
+  "prompt_bindings": [
+    {
+      "stage_key": "conflict_screen",
+      "ordinal": 1,
+      "prompt_key": "conflict_screen",
+      "prompt_version": "1.0.0",
+      "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "messages": [
+        {
+          "ordinal": 1,
+          "role": "SYSTEM",
+          "message_key": "instruction",
+          "content_template": "仅判断原文",
+          "content_format": "TEXT",
+          "trusted_instruction": true,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        },
+        {
+          "ordinal": 2,
+          "role": "USER",
+          "message_key": "input",
+          "content_template": "{{input_json}}",
+          "content_format": "JSON",
+          "trusted_instruction": false,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        }
+      ]
+    },
+    {
+      "stage_key": "equivalence",
+      "ordinal": 1,
+      "prompt_key": "equivalence",
+      "prompt_version": "1.0.0",
+      "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "messages": [
+        {
+          "ordinal": 1,
+          "role": "SYSTEM",
+          "message_key": "instruction",
+          "content_template": "仅判断原文",
+          "content_format": "TEXT",
+          "trusted_instruction": true,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        },
+        {
+          "ordinal": 2,
+          "role": "USER",
+          "message_key": "input",
+          "content_template": "{{input_json}}",
+          "content_format": "JSON",
+          "trusted_instruction": false,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        }
+      ]
+    },
+    {
+      "stage_key": "evidence_extract",
+      "ordinal": 1,
+      "prompt_key": "evidence_extract",
+      "prompt_version": "1.0.0",
+      "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "messages": [
+        {
+          "ordinal": 1,
+          "role": "SYSTEM",
+          "message_key": "instruction",
+          "content_template": "仅判断原文",
+          "content_format": "TEXT",
+          "trusted_instruction": true,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        },
+        {
+          "ordinal": 2,
+          "role": "USER",
+          "message_key": "input",
+          "content_template": "{{input_json}}",
+          "content_format": "JSON",
+          "trusted_instruction": false,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        }
+      ]
+    },
+    {
+      "stage_key": "identity",
+      "ordinal": 1,
+      "prompt_key": "customer_service.identity.system",
+      "prompt_version": "1.0.0",
+      "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "messages": [
+        {
+          "ordinal": 1,
+          "role": "SYSTEM",
+          "message_key": "identity",
+          "content_template": "你是内部智能客服",
+          "content_format": "TEXT",
+          "trusted_instruction": true,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "variables": []
+        }
+      ]
+    }
+  ],
+  "model_policy": {
+    "policy_key": "primary",
+    "semantic_version": "1.0.0",
+    "provider": "DEEPSEEK",
+    "model_name": "deepseek-chat",
+    "temperature": 1e-7,
+    "top_p": 1,
+    "max_input_tokens": 32000,
+    "max_output_tokens": 4096,
+    "connect_timeout_ms": 5000,
+    "read_timeout_ms": 120000,
+    "max_retries": 1,
+    "checksum": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "rag_policy": {
+    "policy_key": "default",
+    "semantic_version": "1.0.0",
+    "rewrite_query_limit": 3,
+    "vector_top_k": 30,
+    "fts_top_k": 30,
+    "fusion_top_k": 40,
+    "rerank_top_k": 12,
+    "context_token_limit": 12000,
+    "citation_limit": 12,
+    "checksum": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "final_evidence_top_k": 8,
+    "similarity_candidate_threshold": 1,
+    "similarity_pair_limit": 20,
+    "adjacent_group_max_parents": 3
+  },
+  "knowledge_bindings": [
+    {
+      "knowledge_base_id": "22222222-2222-2222-2222-222222222222",
+      "index_release_id": "33333333-3333-3333-3333-333333333333",
+      "priority": 1,
+      "required": true
+    }
+  ],
+  "tool_allowlist": [],
+  "output_contract_version": "customer-service-answer/1",
+  "safety_rule_version": "1",
+  "snapshot_checksum": "fbc1e286a9a35f94c786377bd78135ff0dea5cc8ee1e94bead750c8bfba841e2"
+}

@@ -35,41 +35,68 @@ def _payload() -> dict[str, object]:
         "graph_key": "customer-service",
         "graph_version": "1",
         "environment": "dev",
-        "prompt_bindings": [{
-            "stage_key": "identity", "ordinal": 1,
-            "prompt_key": "customer_service.identity.system",
-            "prompt_version": "1.0.0", "checksum": "a" * 64,
-            "messages": [{
-                "ordinal": 1, "role": "SYSTEM", "message_key": "identity",
-                "content_template": "你是内部智能客服", "content_format": "TEXT",
-                "trusted_instruction": True, "checksum": "b" * 64,
-                "variables": [],
-            }],
-        }],
+        "prompt_bindings": [
+            {
+                "stage_key": "identity",
+                "ordinal": 1,
+                "prompt_key": "customer_service.identity.system",
+                "prompt_version": "1.0.0",
+                "checksum": "a" * 64,
+                "messages": [
+                    {
+                        "ordinal": 1,
+                        "role": "SYSTEM",
+                        "message_key": "identity",
+                        "content_template": "你是内部智能客服",
+                        "content_format": "TEXT",
+                        "trusted_instruction": True,
+                        "checksum": "b" * 64,
+                        "variables": [],
+                    }
+                ],
+            }
+        ],
         "model_policy": {
-            "policy_key": "primary", "semantic_version": "1.0.0",
-            "provider": "DEEPSEEK", "model_name": "deepseek-chat",
-            "temperature": 0.1, "top_p": 0.9, "max_input_tokens": 32000,
-            "max_output_tokens": 4096, "connect_timeout_ms": 5000,
-            "read_timeout_ms": 120000, "max_retries": 1, "checksum": "c" * 64,
+            "policy_key": "primary",
+            "semantic_version": "1.0.0",
+            "provider": "DEEPSEEK",
+            "model_name": "deepseek-chat",
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "max_input_tokens": 32000,
+            "max_output_tokens": 4096,
+            "connect_timeout_ms": 5000,
+            "read_timeout_ms": 120000,
+            "max_retries": 1,
+            "checksum": "c" * 64,
         },
         "rag_policy": {
-            "policy_key": "default", "semantic_version": "1.0.0",
-            "rewrite_query_limit": 3, "vector_top_k": 30, "fts_top_k": 30,
-            "fusion_top_k": 40, "rerank_top_k": 12,
-            "context_token_limit": 12000, "citation_limit": 12,
+            "policy_key": "default",
+            "semantic_version": "1.0.0",
+            "rewrite_query_limit": 3,
+            "vector_top_k": 30,
+            "fts_top_k": 30,
+            "fusion_top_k": 40,
+            "rerank_top_k": 12,
+            "context_token_limit": 12000,
+            "citation_limit": 12,
             "checksum": "d" * 64,
         },
-        "knowledge_bindings": [{
-            "knowledge_base_id": "22222222-2222-2222-2222-222222222222",
-            "index_release_id": "33333333-3333-3333-3333-333333333333",
-            "priority": 1, "required": True,
-        }],
+        "knowledge_bindings": [
+            {
+                "knowledge_base_id": "22222222-2222-2222-2222-222222222222",
+                "index_release_id": "33333333-3333-3333-3333-333333333333",
+                "priority": 1,
+                "required": True,
+            }
+        ],
         "tool_allowlist": [],
         "output_contract_version": "customer-service-answer/1",
         "safety_rule_version": "1",
     }
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
     value["snapshot_checksum"] = sha256(canonical.encode()).hexdigest()
     return value
 
@@ -82,10 +109,177 @@ def _rechecksum(value: dict[str, object]) -> None:
     value["snapshot_checksum"] = sha256(canonical.encode()).hexdigest()
 
 
+def _v2_payload():
+    value = _payload()
+    value["contract_version"] = "customer-service-release/2"
+    value["rag_policy"].update(
+        final_evidence_top_k=8,
+        similarity_candidate_threshold=0.96,
+        similarity_pair_limit=20,
+        adjacent_group_max_parents=3,
+    )
+    for stage in ("equivalence", "conflict_screen", "evidence_extract"):
+        value["prompt_bindings"].append(
+            {
+                "stage_key": stage,
+                "ordinal": 1,
+                "prompt_key": stage,
+                "prompt_version": "1.0.0",
+                "checksum": "a" * 64,
+                "messages": [
+                    {
+                        "ordinal": 1,
+                        "role": "SYSTEM",
+                        "message_key": "instruction",
+                        "content_template": "仅判断原文",
+                        "content_format": "TEXT",
+                        "trusted_instruction": True,
+                        "checksum": "b" * 64,
+                        "variables": [],
+                    },
+                    {
+                        "ordinal": 2,
+                        "role": "USER",
+                        "message_key": "input",
+                        "content_template": "{{input_json}}",
+                        "content_format": "JSON",
+                        "trusted_instruction": False,
+                        "checksum": "b" * 64,
+                        "variables": [],
+                    },
+                ],
+            }
+        )
+    value["prompt_bindings"].sort(key=lambda item: item["stage_key"])
+    _rechecksum(value)
+    return value
+
+
+def test_v2_release_and_v1_roundtrip_keep_frozen_checksums():
+    for payload in (_payload(), _v2_payload()):
+        bundle = CustomerServiceReleaseBundle.model_validate(payload)
+        bundle.assert_checksum()
+        restored = _decode_snapshot(bundle.model_dump_json())
+        restored.assert_checksum()
+        assert set(json.loads(bundle.model_dump_json())) == set(payload)
+        assert set(bundle.model_dump()["rag_policy"]) == set(payload["rag_policy"])
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("final_evidence_top_k", 0),
+        ("final_evidence_top_k", 21),
+        ("similarity_candidate_threshold", 0.84),
+        ("similarity_candidate_threshold", 1.01),
+        ("similarity_pair_limit", 0),
+        ("similarity_pair_limit", 51),
+        ("adjacent_group_max_parents", 0),
+        ("adjacent_group_max_parents", 6),
+    ],
+)
+def test_v2_rejects_policy_out_of_bounds(field, value):
+    payload = _v2_payload()
+    payload["rag_policy"][field] = value
+    with pytest.raises(ValueError):
+        CustomerServiceReleaseBundle.model_validate(payload)
+
+
+def test_v2_large_model_is_frozen_and_must_have_larger_input():
+    payload = _v2_payload()
+    payload["large_context_model_policy"] = payload["model_policy"] | {
+        "policy_key": "large",
+        "max_input_tokens": 64000,
+    }
+    _rechecksum(payload)
+    bundle = CustomerServiceReleaseBundle.model_validate(payload)
+    bundle.assert_checksum()
+    payload["large_context_model_policy"]["max_input_tokens"] = 32000
+    with pytest.raises(ValueError):
+        CustomerServiceReleaseBundle.model_validate(payload)
+
+
+def test_v2_requires_all_evidence_stages_and_system_user_order():
+    payload = _v2_payload()
+    payload["prompt_bindings"].pop(0)
+    with pytest.raises(ValueError):
+        CustomerServiceReleaseBundle.model_validate(payload)
+    payload = _v2_payload()
+    payload["prompt_bindings"][0]["messages"].reverse()
+    with pytest.raises(ValueError):
+        CustomerServiceReleaseBundle.model_validate(payload)
+
+
 def test_mysql_json_text_is_decoded_into_release_bundle() -> None:
     decoded = _decode_snapshot(json.dumps(_payload(), ensure_ascii=False))
     assert decoded.agent_key == "customer-service"
     assert decoded.snapshot_checksum == _payload()["snapshot_checksum"]
+
+
+def test_java_golden_snapshots_cover_old_checksum_and_decimal_edges():
+    from pathlib import Path
+
+    fixtures = (
+        Path(__file__).resolve().parents[3]
+        / "ai-efficiency-platform/aiep-boot/src/test/resources"
+    )
+    for version in (1, 2):
+        bundle = CustomerServiceReleaseBundle.model_validate_json(
+            (fixtures / f"customer-service-release-v{version}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        bundle.assert_checksum()
+        _decode_snapshot(bundle.model_dump_json()).assert_checksum()
+
+
+def test_v2_negative_zero_has_same_java_canonical_number_as_zero():
+    payload = _v2_payload()
+    payload["model_policy"]["temperature"] = 0
+    positive = CustomerServiceReleaseBundle.model_validate(payload).computed_checksum()
+    payload["model_policy"]["temperature"] = "-0.0000"
+    assert (
+        CustomerServiceReleaseBundle.model_validate(payload).computed_checksum()
+        == positive
+    )
+
+
+@pytest.mark.asyncio
+async def test_v2_http_delivery_verifies_new_snapshot_and_rejects_tampering():
+    app = create_app(
+        SimpleNamespace(event_hub=None),
+        customer_service_release_repository=InMemoryReleaseRepository(),
+    )
+    payload = _v2_payload()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        accepted = await client.put(
+            "/internal/v1/customer-service/releases/11111111-1111-1111-1111-111111111111",
+            json=payload,
+        )
+        assert accepted.status_code == 200
+        assert accepted.json()["checksum"] == payload["snapshot_checksum"]
+        payload["rag_policy"]["final_evidence_top_k"] = 9
+        tampered = await client.put(
+            "/internal/v1/customer-service/releases/11111111-1111-1111-1111-111111111112",
+            json=payload,
+        )
+        assert tampered.status_code == 422
+        assert tampered.json()["error"]["code"] == "CS_AGENT_RELEASE_CHECKSUM_INVALID"
+
+
+def test_v2_canonical_decimal_does_not_round_to_python_context_precision():
+    from decimal import Decimal
+
+    from efficiency_platform_agent.agents.customer_service.release_bundle import (
+        _canonical_json,
+    )
+
+    assert (
+        _canonical_json(Decimal("0.96000000000000000000000000001"))
+        == "0.96000000000000000000000000001"
+    )
 
 
 @pytest.mark.asyncio
@@ -116,9 +310,7 @@ async def test_structured_gateway_appends_code_owned_json_contract() -> None:
     provider = Provider()
     bundle = CustomerServiceReleaseBundle.model_validate(_payload())
     gateway = ReleaseStructuredModelGateway(provider, bundle)  # type: ignore[arg-type]
-    await gateway.complete(
-        "identity", {"question": "如何梳理问题？"}, IntentDecision
-    )
+    await gateway.complete("identity", {"question": "如何梳理问题？"}, IntentDecision)
 
     assert provider.request is not None
     contract = provider.request.messages[-1]

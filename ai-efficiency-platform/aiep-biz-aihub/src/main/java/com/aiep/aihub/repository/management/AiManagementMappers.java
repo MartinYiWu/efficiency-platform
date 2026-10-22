@@ -41,6 +41,7 @@ public interface AiManagementMappers {
     AgentVersionPolicyBindingPO findPolicyBinding(String agentVersionId);
     void upsertModelPolicyBinding(String agentVersionId, String modelPolicyId);
     void upsertRagPolicyBinding(String agentVersionId, String ragPolicyId);
+    void upsertLargeContextModelPolicyBinding(String agentVersionId, String modelPolicyId);
     List<AgentVersionKnowledgeBindingPO> listKnowledgeBindings(String agentVersionId);
     void replaceKnowledgeBindings(
             String agentVersionId, List<AgentVersionKnowledgeBindingPO> values);

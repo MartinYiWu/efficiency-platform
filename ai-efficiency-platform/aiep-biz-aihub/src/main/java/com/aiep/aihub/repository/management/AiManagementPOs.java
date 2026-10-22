@@ -42,7 +42,8 @@ public final class AiManagementPOs {
             String promptVersionId, boolean required) { }
 
     public record AgentVersionPolicyBindingPO(
-            String agentVersionId, String modelPolicyId, String ragPolicyId) { }
+            String agentVersionId, String modelPolicyId, String ragPolicyId,
+            String largeContextModelPolicyId) { }
 
     public record AgentVersionKnowledgeBindingPO(
             String agentVersionId, String knowledgeBaseId, String indexReleaseId,
@@ -60,5 +61,7 @@ public final class AiManagementPOs {
             int rewriteQueryLimit, int vectorTopK, int ftsTopK, int fusionTopK,
             int rerankTopK, int contextTokenLimit, int citationLimit, String status,
             String checksum, String createdBy, LocalDateTime createdAt,
-            LocalDateTime publishedAt) { }
+            LocalDateTime publishedAt,
+            Integer finalEvidenceTopK, BigDecimal similarityCandidateThreshold,
+            Integer similarityPairLimit, Integer adjacentGroupMaxParents) { }
 }

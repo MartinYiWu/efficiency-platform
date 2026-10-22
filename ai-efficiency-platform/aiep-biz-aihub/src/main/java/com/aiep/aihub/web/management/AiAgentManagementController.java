@@ -75,6 +75,13 @@ public class AiAgentManagementController {
         return ApiResponse.success(service.bindRagPolicy(id, request.assetId()));
     }
 
+    /** 绑定已发布的大上下文备选策略；assetId 为空时解除绑定。 */
+    @PutMapping("/versions/{id}/large-context-model-policy")
+    public ApiResponse<AgentVersionPolicyBindingPO> bindLargeContextModelPolicy(
+            @PathVariable String id, @RequestBody AssetIdRequest request) {
+        return ApiResponse.success(service.bindLargeContextModelPolicy(id, request.assetId()));
+    }
+
     @PutMapping("/versions/{id}/knowledge-bindings")
     public ApiResponse<List<AgentVersionKnowledgeBindingPO>> bindKnowledge(
             @PathVariable String id, @RequestBody KnowledgeBindingRequest request) {

@@ -85,7 +85,9 @@ public class AiPolicyManagementService {
                 input.rewriteQueryLimit(), input.vectorTopK(), input.ftsTopK(), input.fusionTopK(),
                 input.rerankTopK(), input.contextTokenLimit(), input.citationLimit(), "DRAFT",
                 AiAgentManagementService.required(input.checksum(), "校验和"), USER_ID,
-                current == null ? now : current.createdAt(), null);
+                current == null ? now : current.createdAt(), null,
+                input.finalEvidenceTopK(), input.similarityCandidateThreshold(),
+                input.similarityPairLimit(), input.adjacentGroupMaxParents());
         if (current == null) {
             repository.insertRagPolicy(value);
         } else {
@@ -122,7 +124,13 @@ public class AiPolicyManagementService {
                 current.ftsTopK(), current.fusionTopK(), current.rerankTopK(),
                 current.contextTokenLimit(), current.citationLimit(), target, current.checksum(),
                 current.createdBy(), current.createdAt(),
-                "PUBLISHED".equals(target) ? LocalDateTime.now() : current.publishedAt());
+                "PUBLISHED".equals(target) ? LocalDateTime.now() : current.publishedAt(),
+                current.finalEvidenceTopK(), current.similarityCandidateThreshold(),
+                current.similarityPairLimit(), current.adjacentGroupMaxParents());
+        if (!"RETIRED".equals(target)) {
+            validateEvidencePolicy(value.finalEvidenceTopK(), value.similarityCandidateThreshold(),
+                    value.similarityPairLimit(), value.adjacentGroupMaxParents());
+        }
         repository.updateRagPolicy(value);
         return value;
     }
@@ -164,5 +172,33 @@ public class AiPolicyManagementService {
     public record RagPolicyInput(
             String id, String ownerAgentId, String policyKey, String semanticVersion,
             int rewriteQueryLimit, int vectorTopK, int ftsTopK, int fusionTopK,
-            int rerankTopK, int contextTokenLimit, int citationLimit, String checksum) { }
+            int rerankTopK, int contextTokenLimit, int citationLimit, String checksum,
+            Integer finalEvidenceTopK, BigDecimal similarityCandidateThreshold,
+            Integer similarityPairLimit, Integer adjacentGroupMaxParents) {
+        public RagPolicyInput {
+            finalEvidenceTopK = finalEvidenceTopK == null ? 8 : finalEvidenceTopK;
+            similarityCandidateThreshold = similarityCandidateThreshold == null
+                    ? new BigDecimal("0.96") : similarityCandidateThreshold;
+            similarityPairLimit = similarityPairLimit == null ? 20 : similarityPairLimit;
+            adjacentGroupMaxParents = adjacentGroupMaxParents == null ? 3 : adjacentGroupMaxParents;
+            validateEvidencePolicy(finalEvidenceTopK, similarityCandidateThreshold,
+                    similarityPairLimit, adjacentGroupMaxParents);
+        }
+        public RagPolicyInput(String id, String ownerAgentId, String policyKey, String semanticVersion,
+                int rewriteQueryLimit, int vectorTopK, int ftsTopK, int fusionTopK,
+                int rerankTopK, int contextTokenLimit, int citationLimit, String checksum) {
+            this(id, ownerAgentId, policyKey, semanticVersion, rewriteQueryLimit, vectorTopK,
+                    ftsTopK, fusionTopK, rerankTopK, contextTokenLimit, citationLimit, checksum,
+                    null, null, null, null);
+        }
+    }
+
+    static void validateEvidencePolicy(Integer finalTopK, BigDecimal threshold, Integer pairLimit, Integer groupLimit) {
+        if (finalTopK == null || finalTopK < 1 || finalTopK > 20
+                || threshold == null || threshold.compareTo(new BigDecimal("0.85")) < 0
+                || threshold.compareTo(BigDecimal.ONE) > 0 || pairLimit == null
+                || pairLimit < 1 || pairLimit > 50 || groupLimit == null || groupLimit < 1 || groupLimit > 5) {
+            throw new AiManagementException("AI_RAG_POLICY_RANGE_INVALID", "证据策略超出允许范围，旧策略须创建新版本");
+        }
+    }
 }

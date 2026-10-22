@@ -101,7 +101,7 @@ class AiAssetOwnershipTest {
                         "RELEASED", "初始版本", "1", NOW, NOW));
         when(repository.findPolicyBinding("source-version"))
                 .thenReturn(new AgentVersionPolicyBindingPO(
-                        "source-version", "model-1", "rag-1"));
+                        "source-version", "model-1", "rag-1", null));
         when(repository.listPromptBindings("source-version"))
                 .thenReturn(List.of(new PromptBindingPO(
                         "source-version", "answer", 1, "prompt-1", "prompt-version-1", true)));

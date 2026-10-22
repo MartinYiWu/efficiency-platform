@@ -84,6 +84,9 @@ public class AiAgentManagementService {
             if (policies.ragPolicyId() != null) {
                 repository.upsertRagPolicyBinding(target.id(), policies.ragPolicyId());
             }
+            if (policies.largeContextModelPolicyId() != null) {
+                repository.upsertLargeContextModelPolicyBinding(target.id(), policies.largeContextModelPolicyId());
+            }
         }
         for (PromptBindingPO binding : repository.listPromptBindings(sourceVersionId)) {
             repository.insertPromptBinding(new PromptBindingPO(
@@ -143,6 +146,13 @@ public class AiAgentManagementService {
         if (!"PUBLISHED".equals(model.status())) {
             throw new AiManagementException("AI_POLICY_NOT_PUBLISHED", "只能绑定已发布策略");
         }
+        AgentVersionPolicyBindingPO binding = repository.findPolicyBinding(versionId);
+        if (binding != null && binding.largeContextModelPolicyId() != null) {
+            ModelPolicyPO large = repository.findModelPolicy(binding.largeContextModelPolicyId());
+            if (large == null || large.maxInputTokens() <= model.maxInputTokens()) {
+                throw new AiManagementException("AI_LARGE_MODEL_INPUT_INVALID", "备选模型输入上限必须严格大于主模型");
+            }
+        }
         repository.upsertModelPolicyBinding(versionId, modelPolicyId);
         return repository.findPolicyBinding(versionId);
     }
@@ -159,6 +169,29 @@ public class AiAgentManagementService {
             throw new AiManagementException("AI_POLICY_NOT_PUBLISHED", "只能绑定已发布策略");
         }
         repository.upsertRagPolicyBinding(versionId, ragPolicyId);
+        return repository.findPolicyBinding(versionId);
+    }
+
+    @Transactional
+    public AgentVersionPolicyBindingPO bindLargeContextModelPolicy(String versionId, String policyId) {
+        AgentVersionPO version = requiredVersion(versionId);
+        mutable(version.status());
+        if (policyId != null) {
+            ModelPolicyPO large = repository.findModelPolicy(required(policyId, "备选模型策略 ID"));
+            if (large == null || !version.agentDefinitionId().equals(large.ownerAgentDefinitionId())) {
+                throw new AiManagementException("AI_ASSET_OWNER_MISMATCH", "模型策略不属于该 Agent");
+            }
+            if (!"PUBLISHED".equals(large.status())) {
+                throw new AiManagementException("AI_POLICY_NOT_PUBLISHED", "只能绑定已发布策略");
+            }
+            AgentVersionPolicyBindingPO binding = repository.findPolicyBinding(versionId);
+            ModelPolicyPO primary = binding == null || binding.modelPolicyId() == null
+                    ? null : repository.findModelPolicy(binding.modelPolicyId());
+            if (primary == null || large.maxInputTokens() <= primary.maxInputTokens()) {
+                throw new AiManagementException("AI_LARGE_MODEL_INPUT_INVALID", "备选模型输入上限必须严格大于已绑定主模型");
+            }
+        }
+        repository.upsertLargeContextModelPolicyBinding(versionId, policyId);
         return repository.findPolicyBinding(versionId);
     }
 
