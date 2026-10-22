@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -73,6 +73,7 @@ class QueryRewrite(StrictModel):
 
 class Evidence(StrictModel):
     chunk_id: UUID
+    parent_id: UUID | None = None
     knowledge_base_id: UUID
     document_id: UUID
     document_version_id: UUID
@@ -83,7 +84,27 @@ class Evidence(StrictModel):
     page_no: int | None = Field(default=None, gt=0)
     content: str = Field(min_length=1)
     content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    hit_content: str | None = None
+    hit_content_hash: str | None = None
+    hit_start_offset: int | None = None
+    hit_end_offset: int | None = None
     score: float
+
+
+class ParentEvidence(StrictModel):
+    parent_id: UUID
+    knowledge_base_id: UUID
+    document_id: UUID
+    document_version_id: UUID
+    index_release_id: UUID
+    document_title: str = Field(min_length=1)
+    version_no: int = Field(gt=0)
+    section_path: str | None = None
+    page_no: int | None = Field(default=None, gt=0)
+    page_end: int | None = Field(default=None, gt=0)
+    content: str = Field(min_length=1)
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    token_count: int = Field(gt=0)
 
 
 class SupportedClaim(StrictModel):
@@ -97,6 +118,16 @@ class SufficiencyDecision(StrictModel):
     unsupported_claims: tuple[str, ...]
     conflicts: tuple[str, ...]
     recommended_mode: AnswerMode
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_false_sufficiency(cls, value: Any) -> Any:
+        if isinstance(value, dict) and value.get("conflicts"):
+            return value | {
+                "sufficient": False,
+                "recommended_mode": AnswerMode.INSUFFICIENT_EVIDENCE,
+            }
+        return value
 
 
 class CompanyParagraph(StrictModel):
@@ -197,6 +228,7 @@ class RunEventPayload(StrictModel):
     citation: Citation | None = None
     error_code: str | None = None
     error_message: str | None = None
+    retrieval_facts: dict[str, Any] | None = None
 
 
 class RunEvent(StrictModel):

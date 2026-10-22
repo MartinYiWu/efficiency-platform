@@ -10,10 +10,16 @@ from uuid import UUID, uuid5
 
 from pgvector import Vector
 
-from .contracts import ChunkDraft, IndexDocumentMember, IndexVerificationResult
-from .state import Evidence
+from .contracts import (
+    ChunkDraft,
+    IndexDocumentMember,
+    IndexVerificationResult,
+    ParentDraft,
+)
+from .state import Evidence, ParentEvidence
 
 _CHUNK_NAMESPACE = UUID("38e6afe9-28d1-46ef-b538-d59c74b4f6e9")
+_PARENT_NAMESPACE = UUID("a1a161a2-993a-42b7-bb5d-803ec46c4273")
 
 
 class IndexVerificationError(RuntimeError):
@@ -51,6 +57,7 @@ class DocumentChunkRepository:
         version_no: int,
         chunks: tuple[ChunkDraft, ...],
         embeddings: tuple[tuple[float, ...], ...],
+        parents: tuple[ParentDraft, ...] = (),
     ) -> None:
         if not chunks or len(chunks) != len(embeddings):
             raise ValueError("EMBEDDING_COUNT_MISMATCH")
@@ -58,6 +65,20 @@ class DocumentChunkRepository:
             raise ValueError("EMBEDDING_DIMENSION_INVALID")
         if tuple(item.chunk_no for item in chunks) != tuple(range(1, len(chunks) + 1)):
             raise ValueError("CHUNK_SEQUENCE_INVALID")
+        parent_ids = {
+            parent.parent_no: str(
+                uuid5(
+                    _PARENT_NAMESPACE,
+                    f"{document_version_id}:{parent.parent_no}:{parent.content_hash}",
+                )
+            )
+            for parent in parents
+        }
+        if parents and (
+            tuple(parent_ids) != tuple(range(1, len(parents) + 1))
+            or tuple(child for parent in parents for child in parent.children) != chunks
+        ):
+            raise ValueError("PARENT_CHILD_RELATION_INVALID")
         parameters = tuple(
             (
                 str(
@@ -85,6 +106,17 @@ class DocumentChunkRepository:
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         )
         async with self.connection.transaction():
+            published = await _rows(
+                await _await(
+                    self.connection.execute(
+                        "SELECT 1 FROM customer_service.index_release_document "
+                        "WHERE document_version_id = %s LIMIT 1",
+                        (document_version_id,),
+                    )
+                )
+            )
+            if published:
+                raise ValueError("PUBLISHED_DOCUMENT_VERSION_IMMUTABLE")
             await _await(
                 self.connection.execute(
                     "DELETE FROM customer_service.document_chunk "
@@ -92,6 +124,53 @@ class DocumentChunkRepository:
                     (document_version_id,),
                 )
             )
+            if parents:
+                await _await(
+                    self.connection.execute(
+                        "DELETE FROM customer_service.document_parent "
+                        "WHERE document_version_id = %s",
+                        (document_version_id,),
+                    )
+                )
+                await _await(
+                    self.connection.executemany(
+                        "INSERT INTO customer_service.document_parent "
+                        "(parent_id, tenant_id, knowledge_base_id, document_id, "
+                        "document_version_id, document_title, version_no, parent_no, "
+                        "section_path, page_start, page_end, content, content_hash, "
+                        "token_count) VALUES "
+                        "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        tuple(
+                            (
+                                parent_ids[parent.parent_no],
+                                tenant_id,
+                                knowledge_base_id,
+                                document_id,
+                                document_version_id,
+                                document_title,
+                                version_no,
+                                parent.parent_no,
+                                parent.section_path,
+                                parent.page_start,
+                                parent.page_end,
+                                parent.content,
+                                parent.content_hash,
+                                parent.token_count,
+                            )
+                            for parent in parents
+                        ),
+                    )
+                )
+                parameters = tuple(
+                    row
+                    + (
+                        parent_ids[chunk.parent_no],
+                        chunk.child_no,
+                        chunk.start_offset,
+                        chunk.end_offset,
+                    )
+                    for row, chunk in zip(parameters, chunks, strict=True)
+                )
             await _await(
                 self.connection.executemany(
                     "INSERT INTO customer_service.document_chunk "
@@ -99,8 +178,15 @@ class DocumentChunkRepository:
                     "document_version_id, document_title, version_no, chunk_no, "
                     "section_path, page_no, content, "
                     "content_hash, token_count, embedding, embedding_model, "
-                    "embedding_dimension) VALUES "
-                    "(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    "embedding_dimension"
+                    + (
+                        ", parent_id, child_no, start_offset, end_offset"
+                        if parents
+                        else ""
+                    )
+                    + ") VALUES ("
+                    + ", ".join("%s" for _ in range(20 if parents else 16))
+                    + ")",
                     parameters,
                 )
             )
@@ -143,6 +229,51 @@ class DocumentChunkRepository:
     async def verify_index_release(self, release_id: str) -> IndexVerificationResult:
         return await self._verify_index_release(release_id)
 
+    async def get_parents(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        parent_ids: tuple[UUID, ...],
+    ) -> tuple[ParentEvidence, ...]:
+        if not parent_ids:
+            return ()
+        result = await _await(
+            self.connection.execute(
+                "SELECT p.parent_id::text,p.knowledge_base_id::text,p.document_id::text,"
+                "p.document_version_id::text,m.index_release_id::text,p.document_title,"
+                "p.version_no,p.section_path,p.page_start,p.page_end,p.content,p.content_hash,"
+                "p.token_count FROM customer_service.document_parent p "
+                "JOIN customer_service.index_release_document m "
+                "ON m.document_version_id=p.document_version_id "
+                "WHERE p.tenant_id=%s AND m.index_release_id=ANY(%s::uuid[]) "
+                "AND p.parent_id=ANY(%s::uuid[])",
+                (
+                    tenant_id,
+                    [str(item) for item in index_release_ids],
+                    [str(item) for item in parent_ids],
+                ),
+            )
+        )
+        return tuple(
+            ParentEvidence(
+                parent_id=UUID(str(row[0])),
+                knowledge_base_id=UUID(str(row[1])),
+                document_id=UUID(str(row[2])),
+                document_version_id=UUID(str(row[3])),
+                index_release_id=UUID(str(row[4])),
+                document_title=str(row[5]),
+                version_no=int(row[6]),
+                section_path=None if row[7] is None else str(row[7]),
+                page_no=None if row[8] is None else int(row[8]),
+                page_end=None if row[9] is None else int(row[9]),
+                content=str(row[10]),
+                content_hash=str(row[11]),
+                token_count=int(row[12]),
+            )
+            for row in await _rows(result)
+        )
+
     async def vector_search(
         self,
         *,
@@ -158,6 +289,7 @@ class DocumentChunkRepository:
                 "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
                 "c.document_version_id::text,m.index_release_id::text,c.document_title,"
                 "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
+                "c.parent_id::text,c.start_offset,c.end_offset,"
                 "1-(c.embedding <=> %s) AS score "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
@@ -190,6 +322,7 @@ class DocumentChunkRepository:
                 "SELECT c.chunk_id::text,c.knowledge_base_id::text,c.document_id::text,"
                 "c.document_version_id::text,m.index_release_id::text,c.document_title,"
                 "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
+                "c.parent_id::text,c.start_offset,c.end_offset,"
                 "ts_rank_cd(to_tsvector('simple',c.content), plainto_tsquery('simple',%s)) AS score "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
@@ -213,6 +346,7 @@ class DocumentChunkRepository:
         return tuple(
             Evidence(
                 chunk_id=UUID(str(row[0])),
+                parent_id=None if row[11] is None else UUID(str(row[11])),
                 knowledge_base_id=UUID(str(row[1])),
                 document_id=UUID(str(row[2])),
                 document_version_id=UUID(str(row[3])),
@@ -223,7 +357,9 @@ class DocumentChunkRepository:
                 page_no=None if row[8] is None else int(row[8]),
                 content=str(row[9]),
                 content_hash=str(row[10]),
-                score=float(row[11]),
+                hit_start_offset=None if row[12] is None else int(row[12]),
+                hit_end_offset=None if row[13] is None else int(row[13]),
+                score=float(row[14]),
             )
             for row in rows
         )
@@ -246,7 +382,8 @@ class DocumentChunkRepository:
             await _await(
                 self.connection.execute(
                     "SELECT document_version_id::text, chunk_no, content, content_hash, "
-                    "embedding_model, embedding_dimension, vector_dims(embedding) "
+                    "embedding_model, embedding_dimension, vector_dims(embedding), "
+                    "parent_id::text, child_no, start_offset, end_offset "
                     "FROM customer_service.document_chunk "
                     "WHERE document_version_id = ANY(%s::uuid[]) "
                     "ORDER BY document_version_id, chunk_no",
@@ -270,6 +407,10 @@ class DocumentChunkRepository:
                     model,
                     dimension,
                     vector_dimension,
+                    parent_id,
+                    child_no,
+                    start_offset,
+                    end_offset,
                 ) = row
                 if (
                     chunk_no != expected
@@ -278,9 +419,43 @@ class DocumentChunkRepository:
                     or model != "text-embedding-v4"
                     or dimension != 1024
                     or vector_dimension != 1024
+                    or (
+                        parent_id is not None
+                        and (
+                            child_no is None
+                            or start_offset is None
+                            or end_offset is None
+                        )
+                    )
                 ):
                     raise IndexVerificationError()
                 expected += 1
+        linked_rows = [row for row in chunk_rows if row[7] is not None]
+        if linked_rows:
+            if len(linked_rows) != len(chunk_rows):
+                raise IndexVerificationError("MIXED_PARENT_INDEX_INVALID")
+            parent_rows = await _rows(
+                await _await(
+                    self.connection.execute(
+                        "SELECT document_version_id::text, parent_id::text, content, content_hash "
+                        "FROM customer_service.document_parent "
+                        "WHERE document_version_id = ANY(%s::uuid[])",
+                        (list(member_versions),),
+                    )
+                )
+            )
+            parents_by_id = {str(row[1]): row for row in parent_rows}
+            if not parents_by_id:
+                raise IndexVerificationError()
+            for row in linked_rows:
+                parent = parents_by_id.get(str(row[7]))
+                if (
+                    parent is None
+                    or str(parent[0]) != str(row[0])
+                    or sha256(str(parent[2]).encode("utf-8")).hexdigest() != parent[3]
+                    or str(parent[2])[row[9] : row[10]] != str(row[2])
+                ):
+                    raise IndexVerificationError()
         checksum_source = "\n".join(
             f"{row[0]}:{row[1]}:{row[2]}:{len(by_version[str(row[1])])}"
             for row in member_rows

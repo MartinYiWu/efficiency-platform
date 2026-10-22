@@ -102,11 +102,7 @@ class MySqlReleaseRepository:
                 {"release_id": str(release_id)},
             )
             value = result.scalar_one_or_none()
-        return (
-            None
-            if value is None
-            else _decode_snapshot(value)
-        )
+        return None if value is None else _decode_snapshot(value)
 
     async def get_active(self) -> tuple[UUID, CustomerServiceReleaseBundle] | None:
         async with self.engine.connect() as connection:

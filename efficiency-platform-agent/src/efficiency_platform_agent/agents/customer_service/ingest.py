@@ -16,9 +16,10 @@ import httpx
 
 from efficiency_platform_agent.capabilities.document.preflight import preflight_document
 
-from .chunking import chunk_document
+from .chunking import parent_child_document
 from .contracts import IngestJobRequest, IngestJobView, IngestStage, ParsedDocument
 from .ingest_repository import InMemoryIngestJobRepository
+from .parsing import join_pages
 
 logger = logging.getLogger("CustomerServiceIngest")
 
@@ -114,11 +115,18 @@ class CustomerServiceIngestService:
                 if self.ocr is None:
                     raise _IngestFailure("KB_OCR_REQUIRED", "扫描文档需要 OCR")
                 await self._progress(request.task_id, "OCR", 35)
-                markdown = await _ocr_pdf(content, self.ocr)
-            document = ParsedDocument(markdown=markdown, page_markers=())
+                parsed = await _ocr_pdf(content, self.ocr)
+                markdown = _markdown(parsed)
+            page_markers = (
+                tuple(parsed.get("page_markers", ()))
+                if isinstance(parsed, dict)
+                else ()
+            )
+            document = ParsedDocument(markdown=markdown, page_markers=page_markers)
 
             await self._progress(request.task_id, "CHUNK", 55)
-            chunks = chunk_document(document)
+            parents = parent_child_document(document)
+            chunks = tuple(child for parent in parents for child in parent.children)
             await self._progress(request.task_id, "EMBED", 75)
             embeddings = await self.embedder.embed(
                 tuple(item.content for item in chunks)
@@ -132,6 +140,7 @@ class CustomerServiceIngestService:
                 version_no=request.version_no,
                 chunks=chunks,
                 embeddings=embeddings,
+                parents=parents,
             )
             await self._progress(request.task_id, "VERIFY", 95)
             if len(chunks) != len(embeddings) or any(
@@ -211,6 +220,11 @@ def _map_failure(error: Exception) -> _IngestFailure:
     code = getattr(error, "code", None)
     if code == "EMBEDDING_PROVIDER_FAILED":
         return _IngestFailure("KB_EMBEDDING_FAILED", "文档向量生成失败")
+    if isinstance(error, ValueError) and str(error) == "PARENT_CLAUSE_TOO_LONG":
+        return _IngestFailure(
+            "KB_PARENT_CLAUSE_TOO_LONG",
+            "完整条款超过安全切分上限，请拆分源文档后更新版本",
+        )
     if isinstance(error, ValueError) and str(error) == "FILE_SIZE_EXCEEDED":
         return _IngestFailure("KB_FILE_SIZE_INVALID", "文件大小校验失败")
     return _IngestFailure("KB_INGEST_FAILED", "文档处理失败")
@@ -232,7 +246,7 @@ def _markdown(parsed: Any, *, allow_empty: bool = False) -> str:
     return value
 
 
-async def _ocr_pdf(content: bytes, ocr: Any) -> str:
+async def _ocr_pdf(content: bytes, ocr: Any) -> dict[str, Any]:
     try:
         import pypdfium2 as pdfium  # type: ignore[import-untyped]
 
@@ -244,14 +258,14 @@ async def _ocr_pdf(content: bytes, ocr: Any) -> str:
             image.save(buffer, format="PNG")
             result = await _maybe_await(ocr.recognize(buffer.getvalue()))
             pages.append(_ocr_text(result))
-        text = "\n\n".join(item for item in pages if item.strip())
+        parsed = join_pages(tuple(pages))
     except _IngestFailure:
         raise
     except Exception as error:
         raise _IngestFailure("KB_OCR_FAILED", "文档 OCR 失败") from error
-    if not text.strip():
+    if not parsed["text"].strip():
         raise _IngestFailure("KB_OCR_EMPTY", "文档 OCR 未识别到文本")
-    return text
+    return parsed
 
 
 def _ocr_text(value: Any) -> str:

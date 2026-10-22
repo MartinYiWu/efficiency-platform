@@ -107,6 +107,6 @@ class CustomerServiceApplicationServiceTest {
     private CustomerServiceRunEvent event(long sequence, String type, CustomerServiceRunEvent.Citation citation) {
         return new CustomerServiceRunEvent("customer-service-run-event/1", "agent-run-1", sequence, type,
                 CustomerServiceRunView.Status.RUNNING, now,
-                new CustomerServiceRunEvent.Payload("intent", 10, "处理中", null, null, citation, null, null));
+                new CustomerServiceRunEvent.Payload("intent", 10, "处理中", null, null, citation, null, null, null));
     }
 }

@@ -163,6 +163,16 @@ export const debugEvidenceSchema = z
     excerpt: z.string(),
   })
   .strict();
+const debugCandidateSchema = z
+  .object({
+    chunk_id: z.string(),
+    parent_id: z.string().nullable(),
+    document_version_id: z.string(),
+    index_release_id: z.string(),
+    score: z.number(),
+    excerpt: z.string(),
+  })
+  .strict();
 export const debugViewSchema = z
   .object({
     contract_version: z.string(),
@@ -182,8 +192,99 @@ export const debugViewSchema = z
     answer_markdown: z.string().nullable(),
     error_code: z.string().nullable(),
     error_message: z.string().nullable(),
+    vector_candidates: z
+      .array(debugCandidateSchema)
+      .nullish()
+      .transform((items) => items ?? []),
+    fts_candidates: z
+      .array(debugCandidateSchema)
+      .nullish()
+      .transform((items) => items ?? []),
+    fused_candidates: z
+      .array(debugCandidateSchema)
+      .nullish()
+      .transform((items) => items ?? []),
+    child_hits: z
+      .array(debugCandidateSchema)
+      .nullish()
+      .transform((items) => items ?? []),
+    parent_evidence: z
+      .array(
+        z
+          .object({
+            parent_id: z.string(),
+            document_version_id: z.string(),
+            index_release_id: z.string(),
+            document_title: z.string(),
+            version_no: z.number(),
+            section_path: z.string().nullable(),
+            page_start: z.number().nullable().optional(),
+            page_end: z.number().nullable().optional(),
+            content: z.string(),
+            hit_chunk_ids: z.array(z.string()),
+          })
+          .strict(),
+      )
+      .nullish()
+      .transform((items) => items ?? []),
+    assembly_decisions: z
+      .array(
+        z
+          .object({
+            parent_id: z.string(),
+            selected: z.boolean(),
+            reason: z.string(),
+          })
+          .strict(),
+      )
+      .nullish()
+      .transform((items) => items ?? []),
+    budget_usage: z
+      .object({
+        context_token_limit: z.number(),
+        used_tokens: z.number(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    sufficiency: z
+      .object({
+        sufficient: z.boolean(),
+        supported_claims: z.array(
+          z.object({ claim: z.string(), supporting_chunk_ids: z.array(z.string()) }).strict(),
+        ),
+        unsupported_claims: z.array(z.string()),
+        conflicts: z.array(z.string()),
+        recommended_mode: z.string(),
+      })
+      .strict()
+      .nullable()
+      .default(null),
   })
   .strict();
+const retrievalFactsSchema = debugViewSchema.pick({
+  vector_candidates: true,
+  fts_candidates: true,
+  fused_candidates: true,
+  child_hits: true,
+  parent_evidence: true,
+  assembly_decisions: true,
+  budget_usage: true,
+  sufficiency: true,
+});
+
+export function parseRetrievalFacts(internalPayload: string | null) {
+  if (!internalPayload) return null;
+  try {
+    const payload = z
+      .object({ retrieval_facts: retrievalFactsSchema.optional().nullable() })
+      .passthrough()
+      .safeParse(JSON.parse(internalPayload));
+    return payload.success ? (payload.data.retrieval_facts ?? null) : null;
+  } catch {
+    return null;
+  }
+}
 export const runSchema = z
   .object({
     id: z.string(),
@@ -239,7 +340,7 @@ export const runStepSchema = z
     sequenceNo: z.number(),
     stage: z.string(),
     status: z.string(),
-    publicSummary: z.string(),
+    publicSummary: z.string().nullable(),
     internalPayload: z.string().nullable(),
     startedAt: date,
     finishedAt: date,

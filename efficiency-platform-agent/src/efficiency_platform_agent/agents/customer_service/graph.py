@@ -52,7 +52,11 @@ class CustomerServiceGraph:
                 gateway=gateway,
                 bundle=bundle,
             )
-            evidence = retrieval_trace.reranked_evidence
+            evidence = (
+                retrieval_trace.assembly.selected
+                if retrieval_trace.assembly is not None
+                else retrieval_trace.reranked_evidence
+            )
             summaries.append(("retrieval", f"已重排 {len(evidence)} 条候选证据"))
             sufficiency = await judge_sufficiency(
                 gateway, intent.normalized_question, evidence

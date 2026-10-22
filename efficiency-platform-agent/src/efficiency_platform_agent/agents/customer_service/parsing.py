@@ -11,7 +11,7 @@ class CustomerServiceDocumentParser:
     def __init__(self, docling_parser: Any) -> None:
         self.docling_parser = docling_parser
 
-    def parse(self, content: bytes, filename: str) -> dict[str, str]:
+    def parse(self, content: bytes, filename: str) -> dict[str, Any]:
         suffix = Path(filename).suffix.lower()
         if suffix in {".txt", ".md"}:
             return {"text": content.decode("utf-8-sig")}
@@ -24,10 +24,24 @@ class CustomerServiceDocumentParser:
             from pypdf import PdfReader
 
             reader = PdfReader(io.BytesIO(content))
-            return {
-                "text": "\n\n".join(page.extract_text() or "" for page in reader.pages)
-            }
+            return join_pages(tuple(page.extract_text() or "" for page in reader.pages))
         return self.docling_parser.parse(content, filename)
 
 
-__all__ = ["CustomerServiceDocumentParser"]
+def join_pages(pages: tuple[str, ...]) -> dict[str, Any]:
+    texts: list[str] = []
+    markers: list[tuple[int, int]] = []
+    offset = 0
+    for page_no, page in enumerate(pages, 1):
+        page = page.replace("\r\n", "\n").replace("\r", "\n")
+        if not page.strip():
+            continue
+        if texts:
+            offset += 2
+        markers.append((offset, page_no))
+        texts.append(page)
+        offset += len(page)
+    return {"text": "\n\n".join(texts), "page_markers": tuple(markers)}
+
+
+__all__ = ["CustomerServiceDocumentParser", "join_pages"]

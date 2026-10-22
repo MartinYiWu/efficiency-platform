@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
+from .chunking import count_tokens
+from .evidence_assembly import EvidenceAssembly, assemble_evidence
 from .intent import StructuredStageGateway
 from .release_bundle import CustomerServiceReleaseBundle
-from .state import Evidence, QueryRewrite
+from .state import Evidence, ParentEvidence, QueryRewrite
 
 
 class EmbeddingPort(Protocol):
@@ -22,6 +24,14 @@ class RerankPort(Protocol):
 
 
 class RetrievalRepository(Protocol):
+    async def get_parents(
+        self,
+        *,
+        tenant_id: str,
+        index_release_ids: tuple[UUID, ...],
+        parent_ids: tuple[UUID, ...],
+    ) -> tuple[ParentEvidence, ...]: ...
+
     async def vector_search(
         self,
         *,
@@ -50,6 +60,7 @@ class RetrievalTrace:
     fts_candidates: tuple[Evidence, ...]
     fused_candidates: tuple[Evidence, ...]
     reranked_evidence: tuple[Evidence, ...]
+    assembly: EvidenceAssembly | None = None
 
 
 class CustomerServiceRetrieval:
@@ -99,7 +110,20 @@ class CustomerServiceRetrieval:
             rankings.extend((vector_items, fts_items))
             vector_candidates.extend(vector_items)
             fts_candidates.extend(fts_items)
-        fused = _rrf(rankings)[: policy.fusion_top_k]
+        fused: list[Evidence] = []
+        seen_content: set[tuple[UUID, str, str]] = set()
+        for item in _rrf(rankings):
+            content_key = (
+                item.document_version_id,
+                item.content_hash,
+                item.content,
+            )
+            if content_key in seen_content:
+                continue
+            seen_content.add(content_key)
+            fused.append(item)
+            if len(fused) >= policy.fusion_top_k:
+                break
         if not fused:
             return RetrievalTrace(
                 question,
@@ -119,6 +143,67 @@ class CustomerServiceRetrieval:
             fused[index].model_copy(update={"score": score})
             for index, score in reranked
         )
+        assembly = None
+        parent_ids = tuple(dict.fromkeys(item.parent_id for item in evidence))
+        if parent_ids and all(item is not None for item in parent_ids):
+            parents = await self.repository.get_parents(
+                tenant_id=tenant_id,
+                index_release_ids=release_ids,
+                parent_ids=parent_ids,
+            )
+            shared_prompt_tokens = sum(
+                count_tokens(message.content_template)
+                for binding in bundle.prompt_bindings
+                if binding.stage_key in {"safety", "identity"}
+                for message in binding.messages
+            )
+            stage_prompt_tokens = {
+                stage: sum(
+                    count_tokens(message.content_template)
+                    for binding in bundle.prompt_bindings
+                    if binding.stage_key == stage
+                    for message in binding.messages
+                )
+                for stage in (
+                    "citation",
+                    "general_advice",
+                    "sufficiency",
+                    "answer_company",
+                    "answer_mixed",
+                    "answer_repair",
+                )
+            }
+            answer_prompt_tokens = max(
+                (
+                    stage_prompt_tokens["answer_company"],
+                    stage_prompt_tokens["answer_mixed"]
+                    + stage_prompt_tokens["general_advice"],
+                    stage_prompt_tokens["answer_repair"],
+                ),
+                default=0,
+            )
+            evidence_prompt_tokens = max(
+                stage_prompt_tokens["sufficiency"],
+                stage_prompt_tokens["citation"] + answer_prompt_tokens,
+            )
+            limit = min(
+                policy.context_token_limit, bundle.model_policy.max_input_tokens
+            )
+            reserve = (
+                count_tokens(question)
+                + shared_prompt_tokens
+                + evidence_prompt_tokens
+                + bundle.model_policy.max_output_tokens
+                + max(256, limit // 10)
+            )
+            assembly = assemble_evidence(
+                evidence,
+                parents,
+                context_token_limit=limit,
+                reserved_tokens=reserve,
+            )
+        elif any(item is not None for item in parent_ids):
+            raise ValueError("MIXED_PARENT_INDEX_INVALID")
         return RetrievalTrace(
             question,
             queries,
@@ -127,6 +212,7 @@ class CustomerServiceRetrieval:
             tuple(fts_candidates),
             tuple(fused),
             evidence,
+            assembly,
         )
 
 

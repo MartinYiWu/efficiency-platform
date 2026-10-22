@@ -1,4 +1,18 @@
-import { Button, Card, Empty, Input, Select, Space, Steps, Table, Typography, message } from 'antd';
+import {
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Input,
+  Select,
+  Space,
+  Steps,
+  Table,
+  Tabs,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
 import { useEffect, useState } from 'react';
 
 import type {
@@ -194,6 +208,121 @@ export function RagDebugPage() {
           )}
         </Card>
       </div>
+      {result && (
+        <Card title="父子证据组装">
+          {result.budget_usage && (
+            <Descriptions
+              size="small"
+              items={[
+                { key: 'used', label: '已使用 Token', children: result.budget_usage.used_tokens },
+                {
+                  key: 'limit',
+                  label: '上下文上限',
+                  children: result.budget_usage.context_token_limit,
+                },
+              ]}
+            />
+          )}
+          <Tabs
+            items={(
+              [
+                ['向量召回', result.vector_candidates],
+                ['全文召回', result.fts_candidates],
+                ['融合排序', result.fused_candidates],
+              ] as const
+            ).map(([label, candidates]) => ({
+              key: label,
+              label: `${label} (${candidates.length})`,
+              children: (
+                <Table
+                  size="small"
+                  rowKey={(item, index) => `${item.chunk_id}-${index}`}
+                  pagination={false}
+                  dataSource={candidates}
+                  columns={[
+                    { title: '子片段', dataIndex: 'chunk_id' },
+                    {
+                      title: '分数',
+                      dataIndex: 'score',
+                      render: (value: number) => value.toFixed(3),
+                    },
+                    { title: '命中原文', dataIndex: 'excerpt' },
+                  ]}
+                />
+              ),
+            }))}
+          />
+          <Table
+            size="small"
+            rowKey="chunk_id"
+            pagination={false}
+            dataSource={result.child_hits}
+            columns={[
+              { title: '子片段', dataIndex: 'chunk_id' },
+              {
+                title: '父片段',
+                dataIndex: 'parent_id',
+                render: (value: string | null) => value ?? '旧索引',
+              },
+              { title: '文档版本', dataIndex: 'document_version_id' },
+              { title: '索引版本', dataIndex: 'index_release_id' },
+              {
+                title: '重排分数',
+                dataIndex: 'score',
+                render: (value: number) => value.toFixed(3),
+              },
+              { title: '命中原文', dataIndex: 'excerpt' },
+            ]}
+          />
+          {result.assembly_decisions.map((decision) => (
+            <p key={decision.parent_id}>
+              {decision.parent_id}：
+              <Tag color={decision.selected ? 'green' : 'orange'}>
+                {decision.selected
+                  ? '已入选'
+                  : decision.reason === 'DUPLICATE_PARENT_CONTENT'
+                    ? '原文重复排除'
+                    : '预算排除'}
+              </Tag>
+            </p>
+          ))}
+          {result.parent_evidence.map((item) => (
+            <Card
+              key={item.parent_id}
+              size="small"
+              title={`${item.document_title} · v${item.version_no} · ${item.section_path ?? '正文'}${item.page_start ? ` · 第 ${item.page_start}${item.page_end && item.page_end !== item.page_start ? `–${item.page_end}` : ''} 页` : ''}`}
+            >
+              <Typography.Text type="secondary">
+                命中子片段：{item.hit_chunk_ids.join('、')}
+              </Typography.Text>
+              <div className={styles.pre}>{item.content}</div>
+            </Card>
+          ))}
+          {result.sufficiency && (
+            <Descriptions
+              size="small"
+              items={[
+                {
+                  key: 'status',
+                  label: '证据判断',
+                  children: result.sufficiency.sufficient ? '充分' : '不足',
+                },
+                { key: 'mode', label: '建议模式', children: result.sufficiency.recommended_mode },
+                {
+                  key: 'conflicts',
+                  label: '冲突',
+                  children: result.sufficiency.conflicts.join('；') || '无',
+                },
+                {
+                  key: 'unsupported',
+                  label: '未支持事实',
+                  children: result.sufficiency.unsupported_claims.join('；') || '无',
+                },
+              ]}
+            />
+          )}
+        </Card>
+      )}
       {result?.error_message && (
         <Card title={result.error_code ?? '调试失败'}>{result.error_message}</Card>
       )}

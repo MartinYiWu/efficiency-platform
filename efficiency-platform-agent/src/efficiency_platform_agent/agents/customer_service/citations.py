@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from hashlib import sha256
+
 from .state import AnswerMode, Citation, CustomerServiceAnswer, Evidence
 
 
@@ -21,6 +23,20 @@ def validate_citation_closure(
     }
     if not referenced.issubset(allowed):
         raise CitationGuardError("回答包含候选证据之外的引用")
+    for item in evidence:
+        if item.parent_id is None:
+            continue
+        if (
+            item.hit_content is None
+            or item.hit_content_hash is None
+            or item.hit_start_offset is None
+            or item.hit_end_offset is None
+            or item.content[item.hit_start_offset : item.hit_end_offset]
+            != item.hit_content
+            or sha256(item.hit_content.encode("utf-8")).hexdigest()
+            != item.hit_content_hash
+        ):
+            raise CitationGuardError("引用子片段不能定位到完整父原文")
     if (
         answer.answer_mode in {AnswerMode.COMPANY_KNOWLEDGE, AnswerMode.MIXED}
         and not referenced

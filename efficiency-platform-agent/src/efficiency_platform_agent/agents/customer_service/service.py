@@ -167,6 +167,7 @@ class CustomerServiceRunService:
         debug_run_id = uuid4()
         result = await self.graph.run(run_request, bundle, self.gateway_factory(bundle))
         await self.retrieval_snapshots.save(debug_run_id, result)
+        facts = self._retrieval_facts(result)
         return {
             "contract_version": "customer-service-rag-debug-view/1",
             "debug_run_id": str(debug_run_id),
@@ -191,10 +192,78 @@ class CustomerServiceRunService:
                 }
                 for key, summary in result.stage_summaries
             ],
+            **facts,
             "answer_mode": result.rendered.answer.answer_mode.value,
             "answer_markdown": result.rendered.markdown,
             "error_code": None,
             "error_message": None,
+        }
+
+    @staticmethod
+    def _retrieval_facts(result: GraphResult) -> dict[str, Any]:
+        trace = result.retrieval_trace
+        assembly = trace.assembly if trace is not None else None
+        selected_parent_ids = (
+            {item.parent_id for item in assembly.selected}
+            if assembly is not None
+            else set()
+        )
+        return {
+            "vector_candidates": _candidate_rows(
+                trace.vector_candidates if trace else ()
+            ),
+            "fts_candidates": _candidate_rows(trace.fts_candidates if trace else ()),
+            "fused_candidates": _candidate_rows(
+                trace.fused_candidates if trace else ()
+            ),
+            "child_hits": _candidate_rows(trace.reranked_evidence if trace else ()),
+            "parent_evidence": [
+                {
+                    "parent_id": str(item.parent_id),
+                    "document_version_id": str(item.document_version_id),
+                    "index_release_id": str(item.index_release_id),
+                    "document_title": item.document_title,
+                    "version_no": item.version_no,
+                    "section_path": item.section_path,
+                    "page_start": item.page_no,
+                    "page_end": item.page_end,
+                    "content": item.content,
+                    "hit_chunk_ids": [
+                        str(chunk_id)
+                        for chunk_id in assembly.hit_chunk_ids[item.parent_id]
+                    ],
+                }
+                for item in (assembly.selected_parents if assembly else ())
+            ],
+            "assembly_decisions": [
+                {
+                    "parent_id": str(parent_id),
+                    "selected": parent_id in selected_parent_ids,
+                    "reason": (
+                        "SELECTED"
+                        if parent_id in selected_parent_ids
+                        else (
+                            "DUPLICATE_PARENT_CONTENT"
+                            if parent_id in assembly.duplicate_parent_ids
+                            else "CONTEXT_BUDGET_EXCEEDED"
+                        )
+                    ),
+                }
+                for parent_id in (assembly.hit_chunk_ids if assembly else {})
+            ],
+            "budget_usage": (
+                {
+                    "context_token_limit": assembly.context_token_limit,
+                    "used_tokens": assembly.used_tokens,
+                }
+                if assembly is not None
+                else None
+            ),
+            "sufficiency": (
+                result.sufficiency.model_dump(mode="json")
+                if result.sufficiency is not None
+                else None
+            ),
         }
 
     async def _execute(self, run: _Run) -> None:
@@ -253,7 +322,13 @@ class CustomerServiceRunService:
                 run,
                 "stage.completed",
                 RunStatus.RUNNING,
-                RunEventPayload(stage=key, public_summary=summary),
+                RunEventPayload(
+                    stage=key,
+                    public_summary=summary,
+                    retrieval_facts=(
+                        self._retrieval_facts(result) if key == "retrieval" else None
+                    ),
+                ),
             )
         for delta in answer_deltas(result.rendered):
             self._append(
@@ -304,6 +379,20 @@ class CustomerServiceRunService:
             return self._runs[run_id]
         except KeyError as error:
             raise CustomerServiceNotFoundError("Run 不存在") from error
+
+
+def _candidate_rows(values: tuple[Any, ...]) -> list[dict[str, Any]]:
+    return [
+        {
+            "chunk_id": str(item.chunk_id),
+            "parent_id": str(item.parent_id) if item.parent_id else None,
+            "document_version_id": str(item.document_version_id),
+            "index_release_id": str(item.index_release_id),
+            "score": item.score,
+            "excerpt": item.content[:500],
+        }
+        for item in values
+    ]
 
 
 __all__ = ["CustomerServiceNotFoundError", "CustomerServiceRunService"]

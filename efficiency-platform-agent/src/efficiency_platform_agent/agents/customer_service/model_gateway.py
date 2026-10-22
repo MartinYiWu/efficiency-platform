@@ -106,9 +106,7 @@ class ReleaseStructuredModelGateway:
                     and attempt < policy.max_retries
                 ):
                     continue
-                raise StructuredModelError(
-                    result.error.code, result.error.safe_message
-                )
+                raise StructuredModelError(result.error.code, result.error.safe_message)
             if result.message is None or not isinstance(result.message.content, str):
                 raise StructuredModelError(
                     "MODEL_RESPONSE_INVALID", "模型未返回结构化文本"

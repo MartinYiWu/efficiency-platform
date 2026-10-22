@@ -116,6 +116,23 @@ class ChunkDraft(BaseModel):
     content: str = Field(min_length=1)
     content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     token_count: int = Field(gt=0)
+    parent_no: int | None = Field(default=None, gt=0)
+    child_no: int | None = Field(default=None, gt=0)
+    start_offset: int | None = Field(default=None, ge=0)
+    end_offset: int | None = Field(default=None, gt=0)
+
+
+class ParentDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    parent_no: int = Field(gt=0)
+    section_path: str | None
+    page_start: int | None = Field(default=None, gt=0)
+    page_end: int | None = Field(default=None, gt=0)
+    content: str = Field(min_length=1)
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+    token_count: int = Field(gt=0)
+    children: tuple[ChunkDraft, ...] = Field(min_length=1)
 
 
 class IndexVerificationResult(BaseModel):
@@ -136,5 +153,6 @@ __all__ = [
     "IngestJobRequest",
     "IngestJobView",
     "IngestStage",
+    "ParentDraft",
     "ParsedDocument",
 ]

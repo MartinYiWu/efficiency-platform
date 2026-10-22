@@ -121,6 +121,37 @@ async def test_ingest_route_processes_document_and_is_idempotent() -> None:
         "error_message": None,
     }
     assert len(service.vectors.writes) == 1
+    write = service.vectors.writes[0]
+    assert len(write["parents"]) == 1
+    assert write["parents"][0].content == "请按流程提交审批。"
+    assert write["chunks"][0].parent_no == 1
+
+
+@pytest.mark.asyncio
+async def test_ingest_route_reports_oversized_indivisible_clause() -> None:
+    content = ("# 公司制度\n\n第一条 " + "超长条款" * 700).encode()
+    service = _service(content)
+    app = create_app(
+        SimpleNamespace(event_hub=None),  # type: ignore[arg-type]
+        customer_service_ingest_service=service,
+    )
+    payload = _payload() | {
+        "size_bytes": len(content),
+        "sha256": sha256(content).hexdigest(),
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.post("/internal/v1/customer-service/ingest-jobs", json=payload)
+        for _ in range(50):
+            status = await client.get(
+                "/internal/v1/customer-service/ingest-jobs/11111111-1111-1111-1111-111111111111"
+            )
+            if status.json()["status"] == "FAILED":
+                break
+            await asyncio.sleep(0)
+    assert status.json()["error_code"] == "KB_PARENT_CLAUSE_TOO_LONG"
+    assert "完整条款" in status.json()["error_message"]
 
 
 @pytest.mark.asyncio

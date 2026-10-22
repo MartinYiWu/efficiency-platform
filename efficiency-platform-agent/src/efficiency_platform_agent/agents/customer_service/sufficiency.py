@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .intent import StructuredStageGateway
-from .state import Evidence, SufficiencyDecision
+from .state import AnswerMode, Evidence, SufficiencyDecision
 
 
 async def judge_sufficiency(
@@ -11,7 +11,15 @@ async def judge_sufficiency(
     question: str,
     evidence: tuple[Evidence, ...],
 ) -> SufficiencyDecision:
-    return await gateway.complete(
+    if not evidence:
+        return SufficiencyDecision(
+            sufficient=False,
+            supported_claims=(),
+            unsupported_claims=("未检索到可用的完整公司条款",),
+            conflicts=(),
+            recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
+        )
+    decision = await gateway.complete(
         "sufficiency",
         {
             "question": question,
@@ -19,6 +27,20 @@ async def judge_sufficiency(
         },
         SufficiencyDecision,
     )
+    allowed = {item.chunk_id for item in evidence}
+    if any(
+        not set(claim.supporting_chunk_ids).issubset(allowed)
+        for claim in decision.supported_claims
+    ):
+        return decision.model_copy(
+            update={
+                "sufficient": False,
+                "recommended_mode": AnswerMode.INSUFFICIENT_EVIDENCE,
+                "unsupported_claims": decision.unsupported_claims
+                + ("充分性判断引用了未入选的证据",),
+            }
+        )
+    return decision
 
 
 __all__ = ["judge_sufficiency"]
