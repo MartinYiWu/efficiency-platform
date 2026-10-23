@@ -32,7 +32,10 @@ const citation = {
   createdAt: now,
   parentId: 'p',
   citationType: 'EXTRACTED_SPANS',
-  originalSpans: [{ start_offset: 0, end_offset: 4, content_hash: 'hash' }],
+  originalSpans: [
+    { start_offset: 0, end_offset: 4, content_hash: 'hash' },
+    { start_offset: 20, end_offset: 24, content_hash: 'hash2' },
+  ],
 };
 const message = {
   id: 'answer',
@@ -63,14 +66,126 @@ const run = {
   createdAt: now,
   updatedAt: now,
 };
+const longOriginal =
+  '这是需要完整保留上下文的技术说明。'.repeat(80) + 'UNBROKEN_IDENTIFIER_'.repeat(30);
+const evidence = {
+  rank: 1,
+  query_index: 1,
+  chunk_id: 'ch',
+  parent_id: 'p',
+  knowledge_base_id: 'kb',
+  document_id: 'd',
+  document_version_id: 'v',
+  index_release_id: 'index',
+  document_title: '技术指南',
+  version_no: 1,
+  section_path: null,
+  page_no: null,
+  content: longOriginal,
+  content_hash: 'hash',
+  score: 0,
+};
+const parent = {
+  parent_id: 'p',
+  knowledge_base_id: 'kb',
+  document_id: 'd',
+  document_version_id: 'v',
+  index_release_id: 'index',
+  document_title: '技术指南',
+  version_no: 1,
+  section_path: null,
+  page_no: null,
+  content: longOriginal,
+  content_hash: 'hash',
+  token_count: 1000,
+  block_kind: 'PARAGRAPH',
+  evidence_mode: 'EXTRACTIVE_NARRATIVE',
+};
+const conflict = {
+  pairs: [
+    {
+      left_parent_id: 'p',
+      right_parent_id: 'p2',
+      same_scope: true,
+      verdict: 'CONFLICT',
+      left_quote: '允许离线使用',
+      right_quote: '禁止离线使用',
+      reason: '适用条件存在冲突',
+    },
+  ],
+  errors: [],
+  blocked: true,
+};
 const facts = {
-  equivalence_decisions: [],
+  equivalence_decisions: [
+    {
+      left: evidence,
+      right: { ...evidence, chunk_id: 'ch2', parent_id: 'p2' },
+      left_parent: parent,
+      right_parent: { ...parent, parent_id: 'p2' },
+      similarity: 0.98,
+      reason: 'DIFFERENT_CONDITIONS',
+      result: {
+        left_chunk_id: 'ch',
+        right_chunk_id: 'ch2',
+        verdict: 'DIFFERENT',
+        left_quote: '仅内部使用',
+        right_quote: '允许外部使用',
+        differing_conditions: ['受众范围不同'],
+      },
+      retained_parent_id: null,
+      merged_chunk_ids: [],
+    },
+  ],
   equivalence_errors: [],
   version_exclusions: [],
   final_parent_candidates: ['p'],
-  evidence_groups: [],
-  grouping_decisions: [],
-  conflict_screen: { pairs: [], errors: [], blocked: false },
+  evidence_groups: [{ parent_ids: ['p', 'p2'] }],
+  grouping_decisions: [{ parent_id: 'p', reason: 'ADJACENT_SECTION' }],
+  conflict_screen: conflict,
+  evidence_pack: {
+    entries: [
+      {
+        ...evidence,
+        original_parent: parent,
+        citation_type: 'EXTRACTED_SPANS',
+        original_spans: citation.originalSpans,
+        hit_chunk_ids: ['ch'],
+      },
+    ],
+    groups: [{ parent_ids: ['p', 'p2'] }],
+    exclusions: [{ parent_id: 'p3', reason: 'BUDGET_EXCLUDED' }],
+    model_policy: {
+      policy_key: 'large',
+      semantic_version: '1',
+      provider: 'fake',
+      model_name: 'frozen-large-model',
+      temperature: 0,
+      top_p: 1,
+      max_input_tokens: 64000,
+      max_output_tokens: 1000,
+      connect_timeout_ms: 10,
+      read_timeout_ms: 10,
+      max_retries: 0,
+      checksum: 'hash',
+    },
+    budget: {
+      context_token_limit: 60000,
+      reserved_tokens: 1000,
+      used_tokens: 2000,
+      output_tokens: 1000,
+      safety_tokens: 100,
+      fixed_input_tokens: 800,
+      intermediate_output_tokens: 100,
+      evidence_tokens: 1000,
+    },
+    blocked: true,
+    block_reasons: ['CONFLICT'],
+    extraction_decisions: [
+      { parent_id: 'p', selected_sentence_ids: [0, 2], reason: 'EXACT_SENTENCE_SELECTION' },
+    ],
+    conflict_screen: conflict,
+  },
   child_hits: [
     {
       chunk_id: 'ch',
@@ -116,7 +231,20 @@ for (const width of [1440, 1024, 390]) {
         '/api/aihub/agents': [agent],
         '/api/aihub/agents/a': {
           definition: agent,
-          versions: [],
+          versions: [
+            {
+              id: 'av',
+              agentDefinitionId: 'a',
+              semanticVersion: '1',
+              graphKey: 'customer-service',
+              graphVersion: '1',
+              status: 'PUBLISHED',
+              changeSummary: null,
+              createdBy: '1',
+              createdAt: now,
+              publishedAt: now,
+            },
+          ],
           evidenceBindings: [
             {
               sourceType: 'RELEASE',
@@ -129,7 +257,54 @@ for (const width of [1440, 1024, 390]) {
             },
           ],
         },
-        '/api/aihub/policies': { modelPolicies: [], ragPolicies: [] },
+        '/api/aihub/policies': {
+          modelPolicies: [],
+          ragPolicies: [
+            {
+              id: 'rp',
+              ownerAgentDefinitionId: 'a',
+              policyKey: 'evidence-policy',
+              semanticVersion: '1',
+              rewriteQueryLimit: 3,
+              vectorTopK: 10,
+              ftsTopK: 10,
+              fusionTopK: 10,
+              rerankTopK: 5,
+              contextTokenLimit: 60000,
+              citationLimit: 5,
+              status: 'PUBLISHED',
+              checksum: null,
+              createdBy: '1',
+              createdAt: now,
+              publishedAt: now,
+            },
+          ],
+        },
+        '/api/aihub/agents/customer-service/releases': [
+          {
+            id: 'rel',
+            agentDefinitionId: 'a',
+            agentVersionId: 'av',
+            environment: 'TEST',
+            releaseStatus: 'ACTIVE',
+            releaseSnapshotId: 'snap',
+            releasedBy: '1',
+            releasedAt: now,
+            rolledBackFromReleaseId: null,
+            createdAt: now,
+          },
+        ],
+        '/api/aihub/rag-debug-runs': {
+          ...facts,
+          contract_version: 'customer-service-rag-debug-view/1',
+          debug_run_id: 'dr',
+          status: 'SUCCEEDED',
+          stages: [],
+          answer_mode: null,
+          answer_markdown: null,
+          error_code: null,
+          error_message: null,
+        },
         '/api/aihub/runs/r/replay': {
           run,
           question: { ...message, id: 'q', role: 'USER', content: '问题' },
@@ -184,7 +359,41 @@ for (const width of [1440, 1024, 390]) {
       await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible();
       if (url.includes('agents/a'))
         await expect(page.getByText('绑定索引落后于知识库当前发布索引')).toBeVisible();
-      if (url.includes('runs/r')) await expect(page.getByText('旧版过滤计数：0')).toBeVisible();
+      if (url.includes('rag-debug')) {
+        await page.getByRole('combobox').nth(0).click();
+        await page.getByText('证据客服', { exact: true }).last().click();
+        await page.getByRole('combobox').nth(1).click();
+        await page.getByText('TEST · rel', { exact: true }).click();
+        await page.getByRole('combobox').nth(3).click();
+        await page.getByText('evidence-policy@1', { exact: true }).click();
+        await page.getByPlaceholder('知识库 ID').fill('kb');
+        await page.getByPlaceholder('索引 Release ID').fill('index');
+        await page.getByPlaceholder('输入真实问题').fill('离线技术支持范围是什么？');
+        const debugResponse = page.waitForResponse(
+          (response) =>
+            response.url().includes('/api/aihub/rag-debug-runs') &&
+            response.request().method() === 'POST',
+        );
+        await page.getByRole('button', { name: '执行调试' }).click();
+        expect((await debugResponse).status()).toBe(200);
+      }
+      if (url.includes('runs/r') || url.includes('rag-debug')) {
+        for (const text of [
+          '旧版过滤计数：0',
+          'frozen-large-model',
+          '允许离线使用',
+          '禁止离线使用',
+          'BUDGET_EXCLUDED',
+        ]) {
+          await page.getByText(text, { exact: true }).first().scrollIntoViewIfNeeded();
+          await expect(page.getByText(text, { exact: true }).first()).toBeVisible();
+        }
+        await expect(page.getByText(/受众范围不同/)).toBeVisible();
+        await expect(page.getByText(/ADJACENT_SECTION/)).toBeVisible();
+        await expect(page.getByText(/实际使用 Token/)).toBeVisible();
+        await expect(page.getByText(longOriginal, { exact: true })).toBeVisible();
+        await expect(page.getByText(/原文偏移.*\[起,止\)/)).toContainText('[20, 24)');
+      }
       await expect
         .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
         .toBe(true);
@@ -196,6 +405,10 @@ for (const width of [1440, 1024, 390]) {
     await button.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toContainText('准确原文');
+    await expect(page.getByRole('dialog')).toContainText('原文节选');
+    await expect(page.getByRole('dialog')).toContainText('[0, 4)');
+    await expect(page.getByRole('dialog')).toContainText('[20, 24)');
+    await expect(page.getByRole('dialog')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect(page.getByRole('log')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))

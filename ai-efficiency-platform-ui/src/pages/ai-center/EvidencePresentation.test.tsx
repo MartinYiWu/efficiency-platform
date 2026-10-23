@@ -95,7 +95,27 @@ it('marks unrecorded historical processing facts instead of reconstructing them'
     },
     answer: null,
     stages: [],
-    citations: [],
+    citations: [
+      citationSchema.parse({
+        id: 'legacy',
+        runId: 'r',
+        messageId: 'm',
+        citationNo: 1,
+        knowledgeBaseId: 'k',
+        documentId: 'd',
+        documentVersionId: 'v',
+        indexReleaseId: 'i',
+        chunkId: 'ch',
+        documentTitle: '历史引用',
+        versionNo: 1,
+        sectionPath: null,
+        pageNo: null,
+        quotedText: '旧原文',
+        contentHash: 'hash',
+        createdAt: 'now',
+        citationType: null,
+      }),
+    ],
     feedback: null,
   });
   render(
@@ -103,5 +123,7 @@ it('marks unrecorded historical processing facts instead of reconstructing them'
       <RunReplayPage />
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByText('该版本未记录')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText('历史引用')).toBeInTheDocument());
+  expect(screen.queryByText('完整原文')).not.toBeInTheDocument();
+  expect(screen.getAllByText('该版本未记录').length).toBeGreaterThan(1);
 });

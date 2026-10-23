@@ -172,7 +172,11 @@ export function RunReplayPage() {
               title: '引用类型',
               dataIndex: 'citationType',
               render: (value: string | null) =>
-                value === 'EXTRACTED_SPANS' ? '原文节选' : '完整原文',
+                value === 'EXTRACTED_SPANS'
+                  ? '原文节选'
+                  : value === 'FULL_PARENT'
+                    ? '完整原文'
+                    : '该版本未记录',
             },
             {
               title: '原文偏移',

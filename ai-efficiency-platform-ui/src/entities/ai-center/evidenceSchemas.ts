@@ -18,11 +18,12 @@ const modelPolicy = z
   .strict();
 export const spanSchema = z
   .object({
-    start_offset: z.number().int(),
-    end_offset: z.number().int(),
+    start_offset: z.number().int().nonnegative(),
+    end_offset: z.number().int().positive(),
     content_hash: z.string(),
   })
-  .strict();
+  .strict()
+  .refine((span) => span.end_offset > span.start_offset, { message: '原文终点必须晚于起点' });
 
 export const groupSchema = z
   .object({
@@ -32,7 +33,7 @@ export const groupSchema = z
 
 export const exclusionSchema = z
   .object({
-    parent_id: z.string().nullish(),
+    parent_id: z.string().min(1),
     reason: z.string(),
   })
   .strict();
@@ -52,7 +53,7 @@ export const budgetSchema = z
 
 export const extractionDecisionSchema = z
   .object({
-    parent_id: z.string().nullish(),
+    parent_id: z.string().min(1),
     selected_sentence_ids: z.array(z.number().int()),
     reason: z.string(),
   })
@@ -60,10 +61,10 @@ export const extractionDecisionSchema = z
 
 export const conflictPairSchema = z
   .object({
-    left_parent_id: z.string(),
-    right_parent_id: z.string(),
+    left_parent_id: z.string().min(1),
+    right_parent_id: z.string().min(1),
     same_scope: z.boolean(),
-    verdict: z.string(),
+    verdict: z.enum(['CONFLICT', 'NO_CONFLICT', 'UNCERTAIN']),
     left_quote: z.string(),
     right_quote: z.string(),
     reason: z.string(),
@@ -82,9 +83,9 @@ export const parentSchema = z
   .object({
     parent_no: z.number().int().nullish(),
     source_table_id: z.number().int().nullish(),
-    block_kind: z.string(),
-    evidence_mode: z.string(),
-    parent_id: z.string().nullish(),
+    block_kind: z.enum(['NUMBERED_RULE', 'LIST', 'TABLE', 'CODE', 'PARAGRAPH']),
+    evidence_mode: z.enum(['FULL_ONLY', 'EXTRACTIVE_NARRATIVE']),
+    parent_id: z.string().min(1),
     knowledge_base_id: z.string(),
     document_id: z.string(),
     document_version_id: z.string(),
@@ -128,7 +129,7 @@ export const equivalenceResultSchema = z
   .object({
     left_chunk_id: z.string(),
     right_chunk_id: z.string(),
-    verdict: z.string(),
+    verdict: z.enum(['EQUIVALENT', 'DIFFERENT', 'UNCERTAIN']),
     left_quote: z.string(),
     right_quote: z.string(),
     differing_conditions: z.array(z.string()),
