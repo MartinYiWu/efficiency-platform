@@ -18,6 +18,7 @@ from .renderer import answer_deltas
 from .retrieval_snapshot_repository import (
     InMemoryRetrievalSnapshotRepository,
     RetrievalSnapshotRepository,
+    evidence_processing_facts,
 )
 from .state import (
     CustomerServiceRunRequest,
@@ -203,33 +204,13 @@ class CustomerServiceRunService:
     def _retrieval_facts(result: GraphResult) -> dict[str, Any]:
         trace = result.retrieval_trace
         assembly = trace.assembly if trace is not None else None
-        selected_parent_ids = (
-            {item.parent_id for item in assembly.selected}
-            if assembly is not None
-            else set()
-        )
         return {
+            **evidence_processing_facts(trace),
             "equivalence_decisions": [
                 item.model_dump(mode="json")
                 for item in (trace.equivalence_decisions if trace else ())
             ],
             "equivalence_errors": list(trace.equivalence_errors if trace else ()),
-            "final_parent_candidates": [
-                str(p.parent_id)
-                for p in (assembly.candidate_parents if assembly else ())
-            ],
-            "evidence_groups": [
-                g.model_dump(mode="json") for g in (assembly.groups if assembly else ())
-            ],
-            "grouping_decisions": [
-                {"parent_id": str(pid), "reason": reason}
-                for pid, reason in (
-                    assembly.grouping_reasons.items() if assembly else ()
-                )
-            ],
-            "conflict_screen": trace.conflict_screen.model_dump(mode="json")
-            if trace and trace.conflict_screen
-            else None,
             "version_exclusions": [
                 row | {"reason": "NOT_BOUND_INDEX_MEMBER"}
                 for row in _candidate_rows(trace.version_exclusions if trace else ())
@@ -259,24 +240,6 @@ class CustomerServiceRunService:
                     ],
                 }
                 for item in (assembly.selected_parents if assembly else ())
-            ],
-            "assembly_decisions": [
-                {
-                    "parent_id": str(parent_id),
-                    "selected": parent_id in selected_parent_ids,
-                    "reason": (
-                        "SELECTED"
-                        if parent_id in selected_parent_ids
-                        else (
-                            "DUPLICATE_PARENT_CONTENT"
-                            if parent_id in assembly.duplicate_parent_ids
-                            else assembly.exclusion_reasons.get(
-                                parent_id, "CONTEXT_BUDGET_EXCEEDED"
-                            )
-                        )
-                    ),
-                }
-                for parent_id in (assembly.hit_chunk_ids if assembly else {})
             ],
             "budget_usage": (
                 {

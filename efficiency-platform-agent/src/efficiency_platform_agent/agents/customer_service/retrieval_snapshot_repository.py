@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID, uuid5
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .graph import GraphResult
+from .retrieval import RetrievalTrace
 
 _SNAPSHOT_NAMESPACE = UUID("997e5350-2269-433a-b6a7-f7719d2831ca")
 
@@ -51,6 +52,9 @@ class MySqlRetrievalSnapshotRepository:
             "fused_candidates": _evidence_json(trace.fused_candidates),
             "reranked_evidence": _evidence_json(trace.reranked_evidence),
             "sufficiency": result.sufficiency.model_dump_json(),
+            "retrieval_facts": json.dumps(
+                evidence_processing_facts(trace), ensure_ascii=False
+            ),
             "created_at": int(time.time() * 1000),
         }
         async with self.engine.begin() as connection:
@@ -60,16 +64,52 @@ class MySqlRetrievalSnapshotRepository:
                     "(id,run_id,stage_key,index_release_ids_json,original_query,"
                     "rewritten_queries_json,vector_candidates_json,fts_candidates_json,"
                     "fused_candidates_json,reranked_evidence_json,sufficiency_json,"
+                    "retrieval_facts_json,"
                     "created_at_epoch_ms) VALUES "
                     "(:id,:run_id,'retrieval',CAST(:index_release_ids AS JSON),"
                     ":original_query,CAST(:rewritten_queries AS JSON),"
                     "CAST(:vector_candidates AS JSON),CAST(:fts_candidates AS JSON),"
                     "CAST(:fused_candidates AS JSON),CAST(:reranked_evidence AS JSON),"
-                    "CAST(:sufficiency AS JSON),:created_at) "
+                    "CAST(:sufficiency AS JSON),CAST(:retrieval_facts AS JSON),:created_at) "
                     "ON DUPLICATE KEY UPDATE id=id"
                 ),
                 payload,
             )
+
+
+def evidence_processing_facts(trace: RetrievalTrace | None) -> dict[str, Any]:
+    """调试输出与生产快照共享同一组证据处理事实。"""
+    assembly = trace.assembly if trace else None
+    selected = {p.parent_id for p in assembly.selected} if assembly else set()
+    return {
+        "final_parent_candidates": [
+            str(p.parent_id) for p in (assembly.candidate_parents if assembly else ())
+        ],
+        "evidence_groups": [
+            g.model_dump(mode="json") for g in (assembly.groups if assembly else ())
+        ],
+        "grouping_decisions": [
+            {"parent_id": str(pid), "reason": reason}
+            for pid, reason in (assembly.grouping_reasons.items() if assembly else ())
+        ],
+        "conflict_screen": trace.conflict_screen.model_dump(mode="json")
+        if trace and trace.conflict_screen
+        else None,
+        "assembly_decisions": [
+            {
+                "parent_id": str(pid),
+                "selected": pid in selected,
+                "reason": "SELECTED"
+                if pid in selected
+                else (
+                    "DUPLICATE_PARENT_CONTENT"
+                    if pid in assembly.duplicate_parent_ids
+                    else assembly.exclusion_reasons.get(pid, "CONTEXT_BUDGET_EXCEEDED")
+                ),
+            }
+            for pid in (assembly.hit_chunk_ids if assembly else {})
+        ],
+    }
 
 
 def _evidence_json(values: tuple[object, ...]) -> str:
