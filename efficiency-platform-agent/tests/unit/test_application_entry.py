@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 import runpy
 import sys
@@ -138,3 +139,19 @@ def test_local_live_script_selects_database_compatible_loop(
         if platform == "win32"
         else "auto"
     ]
+
+
+def test_uvicorn_resolves_psycopg_compatible_loop_factory() -> None:
+    """自定义导入路径必须能由实际Uvicorn解析为Selector循环工厂。"""
+    import uvicorn
+
+    factory = uvicorn.Config(
+        app="unused", loop="efficiency_platform_agent.main:selector_loop_factory"
+    ).get_loop_factory()
+
+    assert factory is not None
+    loop = factory()
+    try:
+        assert isinstance(loop, asyncio.SelectorEventLoop)
+    finally:
+        loop.close()
