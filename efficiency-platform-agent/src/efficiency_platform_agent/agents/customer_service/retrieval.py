@@ -12,7 +12,13 @@ from .equivalence import EquivalenceDecision, validate_parents, verify_equivalen
 from .evidence_assembly import EvidenceAssembly, assemble_evidence
 from .intent import StructuredStageGateway
 from .release_bundle import CustomerServiceReleaseBundle
-from .state import Evidence, EvidenceContractError, ParentEvidence, QueryRewrite
+from .state import (
+    Evidence,
+    EvidenceContractError,
+    EvidencePack,
+    ParentEvidence,
+    QueryRewrite,
+)
 
 
 class EmbeddingPort(Protocol):
@@ -79,6 +85,7 @@ class RetrievalTrace:
     version_exclusions: tuple[Evidence, ...] = ()
     equivalence_errors: tuple[str, ...] = ()
     conflict_screen: ConflictScreen | None = None
+    evidence_pack: EvidencePack | None = None
 
 
 class CustomerServiceRetrieval:

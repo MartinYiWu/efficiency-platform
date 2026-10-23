@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from .citations import freeze_citations
-from .state import AnswerMode, CustomerServiceAnswer, Evidence, RenderedAnswer
+from .state import (
+    AnswerMode,
+    CustomerServiceAnswer,
+    Evidence,
+    EvidencePack,
+    RenderedAnswer,
+)
 
 
 def render_answer(
-    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...]
+    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
 ) -> RenderedAnswer:
     citations = freeze_citations(answer, evidence)
     citation_by_chunk = {item.chunk_id: item.citation_no for item in citations}
@@ -27,6 +33,9 @@ def render_answer(
         blocks.append(answer.clarification_question or "")
     if answer.answer_mode is AnswerMode.INSUFFICIENT_EVIDENCE:
         blocks.append(answer.insufficiency_reason or "")
+    for citation in citations:
+        if citation.citation_type == "EXTRACTED_SPANS":
+            blocks.append(f"[{citation.citation_no}] 原文节选")
     return RenderedAnswer(
         answer=answer, markdown="\n\n".join(filter(None, blocks)), citations=citations
     )

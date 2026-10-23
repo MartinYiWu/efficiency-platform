@@ -3,9 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from hashlib import sha256
 from uuid import UUID
 
-from .state import Evidence, EvidenceGroup, ParentEvidence
+from .conflict_screen import ConflictScreen
+from .evidence_extract import ExtractionSelection, select_spans, split_sentences
+from .intent import StructuredStageGateway
+from .model_gateway import ReleaseStructuredModelGateway
+from .release_bundle import CustomerServiceReleaseBundle
+from .state import (
+    CustomerServiceAnswer,
+    Evidence,
+    EvidenceBudget,
+    EvidenceExclusion,
+    EvidenceGroup,
+    EvidencePack,
+    EvidencePackEntry,
+    EvidenceSpan,
+    HistoryMessage,
+    IntentDecision,
+    ParentEvidence,
+    SufficiencyDecision,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,4 +173,256 @@ def assemble_evidence(
         groups=tuple(groups),
         exclusion_reasons=reasons,
         grouping_reasons=grouping_reasons,
+    )
+
+
+async def build_evidence_pack(
+    assembly: EvidenceAssembly,
+    *,
+    bundle: CustomerServiceReleaseBundle,
+    gateway: StructuredStageGateway,
+    question: str,
+    history: tuple[HistoryMessage, ...],
+    conflict_screen: ConflictScreen | None,
+    children: tuple[Evidence, ...] | None = None,
+    intent: IntentDecision | None = None,
+) -> EvidencePack:
+    """从最终候选一次冻结证据；后续阶段不能重新挑选原文。"""
+    if not bundle.contract_version.endswith("/2"):
+        raise ValueError("EVIDENCE_PACK_REQUIRES_RELEASE_V2")
+    renderer = ReleaseStructuredModelGateway(None, bundle)
+    policy = bundle.model_policy
+    candidates = assembly.candidate_parents
+    by_parent = {}
+    for child in children if children is not None else assembly.selected:
+        if child.chunk_id in assembly.hit_chunk_ids.get(child.parent_id, ()):
+            by_parent.setdefault(child.parent_id, child)
+    entries = []
+    for parent in candidates:
+        child = by_parent[parent.parent_id]
+        if sha256(parent.content.encode()).hexdigest() != parent.content_hash or any(
+            getattr(child, key) != getattr(parent, key)
+            for key in (
+                "knowledge_base_id",
+                "document_id",
+                "document_version_id",
+                "index_release_id",
+            )
+        ):
+            raise ValueError("EVIDENCE_SOURCE_INVALID")
+        entries.append(
+            EvidencePackEntry(
+                **child.model_copy(
+                    update={
+                        "content": parent.content,
+                        "content_hash": parent.content_hash,
+                        "section_path": parent.section_path,
+                        "hit_content": child.hit_content
+                        if child.hit_content is not None
+                        else child.content,
+                        "hit_content_hash": child.hit_content_hash
+                        if child.hit_content_hash is not None
+                        else child.content_hash,
+                    }
+                ).model_dump(),
+                original_parent=parent,
+                citation_type="FULL_PARENT",
+                original_spans=(
+                    EvidenceSpan(
+                        start_offset=0,
+                        end_offset=len(parent.content),
+                        content_hash=parent.content_hash,
+                    ),
+                ),
+                hit_chunk_ids=assembly.hit_chunk_ids[parent.parent_id],
+            )
+        )
+
+    def input_cost(selected):
+        value = {
+            "question": question,
+            "history": [h.model_dump(mode="json") for h in history],
+            "evidence": [e.model_input() for e in selected],
+        }
+        answer_value = value | {
+            "intent": intent.model_dump(mode="json") if intent else None,
+            "sufficiency": None,
+        }
+        return max(
+            renderer.input_tokens("sufficiency", value, SufficiencyDecision),
+            *(
+                renderer.input_tokens(stage, answer_value, CustomerServiceAnswer)
+                for stage in ("answer_company", "answer_mixed")
+            ),
+            renderer.input_tokens(
+                "answer_repair",
+                {"original_input": answer_value, "validation_error": "验证失败"},
+                CustomerServiceAnswer,
+            ),
+        )
+
+    def budget_for(model):
+        limit = min(bundle.rag_policy.context_token_limit, model.max_input_tokens)
+        safety = max(256, limit // 10)
+        # 充分性输出和意图进入回答输入；额外预留一份输出及结构字段空间。
+        copies = max(
+            sum(
+                message.content_template.count("{{input_json}}")
+                for message in renderer._stage_messages(stage)
+            )
+            for stage in ("answer_company", "answer_mixed", "answer_repair")
+        )
+        reserve = input_cost(()) + (1 + copies) * model.max_output_tokens + safety + 512
+        return limit, safety, reserve
+
+    limit, safety, reserved = budget_for(policy)
+    empty_cost = input_cost(())
+
+    def cost(selected):
+        return input_cost(selected) - empty_cost
+
+    protected = [
+        entry
+        for entry in entries
+        if entry.original_parent.evidence_mode != "EXTRACTIVE_NARRATIVE"
+        or entry.original_parent.block_kind != "PARAGRAPH"
+    ]
+    oversized = any(reserved + cost((entry,)) > limit for entry in protected)
+    alternative = bundle.large_context_model_policy
+    if (
+        oversized
+        and alternative is not None
+        and alternative.max_input_tokens > policy.max_input_tokens
+    ):
+        policy = alternative
+        limit, safety, reserved = budget_for(policy)
+    blocked = bool(conflict_screen and conflict_screen.blocked)
+    reasons = ["CONFLICT_SCREEN_BLOCKED"] if blocked else []
+    exclusions = [
+        EvidenceExclusion(parent_id=pid, reason=reason)
+        for pid, reason in assembly.exclusion_reasons.items()
+        if reason != "BUDGET_EXCLUDED"
+    ]
+    selected = []
+    extraction_decisions = []
+    # 争议双方作为原子集合，预算无法容纳时整组排除，快照仍保留前置冲突事实。
+    if blocked:
+        if reserved + cost(entries) <= limit:
+            selected = entries
+        else:
+            exclusions.extend(
+                EvidenceExclusion(
+                    parent_id=e.parent_id, reason="CONFLICT_BUDGET_EXCLUDED"
+                )
+                for e in entries
+            )
+            reasons.append("CONFLICT_BUDGET_EXCEEDED")
+    else:
+        for entry in entries:
+            if reserved + cost((*selected, entry)) <= limit:
+                selected.append(entry)
+                continue
+            parent = entry.original_parent
+            reason = "BUDGET_EXCLUDED"
+            if entry in protected:
+                if reserved + cost((entry,)) > limit:
+                    blocked = True
+                    reasons.append("PROTECTED_PARENT_TOO_LARGE")
+            else:
+                try:
+                    sentences = split_sentences(parent.content)
+                    available = max(0, limit - reserved - cost(selected))
+                    value = {
+                        "question": question,
+                        "parent_id": str(parent.parent_id),
+                        "sentences": [s.model_dump(mode="json") for s in sentences],
+                        "available_tokens": available,
+                    }
+                    extraction_policy = bundle.model_policy
+                    extraction_cost = renderer.input_tokens(
+                        "evidence_extract", value, ExtractionSelection
+                    )
+                    if (
+                        extraction_cost
+                        + extraction_policy.max_output_tokens
+                        + max(256, extraction_policy.max_input_tokens // 10)
+                        > extraction_policy.max_input_tokens
+                    ):
+                        raise ValueError("EXTRACTION_INPUT_TOO_LARGE")
+                    response = await gateway.complete(
+                        "evidence_extract", value, ExtractionSelection
+                    )
+                    response = ExtractionSelection.model_validate(response.model_dump())
+                    extraction_decisions.append(response)
+                    spans = select_spans(
+                        parent.content, parent.parent_id, sentences, response
+                    )
+                    extracted = entry.model_copy(
+                        update={
+                            "content": "\n".join(
+                                parent.content[s.start_offset : s.end_offset]
+                                for s in spans
+                            ),
+                            "citation_type": "EXTRACTED_SPANS",
+                            "original_spans": spans,
+                        }
+                    )
+                    if reserved + cost((*selected, extracted)) > limit:
+                        raise ValueError("EXTRACTION_RESULT_TOO_LARGE")
+                    selected.append(extracted)
+                    continue
+                except Exception as error:  # noqa: BLE001
+                    known = {
+                        "EXTRACTION_SENTENCE_BOUNDARY_INVALID",
+                        "EXTRACTION_SELECTION_INVALID",
+                        "EXTRACTION_OFFSET_INVALID",
+                        "EXTRACTION_INPUT_TOO_LARGE",
+                        "EXTRACTION_RESULT_TOO_LARGE",
+                    }
+                    reason = getattr(
+                        error,
+                        "code",
+                        str(error) if str(error) in known else "EXTRACTION_FAILED",
+                    )
+            exclusions.append(
+                EvidenceExclusion(parent_id=parent.parent_id, reason=reason)
+            )
+    selected_ids = {e.parent_id for e in selected}
+    groups = tuple(
+        EvidenceGroup(
+            parent_ids=tuple(pid for pid in g.parent_ids if pid in selected_ids)
+        )
+        for g in assembly.groups
+        if sum(pid in selected_ids for pid in g.parent_ids) > 1
+    )
+    by_id = {entry.parent_id: entry for entry in selected}
+    grouped = {pid: group.parent_ids for group in groups for pid in group.parent_ids}
+    arranged = []
+    for entry in selected:
+        for pid in grouped.get(entry.parent_id, (entry.parent_id,)):
+            if pid in by_id:
+                arranged.append(by_id.pop(pid))
+    selected = arranged
+    return EvidencePack(
+        entries=tuple(selected),
+        groups=groups,
+        exclusions=tuple(exclusions),
+        model_policy=policy,
+        budget=EvidenceBudget(
+            context_token_limit=limit,
+            reserved_tokens=reserved,
+            used_tokens=reserved + cost(selected),
+            output_tokens=policy.max_output_tokens,
+            safety_tokens=safety,
+            fixed_input_tokens=empty_cost,
+            intermediate_output_tokens=reserved
+            - empty_cost
+            - policy.max_output_tokens
+            - safety,
+            evidence_tokens=cost(selected),
+        ),
+        blocked=blocked,
+        block_reasons=tuple(dict.fromkeys(reasons)),
+        extraction_decisions=tuple(extraction_decisions),
+        conflict_screen=conflict_screen,
     )

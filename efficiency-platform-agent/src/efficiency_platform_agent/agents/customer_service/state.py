@@ -7,9 +7,18 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    model_serializer,
+    model_validator,
+)
 
 from .contracts import BlockKind, EvidenceMode
+from .release_bundle import ModelPolicy
 
 
 class StrictModel(BaseModel):
@@ -126,6 +135,84 @@ class EvidenceGroup(StrictModel):
     parent_ids: tuple[UUID, ...] = Field(min_length=2)
 
 
+class EvidenceSpan(StrictModel):
+    start_offset: int = Field(ge=0)
+    end_offset: int = Field(gt=0)
+    content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class EvidencePackEntry(Evidence):
+    original_parent: ParentEvidence
+    citation_type: Literal["FULL_PARENT", "EXTRACTED_SPANS"]
+    original_spans: tuple[EvidenceSpan, ...] = Field(min_length=1)
+    hit_chunk_ids: tuple[UUID, ...] = Field(min_length=1)
+
+    def model_input(self) -> dict[str, Any]:
+        return self.model_dump(
+            mode="json",
+            exclude={
+                "original_parent",
+                "hit_content",
+                "hit_content_hash",
+                "hit_start_offset",
+                "hit_end_offset",
+            },
+        )
+
+
+class EvidenceBudget(StrictModel):
+    context_token_limit: int
+    reserved_tokens: int
+    used_tokens: int
+    output_tokens: int
+    safety_tokens: int
+    fixed_input_tokens: int
+    intermediate_output_tokens: int
+    evidence_tokens: int
+
+
+class EvidenceExclusion(StrictModel):
+    parent_id: UUID
+    reason: str
+
+
+class ExtractionSelection(StrictModel):
+    parent_id: UUID
+    selected_sentence_ids: tuple[StrictInt, ...]
+    reason: str = Field(min_length=1)
+
+
+class ConflictPair(StrictModel):
+    left_parent_id: UUID
+    right_parent_id: UUID
+    same_scope: StrictBool
+    verdict: Literal["CONFLICT", "NO_CONFLICT", "UNCERTAIN"]
+    left_quote: str = Field(min_length=1)
+    right_quote: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class ConflictScreen(StrictModel):
+    pairs: tuple[ConflictPair, ...] = ()
+    errors: tuple[str, ...] = ()
+    blocked: bool = False
+
+
+class EvidencePack(StrictModel):
+    entries: tuple[EvidencePackEntry, ...]
+    groups: tuple[EvidenceGroup, ...]
+    exclusions: tuple[EvidenceExclusion, ...]
+    model_policy: ModelPolicy
+    budget: EvidenceBudget
+    blocked: bool = False
+    block_reasons: tuple[str, ...] = ()
+    extraction_decisions: tuple[ExtractionSelection, ...] = ()
+    conflict_screen: ConflictScreen | None = None
+
+    def model_input(self) -> list[dict[str, Any]]:
+        return [entry.model_input() for entry in self.entries]
+
+
 class SupportedClaim(StrictModel):
     claim: str = Field(min_length=1)
     supporting_chunk_ids: tuple[UUID, ...] = Field(min_length=1)
@@ -212,6 +299,17 @@ class Citation(StrictModel):
     page_no: int | None
     quoted_text: str
     content_hash: str
+    parent_id: UUID | None = None
+    citation_type: Literal["FULL_PARENT", "EXTRACTED_SPANS"] = "FULL_PARENT"
+    original_spans: tuple[EvidenceSpan, ...] = ()
+
+    @model_serializer(mode="wrap")
+    def serialize_snapshot(self, handler):
+        value = handler(self)
+        if self.parent_id is None and not self.original_spans:
+            for key in ("parent_id", "citation_type", "original_spans"):
+                value.pop(key, None)
+        return value
 
 
 class RenderedAnswer(StrictModel):

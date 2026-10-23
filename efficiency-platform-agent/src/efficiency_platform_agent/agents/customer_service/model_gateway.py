@@ -15,7 +15,8 @@ from efficiency_platform_agent.core.run import (
     ProviderRequest,
 )
 
-from .release_bundle import CustomerServiceReleaseBundle, PromptMessage
+from .chunking import count_tokens
+from .release_bundle import CustomerServiceReleaseBundle, ModelPolicy, PromptMessage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -40,6 +41,46 @@ class ReleaseStructuredModelGateway:
     ) -> None:
         self.provider = provider
         self.bundle = bundle
+        self.model_policy = bundle.model_policy
+
+    def with_model_policy(self, policy: ModelPolicy) -> ReleaseStructuredModelGateway:
+        if policy not in (
+            self.bundle.model_policy,
+            self.bundle.large_context_model_policy,
+        ):
+            raise StructuredModelError("MODEL_POLICY_NOT_BOUND", "模型策略未绑定")
+        gateway = ReleaseStructuredModelGateway(self.provider, self.bundle)
+        gateway.model_policy = policy
+        return gateway
+
+    def input_tokens(
+        self, stage_key: str, input_value: object, output_type: type[BaseModel]
+    ) -> int:
+        return sum(
+            count_tokens(message.content) + 8
+            for message in self._request_messages(stage_key, input_value, output_type)
+        )
+
+    def _request_messages(
+        self, stage_key: str, input_value: object, output_type: type[BaseModel]
+    ) -> tuple[ProviderMessage, ...]:
+        input_json = json.dumps(input_value, ensure_ascii=False, separators=(",", ":"))
+        messages = tuple(
+            self._render_message(message, input_json)
+            for message in self._stage_messages(stage_key)
+        )
+        return messages + (
+            ProviderMessage(
+                role="developer",
+                content="[OUTPUT CONTRACT]\n只返回一个符合下列 JSON Schema 的 JSON 对象，不要输出 Markdown、解释或代码围栏。\nJSON Schema:\n"
+                + json.dumps(
+                    output_type.model_json_schema(),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
 
     async def complete(
         self,
@@ -47,29 +88,19 @@ class ReleaseStructuredModelGateway:
         input_value: object,
         output_type: type[T],
     ) -> T:
-        input_json = json.dumps(input_value, ensure_ascii=False, separators=(",", ":"))
-        messages = tuple(
-            self._render_message(message, input_json)
-            for message in self._stage_messages(stage_key)
-        )
-        policy = self.bundle.model_policy
+        messages = self._request_messages(stage_key, input_value, output_type)
+        policy = self.model_policy
         schema = output_type.model_json_schema()
-        messages += (
-            ProviderMessage(
-                role="developer",
-                content=(
-                    "[OUTPUT CONTRACT]\n"
-                    "只返回一个符合下列 JSON Schema 的 JSON 对象，不要输出 Markdown、解释或代码围栏。\n"
-                    "JSON Schema:\n"
-                    + json.dumps(
-                        schema,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    )
-                ),
-            ),
-        )
+        if (
+            self.bundle.contract_version.endswith("/2")
+            and self.input_tokens(stage_key, input_value, output_type)
+            + policy.max_output_tokens
+            + max(256, policy.max_input_tokens // 10)
+            > policy.max_input_tokens
+        ):
+            raise StructuredModelError(
+                "MODEL_INPUT_BUDGET_EXCEEDED", "完整输入超过模型预算"
+            )
         options = JsonObject(
             (
                 ("logical_model", policy.model_name),

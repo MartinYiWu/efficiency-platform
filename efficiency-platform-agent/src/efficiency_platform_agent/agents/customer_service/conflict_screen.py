@@ -1,33 +1,20 @@
 """对最终父证据集合逐对核验跨文档冲突。"""
 
 from itertools import combinations
-from typing import Literal
 from uuid import UUID
 
-from pydantic import Field, StrictBool
-
 from .intent import StructuredStageGateway
-from .state import EvidenceContractError, ParentEvidence, StrictModel
-
-
-class ConflictPair(StrictModel):
-    left_parent_id: UUID
-    right_parent_id: UUID
-    same_scope: StrictBool
-    verdict: Literal["CONFLICT", "NO_CONFLICT", "UNCERTAIN"]
-    left_quote: str = Field(min_length=1)
-    right_quote: str = Field(min_length=1)
-    reason: str = Field(min_length=1)
+from .state import (
+    ConflictPair,
+    ConflictScreen,
+    EvidenceContractError,
+    ParentEvidence,
+    StrictModel,
+)
 
 
 class ConflictResponse(StrictModel):
     pairs: tuple[ConflictPair, ...]
-
-
-class ConflictScreen(StrictModel):
-    pairs: tuple[ConflictPair, ...] = ()
-    errors: tuple[str, ...] = ()
-    blocked: bool = False
 
 
 async def screen_conflicts(

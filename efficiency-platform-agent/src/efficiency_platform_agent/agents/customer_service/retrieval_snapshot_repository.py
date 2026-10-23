@@ -81,7 +81,16 @@ def evidence_processing_facts(trace: RetrievalTrace | None) -> dict[str, Any]:
     """调试输出与生产快照共享同一组证据处理事实。"""
     assembly = trace.assembly if trace else None
     selected = {p.parent_id for p in assembly.selected} if assembly else set()
+    reasons = assembly.exclusion_reasons if assembly else {}
+    if trace and trace.evidence_pack is not None:
+        selected = {p.parent_id for p in trace.evidence_pack.entries}
+        reasons = {e.parent_id: e.reason for e in trace.evidence_pack.exclusions}
     return {
+        **(
+            {"evidence_pack": trace.evidence_pack.model_dump(mode="json")}
+            if trace and trace.evidence_pack is not None
+            else {}
+        ),
         "final_parent_candidates": [
             str(p.parent_id) for p in (assembly.candidate_parents if assembly else ())
         ],
@@ -104,7 +113,7 @@ def evidence_processing_facts(trace: RetrievalTrace | None) -> dict[str, Any]:
                 else (
                     "DUPLICATE_PARENT_CONTENT"
                     if pid in assembly.duplicate_parent_ids
-                    else assembly.exclusion_reasons.get(pid, "CONTEXT_BUDGET_EXCEEDED")
+                    else reasons.get(pid, "CONTEXT_BUDGET_EXCEEDED")
                 ),
             }
             for pid in (assembly.hit_chunk_ids if assembly else {})

@@ -6,10 +6,13 @@ from pydantic import ValidationError
 
 from .citations import CitationGuardError, validate_citation_closure
 from .intent import StructuredStageGateway
+from .model_gateway import StructuredModelError
 from .state import (
     AnswerMode,
     CustomerServiceAnswer,
     Evidence,
+    EvidencePack,
+    HistoryMessage,
     IntentDecision,
     IntentType,
     SufficiencyDecision,
@@ -37,8 +40,9 @@ async def generate_answer(
     *,
     question: str,
     intent: IntentDecision,
-    evidence: tuple[Evidence, ...],
+    evidence: tuple[Evidence, ...] | EvidencePack,
     sufficiency: SufficiencyDecision | None,
+    history: tuple[HistoryMessage, ...] = (),
 ) -> CustomerServiceAnswer:
     if intent.intent_type is IntentType.AMBIGUOUS_QUERY:
         return clarification_answer(intent)
@@ -53,15 +57,34 @@ async def generate_answer(
     value = {
         "question": question,
         "intent": intent.model_dump(mode="json"),
-        "evidence": [item.model_dump(mode="json") for item in evidence],
+        "evidence": evidence.model_input()
+        if isinstance(evidence, EvidencePack)
+        else [item.model_dump(mode="json") for item in evidence],
         "sufficiency": None
         if sufficiency is None
         else sufficiency.model_dump(mode="json"),
     }
+    if isinstance(evidence, EvidencePack):
+        from .citations import validate_evidence_pack
+
+        try:
+            validate_evidence_pack(evidence)
+        except CitationGuardError:
+            return insufficient_answer("冻结证据未通过原文校验。")
+        if evidence.blocked:
+            return insufficient_answer("冻结证据存在冲突或超出完整原文预算。")
+        value["history"] = [h.model_dump(mode="json") for h in history]
     try:
         answer = await gateway.complete(stage, value, CustomerServiceAnswer)
         validate_citation_closure(answer, evidence)
         return answer
+    except StructuredModelError as error:
+        if (
+            not isinstance(evidence, EvidencePack)
+            or error.code != "MODEL_INPUT_BUDGET_EXCEEDED"
+        ):
+            raise
+        return insufficient_answer("完整模型输入超过预算。")
     except (ValidationError, CitationGuardError, ValueError) as first_error:
         repair_input = {
             "original_input": value,
@@ -73,6 +96,13 @@ async def generate_answer(
             )
             validate_citation_closure(answer, evidence)
             return answer
+        except StructuredModelError as error:
+            if (
+                not isinstance(evidence, EvidencePack)
+                or error.code != "MODEL_INPUT_BUDGET_EXCEEDED"
+            ):
+                raise
+            return insufficient_answer("完整模型输入超过预算。")
         except (ValidationError, CitationGuardError, ValueError):
             return insufficient_answer(
                 "模型回答未通过结构和引用校验，已停止输出公司事实。"

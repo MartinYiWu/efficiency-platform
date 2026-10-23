@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from hashlib import sha256
 
-from .state import AnswerMode, Citation, CustomerServiceAnswer, Evidence
+from .state import AnswerMode, Citation, CustomerServiceAnswer, Evidence, EvidencePack
 
 
 class CitationGuardError(ValueError):
@@ -12,8 +12,14 @@ class CitationGuardError(ValueError):
 
 
 def validate_citation_closure(
-    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...]
+    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
 ) -> None:
+    pack = evidence if isinstance(evidence, EvidencePack) else None
+    if pack is not None:
+        validate_evidence_pack(pack)
+        if pack.blocked and answer.company_sections:
+            raise CitationGuardError("冻结证据包禁止公司事实回答")
+        evidence = pack.entries
     allowed = {item.chunk_id for item in evidence}
     referenced = {
         chunk_id
@@ -24,6 +30,8 @@ def validate_citation_closure(
     if not referenced.issubset(allowed):
         raise CitationGuardError("回答包含候选证据之外的引用")
     for item in evidence:
+        if pack is not None:
+            continue
         if item.parent_id is None:
             continue
         if (
@@ -50,8 +58,12 @@ def validate_citation_closure(
 
 
 def freeze_citations(
-    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...]
+    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
 ) -> tuple[Citation, ...]:
+    pack = evidence if isinstance(evidence, EvidencePack) else None
+    if pack is not None:
+        validate_citation_closure(answer, pack)
+        evidence = pack.entries
     by_id = {item.chunk_id: item for item in evidence}
     ordered: list[Evidence] = []
     seen = set()
@@ -75,9 +87,91 @@ def freeze_citations(
             page_no=item.page_no,
             quoted_text=item.content,
             content_hash=item.content_hash,
+            **(
+                {
+                    "parent_id": item.parent_id,
+                    "citation_type": item.citation_type,
+                    "original_spans": item.original_spans,
+                }
+                if pack is not None
+                else {}
+            ),
         )
         for index, item in enumerate(ordered, 1)
     )
+
+
+def validate_evidence_pack(pack: EvidencePack) -> None:
+    from .evidence_extract import split_sentences
+
+    for item in pack.entries:
+        parent = item.original_parent
+        if (
+            item.hit_start_offset is None
+            or item.hit_end_offset is None
+            or not 0
+            <= item.hit_start_offset
+            < item.hit_end_offset
+            <= len(parent.content)
+            or item.hit_content is None
+            or parent.content[item.hit_start_offset : item.hit_end_offset]
+            != item.hit_content
+            or sha256(item.hit_content.encode()).hexdigest() != item.hit_content_hash
+        ):
+            raise CitationGuardError("冻结子命中无法定位到父原文")
+        if (
+            sha256(parent.content.encode()).hexdigest() != parent.content_hash
+            or any(
+                getattr(item, key) != getattr(parent, key)
+                for key in (
+                    "parent_id",
+                    "knowledge_base_id",
+                    "document_id",
+                    "document_version_id",
+                    "index_release_id",
+                    "content_hash",
+                )
+            )
+            or item.chunk_id not in item.hit_chunk_ids
+        ):
+            raise CitationGuardError("冻结证据原文或版本不一致")
+        pieces = []
+        end = 0
+        for span in item.original_spans:
+            if not end <= span.start_offset < span.end_offset <= len(parent.content):
+                raise CitationGuardError("原文偏移无效")
+            piece = parent.content[span.start_offset : span.end_offset]
+            if sha256(piece.encode()).hexdigest() != span.content_hash:
+                raise CitationGuardError("原文节选哈希无效")
+            pieces.append(piece)
+            end = span.end_offset
+        if item.citation_type == "FULL_PARENT":
+            if (
+                len(item.original_spans) != 1
+                or item.original_spans[0].start_offset != 0
+                or end != len(parent.content)
+                or item.content != parent.content
+            ):
+                raise CitationGuardError("完整父引用不得截断")
+        else:
+            if (
+                parent.evidence_mode != "EXTRACTIVE_NARRATIVE"
+                or parent.block_kind != "PARAGRAPH"
+                or item.content != "\n".join(pieces)
+            ):
+                raise CitationGuardError("不允许节选或节选内容无效")
+            try:
+                boundaries = {
+                    (s.start_offset, s.end_offset)
+                    for s in split_sentences(parent.content)
+                }
+            except ValueError as error:
+                raise CitationGuardError("无法可靠定位原句") from error
+            if any(
+                (s.start_offset, s.end_offset) not in boundaries
+                for s in item.original_spans
+            ):
+                raise CitationGuardError("引用必须为完整原句")
 
 
 __all__ = ["CitationGuardError", "freeze_citations", "validate_citation_closure"]
