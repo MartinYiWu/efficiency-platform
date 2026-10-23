@@ -39,6 +39,7 @@ export function CustomerServiceAnswer({
           {citations.map((citation) => (
             <Button key={citation.id} size="small" onClick={() => onCitation(citation)}>
               [{citation.citationNo}] {citation.documentTitle}
+              {citation.citationType === 'EXTRACTED_SPANS' ? ' · 原文节选' : ''}
             </Button>
           ))}
         </Space>

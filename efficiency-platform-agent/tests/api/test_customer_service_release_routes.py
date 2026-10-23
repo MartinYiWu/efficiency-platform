@@ -281,6 +281,14 @@ def test_java_golden_snapshots_cover_old_checksum_and_decimal_edges():
         bundle.assert_checksum()
         _decode_snapshot(bundle.model_dump_json()).assert_checksum()
 
+    capable = CustomerServiceReleaseBundle.model_validate_json(
+        (fixtures / "customer-service-release-v2-evidence-scope.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    capable.assert_checksum()
+    _decode_snapshot(capable.model_dump_json()).assert_checksum()
+
 
 def test_v2_negative_zero_has_same_java_canonical_number_as_zero():
     payload = _v2_payload()

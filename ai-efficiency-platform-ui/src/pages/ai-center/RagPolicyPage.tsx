@@ -26,6 +26,40 @@ const numberFields = [
   'contextTokenLimit',
   'citationLimit',
 ];
+const evidenceFields = [
+  {
+    name: 'finalEvidenceTopK',
+    label: '最终父证据 TopK',
+    min: 1,
+    max: 20,
+    step: 1,
+    help: '冲突核验与预算组装的独立父证据数量，相邻成员分别计数。',
+  },
+  {
+    name: 'similarityCandidateThreshold',
+    label: '相似候选阈值',
+    min: 0.85,
+    max: 1,
+    step: 0.01,
+    help: '仅筛选送入等价判断的候选，不直接决定合并。',
+  },
+  {
+    name: 'similarityPairLimit',
+    label: '相似候选对上限',
+    min: 1,
+    max: 50,
+    step: 1,
+    help: '每次运行最多核验的相似候选对数。',
+  },
+  {
+    name: 'adjacentGroupMaxParents',
+    label: '相邻组父片段上限',
+    min: 1,
+    max: 5,
+    step: 1,
+    help: '同版同路径且连续命中的父片段组大小。',
+  },
+];
 export function RagPolicyPage() {
   const [params] = useSearchParams();
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
@@ -82,7 +116,23 @@ export function RagPolicyPage() {
                 { title: '版本', dataIndex: 'semanticVersion' },
                 {
                   title: '召回/重排',
-                  render: (_, item) => `${item.fusionTopK}/${item.rerankTopK}`,
+                  render: (_, item) =>
+                    `向量 ${item.vectorTopK} / 全文 ${item.ftsTopK} / RRF ${item.fusionTopK} / Rerank ${item.rerankTopK}`,
+                },
+                {
+                  title: '最终父证据 TopK',
+                  dataIndex: 'finalEvidenceTopK',
+                  render: (value: number | null | undefined) => value ?? '该版本未记录',
+                },
+                {
+                  title: '相似候选阈值',
+                  dataIndex: 'similarityCandidateThreshold',
+                  render: (value: number | null | undefined) => value ?? '该版本未记录',
+                },
+                {
+                  title: '候选对 / 相邻组上限',
+                  render: (_, item) =>
+                    `${item.similarityPairLimit ?? '未记录'} / ${item.adjacentGroupMaxParents ?? '未记录'}`,
                 },
                 {
                   title: '状态',
@@ -104,6 +154,10 @@ export function RagPolicyPage() {
                 rerankTopK: 8,
                 contextTokenLimit: 8000,
                 citationLimit: 8,
+                finalEvidenceTopK: 8,
+                similarityCandidateThreshold: 0.96,
+                similarityPairLimit: 20,
+                adjacentGroupMaxParents: 3,
               }}
             >
               <Form.Item name="policyKey" label="策略 Key" rules={[{ required: true }]}>
@@ -115,6 +169,17 @@ export function RagPolicyPage() {
               {numberFields.map((name) => (
                 <Form.Item key={name} name={name} label={name} rules={[{ required: true }]}>
                   <InputNumber min={1} style={{ width: '100%' }} />
+                </Form.Item>
+              ))}
+              {evidenceFields.map(({ name, label, min, max, step, help }) => (
+                <Form.Item
+                  key={name}
+                  name={name}
+                  label={label}
+                  extra={help}
+                  rules={[{ required: true }, { type: 'number', min, max }]}
+                >
+                  <InputNumber min={min} max={max} step={step} precision={step === 1 ? 0 : 2} />
                 </Form.Item>
               ))}
               <Button type="primary" onClick={() => void save()}>

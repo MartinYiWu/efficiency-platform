@@ -68,10 +68,12 @@ export async function uploadDocumentVersion(
   file: File,
   changeSummary: string,
   effectiveDate?: string,
+  evidenceMode: 'FULL_ONLY' | 'EXTRACTIVE_NARRATIVE' = 'FULL_ONLY',
 ) {
   const form = new FormData();
   form.append('file', file);
   form.append('changeSummary', changeSummary);
+  form.append('evidenceMode', evidenceMode);
   if (effectiveDate) form.append('effectiveDate', effectiveDate);
   return call(`/api/knowledge/documents/${documentId}/versions`, documentVersionSchema, {
     method: 'POST',
@@ -86,10 +88,16 @@ export const listIndexReleases = (id: string) =>
   });
 export const rollbackIndexRelease = (id: string) =>
   call(`/api/knowledge/index-releases/${id}/rollback`, indexReleaseSchema, { method: 'POST' });
-export async function uploadDocuments(baseId: string, files: File[], directoryId?: string) {
+export async function uploadDocuments(
+  baseId: string,
+  files: File[],
+  directoryId?: string,
+  evidenceMode: 'FULL_ONLY' | 'EXTRACTIVE_NARRATIVE' = 'FULL_ONLY',
+) {
   const form = new FormData();
   files.forEach((file) => form.append(files.length === 1 ? 'file' : 'files', file));
   if (directoryId) form.append('directoryId', directoryId);
+  if (files.length === 1) form.append('evidenceMode', evidenceMode);
   return call(
     `/api/knowledge/bases/${baseId}/${files.length === 1 ? 'documents/upload' : 'imports'}`,
     ingestBatchSchema,

@@ -10,6 +10,40 @@ class CustomerServiceDebugViewTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void preservesFrozenEvidenceFactsAndZeroRanksWithoutInventingLegacyFacts() throws Exception {
+        String json = """
+                {"child_hits":[{"chunk_id":"child","parent_id":"parent","knowledge_base_id":"kb",
+                  "document_id":"doc","document_version_id":"version","index_release_id":"idx",
+                  "rank":1,"query_index":1,"score":0.0,"excerpt":"原文"}],
+                 "equivalence_decisions":[],"equivalence_errors":[],"version_exclusions":[],
+                 "evidence_groups":[{"parent_ids":["p1","p2"]}],"grouping_decisions":[],
+                 "final_parent_candidates":["p1"],
+                 "conflict_screen":{"pairs":[],"errors":[],"blocked":false},
+                 "evidence_pack":{"entries":[],"groups":[],"exclusions":[{"parent_id":"p1","reason":"BUDGET_EXCLUDED"}],
+                  "model_policy":null,"budget":{"context_token_limit":8000,"reserved_tokens":100,"used_tokens":0,
+                  "output_tokens":10,"safety_tokens":20,"fixed_input_tokens":70,"intermediate_output_tokens":0,"evidence_tokens":0},
+                  "blocked":true,"block_reasons":["BUDGET_EXCLUDED"],"extraction_decisions":[],"conflict_screen":null}}
+                """;
+        var parsed = mapper.readValue(json, CustomerServiceRunEvent.RetrievalFacts.class);
+        com.fasterxml.jackson.databind.node.ObjectNode serialized = mapper.valueToTree(parsed);
+        for (var field : mapper.readTree(json).properties()) assertEquals(field.getValue(), serialized.get(field.getKey()));
+    }
+
+    @Test
+    void preservesExtractedCitationOffsetsAndRejectsInvalidType() throws Exception {
+        String json = """
+                {"citation_no":1,"quoted_text":"原文","parent_id":"parent","citation_type":"EXTRACTED_SPANS",
+                 "original_spans":[{"start_offset":0,"end_offset":2,"content_hash":"hash"}]}
+                """;
+        var parsed = mapper.readValue(json, CustomerServiceRunEvent.Citation.class);
+        assertEquals("EXTRACTED_SPANS", mapper.valueToTree(parsed).path("citation_type").asText());
+        org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> mapper.readValue(
+                json.replace("EXTRACTED_SPANS", "SUMMARY"), CustomerServiceRunEvent.Citation.class));
+        org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> mapper.readValue(
+                json.replace("\"end_offset\":2", "\"end_offset\":0"), CustomerServiceRunEvent.Citation.class));
+    }
+
+    @Test
     void readsParentChildDebugFactsAndOldResponse() throws Exception {
         String response = """
                 {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-1",

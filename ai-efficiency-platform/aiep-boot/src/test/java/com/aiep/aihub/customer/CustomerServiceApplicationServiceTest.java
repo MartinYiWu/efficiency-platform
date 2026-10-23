@@ -84,6 +84,46 @@ class CustomerServiceApplicationServiceTest {
     }
 
     @Test
+    void storesInternalFactsButKeepsThemOutOfPublicProgress() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var projector = new CustomerServiceEventProjector(repository, mapper);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 0));
+        when(repository.findAssistantMessageByRun("run-1", "dev")).thenReturn(message("answer-1", "ASSISTANT", ""));
+        when(repository.advanceRun("run-1", 0, 1, "RUNNING", null, null, null)).thenReturn(true);
+        var event = mapper.readValue("""
+                {"contract_version":"customer-service-run-event/1","run_id":"agent-run-1","sequence":1,
+                 "event_type":"stage.completed","status":"RUNNING","occurred_at":"2026-10-23T00:00:00Z",
+                 "payload":{"stage":"retrieval","public_summary":"完成检索","retrieval_facts":{
+                 "equivalence_errors":["INTERNAL_ONLY"],"version_exclusions":[],"final_parent_candidates":["frozen-parent"]}}}
+                """, CustomerServiceRunEvent.class);
+        var result = projector.project("run-1", "dev", event);
+        var saved = ArgumentCaptor.forClass(com.aiep.aihub.repository.customer.CustomerServicePOs.RunStepPO.class);
+        verify(repository).insertRunStep(saved.capture());
+        assertThat(saved.getValue().internalPayload()).contains("INTERNAL_ONLY", "frozen-parent");
+        assertThat(mapper.writeValueAsString(result.payload())).doesNotContain("INTERNAL_ONLY", "retrieval_facts", "frozen-parent");
+    }
+
+    @Test
+    void freezesExcerptMetadataInCitationTableAndPublicEvent() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var projector = new CustomerServiceEventProjector(repository, mapper);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 0));
+        when(repository.findAssistantMessageByRun("run-1", "dev")).thenReturn(message("answer-1", "ASSISTANT", ""));
+        when(repository.advanceRun("run-1", 0, 1, "RUNNING", null, null, null)).thenReturn(true);
+        var citation = mapper.readValue("""
+                {"citation_no":1,"parent_id":"parent","citation_type":"EXTRACTED_SPANS",
+                 "original_spans":[{"start_offset":0,"end_offset":2,"content_hash":"hash"}]}
+                """, CustomerServiceRunEvent.Citation.class);
+        var result = projector.project("run-1", "dev", event(1, "citation.ready", citation));
+        var saved = ArgumentCaptor.forClass(com.aiep.aihub.repository.customer.CustomerServicePOs.CitationPO.class);
+        verify(repository).insertCitation(saved.capture());
+        var json = mapper.valueToTree(saved.getValue());
+        assertThat(json.path("citationType").asText()).isEqualTo("EXTRACTED_SPANS");
+        assertThat(json.path("originalSpans").get(0).path("end_offset").asInt()).isEqualTo(2);
+        assertThat(result.payload()).isEqualTo(saved.getValue());
+    }
+
+    @Test
     void projectorRejectsDuplicateOrLateEventAndFreezesAcceptedCitation() {
         CustomerServiceEventProjector projector = new CustomerServiceEventProjector(repository, new ObjectMapper().findAndRegisterModules());
         when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 0));

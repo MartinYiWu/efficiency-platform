@@ -1,0 +1,10 @@
+.facts {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.original {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

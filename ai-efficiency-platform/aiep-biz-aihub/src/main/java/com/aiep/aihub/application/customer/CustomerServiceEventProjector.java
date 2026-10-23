@@ -54,7 +54,8 @@ public class CustomerServiceEventProjector {
             CustomerServiceRunEvent.Citation c = event.payload().citation();
             CitationPO citation = new CitationPO(UUID.randomUUID().toString(), javaRunId, assistant.id(), c.citationNo(),
                     c.knowledgeBaseId(), c.documentId(), c.documentVersionId(), c.indexReleaseId(), c.chunkId(),
-                    c.documentTitle(), c.versionNo(), c.sectionPath(), c.pageNo(), c.quotedText(), c.contentHash(), Instant.now());
+                    c.documentTitle(), c.versionNo(), c.sectionPath(), c.pageNo(), c.quotedText(), c.contentHash(), Instant.now(),
+                    c.parentId(), c.citationType(), c.originalSpans());
             repository.insertCitation(citation);
             return new PublicEvent(event.sequence(), "citation.ready", citation);
         }

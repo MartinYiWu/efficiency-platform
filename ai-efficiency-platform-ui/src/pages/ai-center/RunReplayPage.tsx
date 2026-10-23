@@ -17,6 +17,7 @@ import type { RunReplay } from '../../entities/ai-center/model';
 import { parseRetrievalFacts } from '../../entities/ai-center/schemas';
 import { getRunReplay } from '../../features/ai-center/api';
 import styles from './AiCenter.module.css';
+import { EvidenceFactsPanel } from '../../features/ai-center/EvidenceFactsPanel';
 
 export function RunReplayPage() {
   const { runId = '' } = useParams();
@@ -64,8 +65,10 @@ export function RunReplayPage() {
           }))}
         />
       </Card>
+      {!retrievalFacts && <Card title="检索证据回放">该版本未记录</Card>}
       {retrievalFacts && (
         <Card title="检索证据回放">
+          <EvidenceFactsPanel facts={retrievalFacts} />
           {retrievalFacts.budget_usage && (
             <Descriptions
               size="small"
@@ -86,9 +89,10 @@ export function RunReplayPage() {
           <Tabs
             items={(
               [
-                ['向量召回', retrievalFacts.vector_candidates],
-                ['全文召回', retrievalFacts.fts_candidates],
-                ['融合排序', retrievalFacts.fused_candidates],
+                ['向量原始分数', retrievalFacts.vector_candidates],
+                ['全文原始分数', retrievalFacts.fts_candidates],
+                ['RRF 分数', retrievalFacts.fused_candidates],
+                ['Rerank 分数', retrievalFacts.child_hits],
               ] as const
             ).map(([label, candidates]) => ({
               key: label,
@@ -101,6 +105,11 @@ export function RunReplayPage() {
                   dataSource={candidates}
                   columns={[
                     { title: '子片段', dataIndex: 'chunk_id' },
+                    {
+                      title: '阶段名次',
+                      dataIndex: 'rank',
+                      render: (value: number | null | undefined) => value ?? '该版本未记录',
+                    },
                     {
                       title: '分数',
                       dataIndex: 'score',
@@ -129,12 +138,7 @@ export function RunReplayPage() {
           />
           {retrievalFacts.assembly_decisions.map((decision) => (
             <p key={decision.parent_id}>
-              {decision.parent_id}：
-              {decision.selected
-                ? '已入选'
-                : decision.reason === 'DUPLICATE_PARENT_CONTENT'
-                  ? '因原文重复排除'
-                  : '因上下文预算排除'}
+              {decision.parent_id}：{decision.selected ? '已入选' : decision.reason}
             </p>
           ))}
           {retrievalFacts.parent_evidence.map((item) => (
@@ -164,6 +168,19 @@ export function RunReplayPage() {
             { title: '版本', dataIndex: 'versionNo' },
             { title: '章节', dataIndex: 'sectionPath' },
             { title: '引用原文', dataIndex: 'quotedText' },
+            {
+              title: '引用类型',
+              dataIndex: 'citationType',
+              render: (value: string | null) =>
+                value === 'EXTRACTED_SPANS' ? '原文节选' : '完整原文',
+            },
+            {
+              title: '原文偏移',
+              render: (_, item) =>
+                item.originalSpans
+                  ?.map((span) => `[${span.start_offset}, ${span.end_offset})`)
+                  .join('；') ?? '该版本未记录',
+            },
           ]}
         />
       </Card>

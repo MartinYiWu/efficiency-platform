@@ -40,6 +40,33 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
         this.jdbc = jdbc;
     }
 
+    @Override
+    public List<AgentEvidenceBindingPO> listEvidenceBindings(String agentId) {
+        return jdbc.query("""
+                SELECT 'VERSION' AS source_type,v.id AS source_id,m.model_name AS large_model_name,
+                       m.max_input_tokens,k.knowledge_base_id,k.index_release_id AS bound_index_release_id,
+                       b.current_index_release_id
+                FROM ai_agent_version v
+                LEFT JOIN ai_agent_version_policy_binding p ON p.agent_version_id=v.id
+                LEFT JOIN ai_model_policy m ON m.id=p.large_context_model_policy_id
+                LEFT JOIN ai_agent_version_knowledge_binding k ON k.agent_version_id=v.id
+                LEFT JOIN kb_knowledge_base b ON b.id=k.knowledge_base_id
+                WHERE v.agent_definition_id=?
+                UNION ALL
+                SELECT 'RELEASE',r.id,
+                       NULLIF(JSON_UNQUOTE(JSON_EXTRACT(s.snapshot_json,'$.large_context_model_policy.model_name')),'null'),
+                       CAST(JSON_UNQUOTE(JSON_EXTRACT(s.snapshot_json,'$.large_context_model_policy.max_input_tokens')) AS UNSIGNED),
+                       k.knowledge_base_id,k.index_release_id,b.current_index_release_id
+                FROM ai_agent_release r
+                JOIN ai_agent_release_snapshot s ON s.id=r.release_snapshot_id
+                LEFT JOIN JSON_TABLE(s.snapshot_json,'$.knowledge_bindings[*]' COLUMNS(
+                    knowledge_base_id VARCHAR(64) PATH '$.knowledge_base_id',
+                    index_release_id VARCHAR(64) PATH '$.index_release_id')) k ON TRUE
+                LEFT JOIN kb_knowledge_base b ON b.id=k.knowledge_base_id
+                WHERE r.agent_definition_id=?
+                """, DataClassRowMapper.newInstance(AgentEvidenceBindingPO.class), agentId, agentId);
+    }
+
     @Override public List<AgentDefinitionPO> listAgents() {
         return jdbc.query("SELECT * FROM ai_agent_definition ORDER BY updated_at DESC", AGENT);
     }

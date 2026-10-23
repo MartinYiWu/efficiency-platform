@@ -19,6 +19,7 @@ public interface AiManagementMappers {
     AgentDefinitionPO findAgentByKey(String agentKey);
     void insertAgent(AgentDefinitionPO value);
     List<AgentVersionPO> listAgentVersions(String agentId);
+    List<AgentEvidenceBindingPO> listEvidenceBindings(String agentId);
     AgentVersionPO findAgentVersion(String id);
     void insertAgentVersion(AgentVersionPO value);
     void updateAgentVersion(AgentVersionPO value);

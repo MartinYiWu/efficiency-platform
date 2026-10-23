@@ -60,6 +60,55 @@ describe('debugViewSchema', () => {
 });
 
 describe('parseRetrievalFacts', () => {
+  it('preserves recorded zero scores, exclusions and conflicts while leaving old facts absent', () => {
+    const candidate = {
+      chunk_id: 'c',
+      parent_id: 'p',
+      document_version_id: 'v',
+      index_release_id: 'i',
+      knowledge_base_id: 'kb',
+      document_id: 'd',
+      rank: 1,
+      query_index: 1,
+      score: 0,
+      excerpt: '原文',
+    };
+    const facts = parseRetrievalFacts(
+      JSON.stringify({
+        retrieval_facts: {
+          child_hits: [candidate],
+          equivalence_decisions: [],
+          equivalence_errors: [],
+          version_exclusions: [{ ...candidate, reason: 'NOT_BOUND_INDEX_MEMBER' }],
+          final_parent_candidates: ['p'],
+          evidence_groups: [{ parent_ids: ['p', 'p2'] }],
+          grouping_decisions: [{ parent_id: 'p', reason: 'ADJACENT' }],
+          conflict_screen: {
+            pairs: [
+              {
+                left_parent_id: 'p',
+                right_parent_id: 'p2',
+                same_scope: true,
+                verdict: 'CONFLICT',
+                left_quote: '允许',
+                right_quote: '禁止',
+                reason: '同条件相反',
+              },
+            ],
+            errors: [],
+            blocked: true,
+          },
+        },
+      }),
+    );
+    expect(facts).not.toBeNull();
+    expect(facts).toMatchObject({
+      child_hits: [{ score: 0, rank: 1 }],
+      conflict_screen: { blocked: true },
+    });
+    expect(parseRetrievalFacts('{"retrieval_facts":{}}')).not.toHaveProperty('evidence_pack', {});
+  });
+
   it('reads projected retrieval facts and safely skips old run steps', () => {
     expect(parseRetrievalFacts('{"stage":"retrieval"}')).toBeNull();
     const facts = parseRetrievalFacts(

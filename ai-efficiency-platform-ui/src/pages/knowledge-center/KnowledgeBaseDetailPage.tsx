@@ -226,6 +226,7 @@ export function KnowledgeBaseDetailPage() {
         />
       </div>
       <KnowledgeUploadDrawer
+        knowledgeType={base.knowledgeType}
         open={uploadOpen}
         baseId={baseId}
         directories={directories}

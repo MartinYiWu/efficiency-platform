@@ -17,8 +17,10 @@ import { useNavigate, useParams } from 'react-router';
 
 import type { KnowledgeDocument } from '../../entities/knowledge/model';
 import { ProcessingTaskDrawer } from '../../features/knowledge/ProcessingTaskDrawer';
+import { EvidenceModeSelect, type EvidenceMode } from '../../features/knowledge/EvidenceModeSelect';
 import {
   getDocument,
+  getKnowledgeBase,
   publishDocumentVersion,
   uploadDocumentVersion,
 } from '../../features/knowledge/api';
@@ -30,6 +32,20 @@ export function KnowledgeDocumentPage() {
   const [document, setDocument] = useState<KnowledgeDocument>();
   const [taskId, setTaskId] = useState<string>();
   const [files, setFiles] = useState<UploadFile[]>([]);
+  const [knowledgeType, setKnowledgeType] = useState<string>();
+  const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>('FULL_ONLY');
+  useEffect(() => {
+    if (!document) return;
+    let active = true;
+    void getKnowledgeBase(document.knowledgeBaseId)
+      .then((base) => {
+        if (active) setKnowledgeType(base.knowledgeType);
+      })
+      .catch((error: Error) => message.error(error.message));
+    return () => {
+      active = false;
+    };
+  }, [document]);
   const load = async () => {
     try {
       setDocument(await getDocument(documentId));
@@ -55,7 +71,15 @@ export function KnowledgeDocumentPage() {
       return;
     }
     try {
-      await uploadDocumentVersion(documentId, file, '后台手工更新版本');
+      const allowed =
+        knowledgeType === 'PRODUCT_DOCUMENTATION' || knowledgeType === 'TECHNICAL_DOCUMENTATION';
+      await uploadDocumentVersion(
+        documentId,
+        file,
+        '后台手工更新版本',
+        undefined,
+        allowed ? evidenceMode : 'FULL_ONLY',
+      );
       setFiles([]);
       message.success('新版本已提交处理');
       await load();
@@ -108,6 +132,11 @@ export function KnowledgeDocumentPage() {
         ]}
       />
       <Card title="版本记录">
+        <EvidenceModeSelect
+          knowledgeType={knowledgeType}
+          value={evidenceMode}
+          onChange={setEvidenceMode}
+        />
         <Timeline
           items={document.versions.map((version) => ({
             color:
@@ -124,6 +153,12 @@ export function KnowledgeDocumentPage() {
                   <span>{version.createdAt}</span>
                 </Space>
                 <p>{version.changeSummary ?? '未填写变更说明'}</p>
+                <p>
+                  冻结证据模式：
+                  {version.evidenceMode === 'EXTRACTIVE_NARRATIVE'
+                    ? '允许叙述性原文节选'
+                    : '全文优先'}
+                </p>
                 <Space>
                   {version.processingTasks.map((task) => (
                     <Button key={task.id} size="small" onClick={() => setTaskId(task.id)}>

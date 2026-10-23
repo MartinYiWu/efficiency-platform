@@ -24,10 +24,13 @@ export function AgentDetailPage() {
   const [detail, setDetail] = useState<AgentDetail>();
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
-  const load = useCallback(() =>
-    getAgent(agentId)
-      .then(setDetail)
-      .catch((error: Error) => message.error(error.message)), [agentId]);
+  const load = useCallback(
+    () =>
+      getAgent(agentId)
+        .then(setDetail)
+        .catch((error: Error) => message.error(error.message)),
+    [agentId],
+  );
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(timer);
@@ -103,6 +106,47 @@ export function AgentDetailPage() {
             },
           ]}
         />
+      </Card>
+      <Card title="版本 / Release 证据绑定">
+        {detail.evidenceBindings == null ? (
+          '该版本未记录'
+        ) : (
+          <Table
+            rowKey={(item, index) => item.sourceType + item.sourceId + index}
+            pagination={false}
+            scroll={{ x: 720 }}
+            dataSource={detail.evidenceBindings}
+            columns={[
+              { title: '来源', render: (_, item) => item.sourceType + ' · ' + item.sourceId },
+              {
+                title: '可选大上下文模型',
+                dataIndex: 'largeModelName',
+                render: (value: string | null) => value ?? '未绑定',
+              },
+              {
+                title: '输入上限 Token',
+                dataIndex: 'maxInputTokens',
+                render: (value: number | null) => value ?? '未绑定',
+              },
+              { title: '绑定索引', dataIndex: 'boundIndexReleaseId' },
+              { title: '知识库当前索引', dataIndex: 'currentIndexReleaseId' },
+              {
+                title: '提示',
+                render: (_, item) =>
+                  item.currentIndexReleaseId &&
+                  item.boundIndexReleaseId &&
+                  item.currentIndexReleaseId !== item.boundIndexReleaseId ? (
+                    <Tag color="warning">绑定索引落后于知识库当前发布索引</Tag>
+                  ) : (
+                    '—'
+                  ),
+              },
+            ]}
+          />
+        )}
+        <Typography.Text type="secondary">
+          Release 展示冻结绑定；发布知识库新索引不会自动切换运行索引。
+        </Typography.Text>
       </Card>
       <Modal
         title="新建 Agent 版本"

@@ -14,7 +14,8 @@ public final class AiManagementViews {
     private AiManagementViews() {
     }
 
-    public record AgentDetail(AgentDefinitionPO definition, List<AgentVersionPO> versions) { }
+    public record AgentDetail(AgentDefinitionPO definition, List<AgentVersionPO> versions,
+            List<com.aiep.aihub.repository.management.AgentEvidenceBindingPO> evidenceBindings) { }
     public record PromptDetail(
             PromptDefinitionPO definition, PromptVersionPO version,
             List<PromptMessageTemplatePO> messages, List<PromptVariablePO> variables) { }

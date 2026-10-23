@@ -17,6 +17,7 @@ export const processingTaskSchema = z
   .strict();
 export const documentVersionSchema = z
   .object({
+    evidenceMode: z.enum(['FULL_ONLY', 'EXTRACTIVE_NARRATIVE']).nullish(),
     id: z.string(),
     documentId: z.string(),
     versionNo: z.number(),

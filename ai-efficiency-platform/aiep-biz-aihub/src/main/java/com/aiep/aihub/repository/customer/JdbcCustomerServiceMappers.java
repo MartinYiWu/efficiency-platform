@@ -127,9 +127,10 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     @Override public void insertCitation(CitationPO v) {
         jdbc.update("INSERT IGNORE INTO ai_customer_service_citation "
                 + "(id,run_id,message_id,citation_no,knowledge_base_id,document_id,document_version_id,index_release_id,chunk_id,"
-                + "document_title,version_no,section_path,page_no,quoted_text,content_hash,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                + "document_title,version_no,section_path,page_no,quoted_text,content_hash,created_at,parent_id,citation_type,original_spans_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CAST(? AS JSON))",
                 v.id(), v.runId(), v.messageId(), v.citationNo(), v.knowledgeBaseId(), v.documentId(), v.documentVersionId(), v.indexReleaseId(),
-                v.chunkId(), v.documentTitle(), v.versionNo(), v.sectionPath(), v.pageNo(), v.quotedText(), v.contentHash(), ts(v.createdAt()));
+                v.chunkId(), v.documentTitle(), v.versionNo(), v.sectionPath(), v.pageNo(), v.quotedText(), v.contentHash(), ts(v.createdAt()),
+                v.parentId(), v.citationType(), spansJson(v.originalSpans()));
     }
     @Override public List<CitationPO> listCitationsByMessage(String messageId) {
         return jdbc.query("SELECT * FROM ai_customer_service_citation WHERE message_id=? ORDER BY citation_no", JdbcCustomerServiceMappers::citation, messageId);
@@ -169,6 +170,18 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     private static MessagePO message(ResultSet r, int n) throws SQLException { return new MessagePO(r.getString("id"),r.getString("conversation_id"),r.getString("tenant_id"),r.getString("role"),r.getString("content_markdown"),r.getString("status"),r.getString("answer_mode"),r.getString("run_id"),r.getString("client_request_id"),instant(r,"created_at")); }
     private static RunPO run(ResultSet r, int n) throws SQLException { return new RunPO(r.getString("id"),r.getString("conversation_id"),r.getString("tenant_id"),r.getString("user_message_id"),r.getString("agent_run_id"),r.getString("agent_release_id"),r.getString("status"),r.getString("answer_mode"),r.getLong("last_event_sequence"),r.getString("failure_code"),r.getString("failure_message"),instant(r,"started_at"),instant(r,"finished_at"),instant(r,"created_at"),instant(r,"updated_at")); }
     private static RunStepPO step(ResultSet r, int n) throws SQLException { return new RunStepPO(r.getString("id"),r.getString("run_id"),r.getLong("sequence_no"),r.getString("stage"),r.getString("status"),r.getString("public_summary"),r.getString("internal_payload"),instant(r,"started_at"),instant(r,"finished_at")); }
-    private static CitationPO citation(ResultSet r, int n) throws SQLException { return new CitationPO(r.getString("id"),r.getString("run_id"),r.getString("message_id"),r.getInt("citation_no"),r.getString("knowledge_base_id"),r.getString("document_id"),r.getString("document_version_id"),r.getString("index_release_id"),r.getString("chunk_id"),r.getString("document_title"),r.getInt("version_no"),r.getString("section_path"),(Integer)r.getObject("page_no"),r.getString("quoted_text"),r.getString("content_hash"),instant(r,"created_at")); }
+    private static CitationPO citation(ResultSet r, int n) throws SQLException { return new CitationPO(r.getString("id"),r.getString("run_id"),r.getString("message_id"),r.getInt("citation_no"),r.getString("knowledge_base_id"),r.getString("document_id"),r.getString("document_version_id"),r.getString("index_release_id"),r.getString("chunk_id"),r.getString("document_title"),r.getInt("version_no"),r.getString("section_path"),(Integer)r.getObject("page_no"),r.getString("quoted_text"),r.getString("content_hash"),instant(r,"created_at"),r.getString("parent_id"),r.getString("citation_type"),readSpans(r.getString("original_spans_json"))); }
+
+    private static String spansJson(java.util.List<com.aiep.platformai.api.dto.CustomerServiceEvidenceFacts.Span> spans) {
+        if (spans == null) return null;
+        try { return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(spans); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException error) { throw new IllegalArgumentException("CITATION_SPANS_INVALID", error); }
+    }
+
+    private static java.util.List<com.aiep.platformai.api.dto.CustomerServiceEvidenceFacts.Span> readSpans(String json) {
+        if (json == null) return null;
+        try { return new com.fasterxml.jackson.databind.ObjectMapper().readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() { }); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException error) { throw new IllegalArgumentException("CITATION_SPANS_INVALID", error); }
+    }
     private static FeedbackPO feedback(ResultSet r, int n) throws SQLException { return new FeedbackPO(r.getString("id"),r.getString("conversation_id"),r.getString("message_id"),r.getString("run_id"),r.getString("tenant_id"),r.getString("user_id"),r.getString("rating"),r.getString("reason_code"),r.getString("comment"),instant(r,"created_at"),instant(r,"updated_at")); }
 }

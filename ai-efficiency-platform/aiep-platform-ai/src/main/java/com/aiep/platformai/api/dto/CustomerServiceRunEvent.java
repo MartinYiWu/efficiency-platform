@@ -29,7 +29,7 @@ public record CustomerServiceRunEvent(
     }
 
     /**
-     * 公开传输载荷。不同事件只填写与该事件相关的字段；候选内容与 Prompt 不进入公开 SSE。
+     * Agent 内部传输载荷。Java 仅将公开字段白名单映射至员工 SSE；候选与内部核验事实不得转发。
      */
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record Payload(
@@ -54,9 +54,22 @@ public record CustomerServiceRunEvent(
             @JsonProperty("parent_evidence") List<CustomerServiceDebugView.ParentEvidence> parentEvidence,
             @JsonProperty("assembly_decisions") List<CustomerServiceDebugView.AssemblyDecision> assemblyDecisions,
             @JsonProperty("budget_usage") CustomerServiceDebugView.BudgetUsage budgetUsage,
-            @JsonProperty("sufficiency") CustomerServiceDebugView.Sufficiency sufficiency) { }
+            @JsonProperty("sufficiency") CustomerServiceDebugView.Sufficiency sufficiency,
+        @JsonProperty("equivalence_decisions") List<CustomerServiceEvidenceFacts.EquivalenceDecision> equivalenceDecisions,
+        @JsonProperty("equivalence_errors") List<String> equivalenceErrors,
+        @JsonProperty("version_exclusions") List<CustomerServiceEvidenceFacts.VersionExclusion> versionExclusions,
+        @JsonProperty("final_parent_candidates") List<String> finalParentCandidates,
+        @JsonProperty("evidence_groups") List<CustomerServiceEvidenceFacts.Group> evidenceGroups,
+        @JsonProperty("grouping_decisions") List<CustomerServiceEvidenceFacts.Exclusion> groupingDecisions,
+        @JsonProperty("conflict_screen") CustomerServiceEvidenceFacts.ConflictScreen conflictScreen,
+        @JsonProperty("evidence_pack") CustomerServiceEvidenceFacts.Pack evidencePack) { }
 
-    /** 回答完成时由 Agent 返回、随后由 Java 冻结的引用事实。 */
+    /**
+     * 回答完成时由 Agent 返回、随后由 Java 冻结的引用事实。
+     * @param parentId 原始父片段 ID；旧引用允许 null
+     * @param citationType FULL_PARENT 表示完整父原文，EXTRACTED_SPANS 表示可追溯原文节选；旧引用允许 null
+     * @param originalSpans 有序且不重叠的原文码点偏移及哈希；旧引用允许 null，新引用必须非空
+     */
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record Citation(
             @JsonProperty("citation_no") int citationNo,
@@ -70,6 +83,37 @@ public record CustomerServiceRunEvent(
             @JsonProperty("section_path") String sectionPath,
             @JsonProperty("page_no") Integer pageNo,
             @JsonProperty("quoted_text") String quotedText,
-            @JsonProperty("content_hash") String contentHash) {
+            @JsonProperty("content_hash") String contentHash,
+            @JsonProperty("parent_id") String parentId,
+            @JsonProperty("citation_type") String citationType,
+            @JsonProperty("original_spans") List<CustomerServiceEvidenceFacts.Span> originalSpans) {
+        public Citation {
+            if (citationType != null && !List.of("FULL_PARENT", "EXTRACTED_SPANS").contains(citationType)) {
+                throw new IllegalArgumentException("citation_type 无效");
+            }
+            if (citationType != null) {
+                CustomerServiceDtoSupport.requireText(parentId, "parent_id");
+                if (originalSpans == null || originalSpans.isEmpty()) {
+                    throw new IllegalArgumentException("新引用必须保存原文偏移");
+                }
+                int previousEnd = 0;
+                for (var span : originalSpans) {
+                    if (span.startOffset() == null || span.endOffset() == null
+                            || span.startOffset() < previousEnd || span.endOffset() <= span.startOffset()) {
+                        throw new IllegalArgumentException("原文偏移必须有序且不重叠");
+                    }
+                    CustomerServiceDtoSupport.requireText(span.contentHash(), "content_hash");
+                    previousEnd = span.endOffset();
+                }
+                originalSpans = List.copyOf(originalSpans);
+            }
+        }
+
+        public Citation(int citationNo, String knowledgeBaseId, String documentId, String documentVersionId,
+                String indexReleaseId, String chunkId, String documentTitle, int versionNo,
+                String sectionPath, Integer pageNo, String quotedText, String contentHash) {
+            this(citationNo, knowledgeBaseId, documentId, documentVersionId, indexReleaseId, chunkId,
+                    documentTitle, versionNo, sectionPath, pageNo, quotedText, contentHash, null, null, null);
+        }
     }
 }

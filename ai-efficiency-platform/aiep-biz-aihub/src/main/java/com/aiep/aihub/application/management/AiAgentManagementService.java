@@ -32,7 +32,7 @@ public class AiAgentManagementService {
 
     public AiManagementViews.AgentDetail get(String id) {
         AgentDefinitionPO definition = requiredAgent(id);
-        return new AiManagementViews.AgentDetail(definition, repository.listAgentVersions(id));
+        return new AiManagementViews.AgentDetail(definition, repository.listAgentVersions(id), repository.listEvidenceBindings(id));
     }
 
     @Transactional

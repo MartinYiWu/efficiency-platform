@@ -65,14 +65,15 @@ class AiReleaseServiceTest {
                 8, new BigDecimal("0.96"), 20, 3));
         var bindings = new java.util.ArrayList<PromptBindingPO>();
         bindings.add(new PromptBindingPO("version-1", "identity", 1, "prompt-1", "pv-1", true));
-        for (String stage : List.of("equivalence", "conflict_screen", "evidence_extract")) {
+        for (String stage : List.of("equivalence", "conflict_screen", "evidence_extract", "answer_company", "answer_mixed", "answer_repair")) {
             bindings.add(new PromptBindingPO("version-1", stage, 1, stage, stage + "-v1", true));
             when(target.findPromptDefinition(stage)).thenReturn(new PromptDefinitionPO(
                     stage, stage, "PRIVATE", "agent-1", stage, null, stage, "ACTIVE", "1", NOW, "1", NOW));
             when(target.findPromptVersion(stage + "-v1")).thenReturn(new PromptVersionPO(
                     stage + "-v1", stage, "1.0.0", "PUBLISHED", "a".repeat(64), "首版", "1", NOW, NOW));
             when(target.listPromptMessages(stage + "-v1")).thenReturn(List.of(
-                    new PromptMessageTemplatePO(stage + "-system", stage + "-v1", 1, "SYSTEM", "instruction",
+                    new PromptMessageTemplatePO(stage + "-system", stage + "-v1", 1, "SYSTEM",
+                            stage.startsWith("answer_") ? "customer_service.evidence_scope.v1" : "instruction",
                             "仅判断原文", "TEXT", true, "b".repeat(64)),
                     new PromptMessageTemplatePO(stage + "-user", stage + "-v1", 2, "USER", "input",
                             "{{input_json}}", "JSON", false, "b".repeat(64))));
@@ -93,6 +94,21 @@ class AiReleaseServiceTest {
                 new AgentVersionKnowledgeBindingPO("version-1", "22222222-2222-2222-2222-222222222222",
                         "33333333-3333-3333-3333-333333333333", 1, true)));
         when(target.isIndexReleaseReady(anyString())).thenReturn(true);
+    }
+
+    @Test
+    void generatedV2SnapshotMatchesExcerptCapableGolden() throws Exception {
+        when(ai.publishCustomerServiceRelease(anyString(), any())).thenAnswer(invocation -> {
+            CustomerServiceReleaseRequest request = invocation.getArgument(1);
+            var mapper = new ObjectMapper();
+            var golden = mapper.readTree(getClass().getResourceAsStream("/customer-service-release-v2-evidence-scope.json"));
+            com.fasterxml.jackson.databind.JsonNode generated = mapper.readTree(mapper.writeValueAsString(request));
+            assertThat(request.snapshotChecksum()).isEqualTo(golden.path("snapshot_checksum").asText());
+            assertThat(generated).isEqualTo(golden);
+            return new CustomerServiceReleaseAck("customer-service-release-ack/1", invocation.getArgument(0),
+                    request.snapshotChecksum(), "ACKNOWLEDGED");
+        });
+        service.publish("version-1", "dev");
     }
 
     @Test

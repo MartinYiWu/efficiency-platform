@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+  equivalenceDecisionSchema,
+  versionExclusionSchema,
+  groupSchema,
+  exclusionSchema,
+  conflictScreenSchema,
+  packSchema,
+} from './evidenceSchemas';
 
 const date = z.string().nullable();
 export const agentDefinitionSchema = z
@@ -30,7 +38,25 @@ export const agentVersionSchema = z
   })
   .strict();
 export const agentDetailSchema = z
-  .object({ definition: agentDefinitionSchema, versions: z.array(agentVersionSchema) })
+  .object({
+    definition: agentDefinitionSchema,
+    versions: z.array(agentVersionSchema),
+    evidenceBindings: z
+      .array(
+        z
+          .object({
+            sourceType: z.enum(['VERSION', 'RELEASE']),
+            sourceId: z.string(),
+            largeModelName: z.string().nullable(),
+            maxInputTokens: z.number().nullable(),
+            knowledgeBaseId: z.string().nullable(),
+            boundIndexReleaseId: z.string().nullable(),
+            currentIndexReleaseId: z.string().nullable(),
+          })
+          .strict(),
+      )
+      .nullish(),
+  })
   .strict();
 export const agentReleaseSchema = z
   .object({
@@ -142,6 +168,10 @@ export const ragPolicySchema = z
     ftsTopK: z.number(),
     fusionTopK: z.number(),
     rerankTopK: z.number(),
+    finalEvidenceTopK: z.number().int().min(1).max(20).nullish(),
+    similarityCandidateThreshold: z.number().min(0.85).max(1).nullish(),
+    similarityPairLimit: z.number().int().min(1).max(50).nullish(),
+    adjacentGroupMaxParents: z.number().int().min(1).max(5).nullish(),
     contextTokenLimit: z.number(),
     citationLimit: z.number(),
     status: z.string(),
@@ -165,6 +195,10 @@ export const debugEvidenceSchema = z
   .strict();
 const debugCandidateSchema = z
   .object({
+    rank: z.number().int().positive().nullish(),
+    query_index: z.number().int().positive().nullish(),
+    knowledge_base_id: z.string().nullish(),
+    document_id: z.string().nullish(),
     chunk_id: z.string(),
     parent_id: z.string().nullable(),
     document_version_id: z.string(),
@@ -175,6 +209,14 @@ const debugCandidateSchema = z
   .strict();
 export const debugViewSchema = z
   .object({
+    equivalence_decisions: z.array(equivalenceDecisionSchema).nullish(),
+    equivalence_errors: z.array(z.string()).nullish(),
+    version_exclusions: z.array(versionExclusionSchema).nullish(),
+    final_parent_candidates: z.array(z.string()).nullish(),
+    evidence_groups: z.array(groupSchema).nullish(),
+    grouping_decisions: z.array(exclusionSchema).nullish(),
+    conflict_screen: conflictScreenSchema.nullish(),
+    evidence_pack: packSchema.nullish(),
     contract_version: z.string(),
     debug_run_id: z.string(),
     status: z.string(),
@@ -263,6 +305,14 @@ export const debugViewSchema = z
   })
   .strict();
 const retrievalFactsSchema = debugViewSchema.pick({
+  equivalence_decisions: true,
+  equivalence_errors: true,
+  version_exclusions: true,
+  final_parent_candidates: true,
+  evidence_groups: true,
+  grouping_decisions: true,
+  conflict_screen: true,
+  evidence_pack: true,
   vector_candidates: true,
   fts_candidates: true,
   fused_candidates: true,
@@ -348,6 +398,19 @@ export const runStepSchema = z
   .strict();
 export const citationSchema = z
   .object({
+    parentId: z.string().nullish(),
+    citationType: z.enum(['FULL_PARENT', 'EXTRACTED_SPANS']).nullish(),
+    originalSpans: z
+      .array(
+        z
+          .object({
+            start_offset: z.number().int().nonnegative(),
+            end_offset: z.number().int().positive(),
+            content_hash: z.string(),
+          })
+          .strict(),
+      )
+      .nullish(),
     id: z.string(),
     runId: z.string(),
     messageId: z.string(),

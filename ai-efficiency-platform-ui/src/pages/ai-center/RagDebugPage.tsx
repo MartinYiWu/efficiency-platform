@@ -30,6 +30,7 @@ import {
   listPolicies,
 } from '../../features/ai-center/api';
 import styles from './AiCenter.module.css';
+import { EvidenceFactsPanel } from '../../features/ai-center/EvidenceFactsPanel';
 
 export function RagDebugPage() {
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
@@ -210,6 +211,7 @@ export function RagDebugPage() {
       </div>
       {result && (
         <Card title="父子证据组装">
+          <EvidenceFactsPanel facts={result} />
           {result.budget_usage && (
             <Descriptions
               size="small"
@@ -226,9 +228,10 @@ export function RagDebugPage() {
           <Tabs
             items={(
               [
-                ['向量召回', result.vector_candidates],
-                ['全文召回', result.fts_candidates],
-                ['融合排序', result.fused_candidates],
+                ['向量原始分数', result.vector_candidates],
+                ['全文原始分数', result.fts_candidates],
+                ['RRF 分数', result.fused_candidates],
+                ['Rerank 分数', result.child_hits],
               ] as const
             ).map(([label, candidates]) => ({
               key: label,
@@ -241,6 +244,11 @@ export function RagDebugPage() {
                   dataSource={candidates}
                   columns={[
                     { title: '子片段', dataIndex: 'chunk_id' },
+                    {
+                      title: '阶段名次',
+                      dataIndex: 'rank',
+                      render: (value: number | null | undefined) => value ?? '该版本未记录',
+                    },
                     {
                       title: '分数',
                       dataIndex: 'score',
@@ -278,11 +286,7 @@ export function RagDebugPage() {
             <p key={decision.parent_id}>
               {decision.parent_id}：
               <Tag color={decision.selected ? 'green' : 'orange'}>
-                {decision.selected
-                  ? '已入选'
-                  : decision.reason === 'DUPLICATE_PARENT_CONTENT'
-                    ? '原文重复排除'
-                    : '预算排除'}
+                {decision.selected ? '已入选' : decision.reason}
               </Tag>
             </p>
           ))}

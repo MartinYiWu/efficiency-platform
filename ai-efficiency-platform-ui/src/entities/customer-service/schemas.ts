@@ -21,6 +21,19 @@ export const conversationSchema = z
   .strict();
 export const citationSchema = z
   .object({
+    parentId: z.string().nullish(),
+    citationType: z.enum(['FULL_PARENT', 'EXTRACTED_SPANS']).nullish(),
+    originalSpans: z
+      .array(
+        z
+          .object({
+            start_offset: z.number().int().nonnegative(),
+            end_offset: z.number().int().positive(),
+            content_hash: z.string(),
+          })
+          .strict(),
+      )
+      .nullish(),
     id: z.string(),
     runId: z.string(),
     messageId: z.string(),

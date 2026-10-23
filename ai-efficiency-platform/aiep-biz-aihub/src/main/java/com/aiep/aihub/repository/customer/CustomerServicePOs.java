@@ -28,7 +28,18 @@ public final class CustomerServicePOs {
             String id, String runId, String messageId, int citationNo, String knowledgeBaseId,
             String documentId, String documentVersionId, String indexReleaseId, String chunkId,
             String documentTitle, int versionNo, String sectionPath, Integer pageNo,
-            String quotedText, String contentHash, Instant createdAt) { }
+            String quotedText, String contentHash, Instant createdAt,
+            String parentId, String citationType,
+            java.util.List<com.aiep.platformai.api.dto.CustomerServiceEvidenceFacts.Span> originalSpans) {
+        public CitationPO(String id, String runId, String messageId, int citationNo, String knowledgeBaseId,
+                String documentId, String documentVersionId, String indexReleaseId, String chunkId,
+                String documentTitle, int versionNo, String sectionPath, Integer pageNo,
+                String quotedText, String contentHash, Instant createdAt) {
+            this(id, runId, messageId, citationNo, knowledgeBaseId, documentId, documentVersionId,
+                    indexReleaseId, chunkId, documentTitle, versionNo, sectionPath, pageNo,
+                    quotedText, contentHash, createdAt, null, null, null);
+        }
+    }
 
     public record FeedbackPO(
             String id, String conversationId, String messageId, String runId, String tenantId,

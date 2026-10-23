@@ -4,16 +4,26 @@ import { useState } from 'react';
 
 import type { KnowledgeDirectory } from '../../entities/knowledge/model';
 import { uploadDocuments } from './api';
+import { EvidenceModeSelect, type EvidenceMode } from './EvidenceModeSelect';
 
 interface Props {
   open: boolean;
   baseId: string;
+  knowledgeType?: string;
   directories: KnowledgeDirectory[];
   onClose(): void;
   onSubmitted(batchId: string): void;
 }
 
-export function KnowledgeUploadDrawer({ open, baseId, directories, onClose, onSubmitted }: Props) {
+export function KnowledgeUploadDrawer({
+  open,
+  baseId,
+  knowledgeType,
+  directories,
+  onClose,
+  onSubmitted,
+}: Props) {
+  const [evidenceMode, setEvidenceMode] = useState<EvidenceMode>('FULL_ONLY');
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [directoryId, setDirectoryId] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -28,7 +38,14 @@ export function KnowledgeUploadDrawer({ open, baseId, directories, onClose, onSu
     }
     setSubmitting(true);
     try {
-      const batch = await uploadDocuments(baseId, selected, directoryId);
+      const allowed =
+        knowledgeType === 'PRODUCT_DOCUMENTATION' || knowledgeType === 'TECHNICAL_DOCUMENTATION';
+      const batch = await uploadDocuments(
+        baseId,
+        selected,
+        directoryId,
+        allowed ? evidenceMode : 'FULL_ONLY',
+      );
       message.success('文件已提交处理');
       onSubmitted(batch.id);
       setFiles([]);
@@ -53,6 +70,11 @@ export function KnowledgeUploadDrawer({ open, baseId, directories, onClose, onSu
       }
     >
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
+        <EvidenceModeSelect
+          knowledgeType={knowledgeType}
+          value={evidenceMode}
+          onChange={setEvidenceMode}
+        />
         <Select
           allowClear
           placeholder="选择目录（可选）"
