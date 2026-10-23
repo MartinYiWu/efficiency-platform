@@ -103,3 +103,38 @@ def test_legacy_script_forwards_to_package_main(
     runpy.run_path("scripts/local_agent_server.py", run_name="__main__")
 
     assert calls == ["called"]
+
+
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_local_live_script_selects_database_compatible_loop(
+    monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    """实时验收脚本与正式入口使用相同的数据库兼容事件循环。"""
+    script = runpy.run_path("scripts/run_local_live_agent.py")
+    entry = script["main"]
+    selected: list[object] = []
+    settings = SimpleNamespace(gates={}, model_copy=lambda **_: "settings")
+    monkeypatch.setattr(
+        script["S7IntegrationSettings"], "from_env_file", lambda _: settings
+    )
+    monkeypatch.setitem(entry.__globals__, "_runtime_database_url", lambda _: "unused")
+    monkeypatch.setitem(
+        entry.__globals__,
+        "build_local_agent_application",
+        lambda **_: SimpleNamespace(app="application"),
+    )
+    monkeypatch.setattr(
+        script["uvicorn"],
+        "run",
+        lambda *_, **options: selected.append(options.get("loop", "auto")),
+    )
+    monkeypatch.setattr(sys, "argv", ["run_local_live_agent.py"])
+    monkeypatch.setattr(sys, "platform", platform)
+
+    entry()
+
+    assert selected == [
+        "efficiency_platform_agent.main:selector_loop_factory"
+        if platform == "win32"
+        else "auto"
+    ]

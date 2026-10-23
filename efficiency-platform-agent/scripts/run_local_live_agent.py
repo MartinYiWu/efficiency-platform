@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 from urllib.parse import quote_plus
 
@@ -85,7 +86,17 @@ def main() -> None:
         settings=settings,
         research_v2_settings=research,
     )
-    uvicorn.run(bundle.app, host="127.0.0.1", port=args.port, log_level="info")
+    uvicorn.run(
+        bundle.app,
+        host="127.0.0.1",
+        port=args.port,
+        log_level="info",
+        loop=(
+            "efficiency_platform_agent.main:selector_loop_factory"
+            if sys.platform == "win32"
+            else "auto"
+        ),
+    )
 
 
 if __name__ == "__main__":
