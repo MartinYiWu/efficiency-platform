@@ -129,6 +129,7 @@ class ChunkDraft(BaseModel):
 class ParentDraft(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    source_table_id: int | None = Field(default=None, ge=0)
     parent_no: int = Field(gt=0)
     block_kind: BlockKind = "LIST"
     evidence_mode: EvidenceMode = "FULL_ONLY"

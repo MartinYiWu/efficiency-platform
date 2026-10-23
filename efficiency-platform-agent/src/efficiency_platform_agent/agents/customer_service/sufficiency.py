@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .conflict_screen import ConflictScreen
 from .intent import StructuredStageGateway
 from .state import AnswerMode, Evidence, SufficiencyDecision
 
@@ -10,7 +11,17 @@ async def judge_sufficiency(
     gateway: StructuredStageGateway,
     question: str,
     evidence: tuple[Evidence, ...],
+    *,
+    conflict_screen: ConflictScreen | None = None,
 ) -> SufficiencyDecision:
+    if conflict_screen is not None and conflict_screen.blocked:
+        return SufficiencyDecision(
+            sufficient=False,
+            supported_claims=(),
+            unsupported_claims=(),
+            conflicts=("公司资料存在冲突或尚未完成有效核验",),
+            recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
+        )
     if not evidence:
         return SufficiencyDecision(
             sufficient=False,

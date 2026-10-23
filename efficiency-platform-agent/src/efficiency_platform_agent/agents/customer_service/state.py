@@ -103,6 +103,8 @@ class Evidence(StrictModel):
 
 
 class ParentEvidence(StrictModel):
+    parent_no: int | None = Field(default=None, gt=0)
+    source_table_id: int | None = Field(default=None, ge=0)
     block_kind: BlockKind = "LIST"
     evidence_mode: EvidenceMode = "FULL_ONLY"
     parent_id: UUID
@@ -118,6 +120,10 @@ class ParentEvidence(StrictModel):
     content: str = Field(min_length=1)
     content_hash: str = Field(pattern=r"^[a-f0-9]{64}$")
     token_count: int = Field(gt=0)
+
+
+class EvidenceGroup(StrictModel):
+    parent_ids: tuple[UUID, ...] = Field(min_length=2)
 
 
 class SupportedClaim(StrictModel):

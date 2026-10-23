@@ -59,7 +59,10 @@ class CustomerServiceGraph:
             )
             summaries.append(("retrieval", f"已重排 {len(evidence)} 条候选证据"))
             sufficiency = await judge_sufficiency(
-                gateway, intent.normalized_question, evidence
+                gateway,
+                intent.normalized_question,
+                evidence,
+                conflict_screen=retrieval_trace.conflict_screen,
             )
             summaries.append(
                 ("sufficiency", "证据充分" if sufficiency.sufficient else "证据不足")

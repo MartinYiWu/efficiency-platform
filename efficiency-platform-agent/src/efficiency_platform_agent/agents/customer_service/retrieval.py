@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
 
 from .chunking import count_tokens
+from .conflict_screen import ConflictScreen, screen_conflicts
 from .equivalence import EquivalenceDecision, validate_parents, verify_equivalence
 from .evidence_assembly import EvidenceAssembly, assemble_evidence
 from .intent import StructuredStageGateway
@@ -77,6 +78,7 @@ class RetrievalTrace:
     equivalence_decisions: tuple[EquivalenceDecision, ...] = ()
     version_exclusions: tuple[Evidence, ...] = ()
     equivalence_errors: tuple[str, ...] = ()
+    conflict_screen: ConflictScreen | None = None
 
 
 class CustomerServiceRetrieval:
@@ -241,6 +243,7 @@ class CustomerServiceRetrieval:
         assembly = None
         decisions = ()
         equivalence_errors = ()
+        conflict_result = None
         selected_evidence = evidence
         parent_ids = tuple(dict.fromkeys(item.parent_id for item in evidence))
         if parent_ids and all(item is not None for item in parent_ids):
@@ -317,12 +320,47 @@ class CustomerServiceRetrieval:
                 + bundle.model_policy.max_output_tokens
                 + max(256, limit // 10)
             )
+            options = (
+                {
+                    "final_evidence_top_k": getattr(policy, "final_evidence_top_k", 8),
+                    "adjacent_group_max_parents": getattr(
+                        policy, "adjacent_group_max_parents", 3
+                    ),
+                }
+                if enhanced
+                else {}
+            )
+            if enhanced:
+                pending = assemble_evidence(
+                    selected_evidence,
+                    parents,
+                    context_token_limit=sum(p.token_count for p in parents) + 1,
+                    reserved_tokens=0,
+                    **options,
+                )
+                conflict_result = await screen_conflicts(
+                    pending.candidate_parents,
+                    question=question,
+                    gateway=gateway,
+                    members=members,
+                    stage_bound=any(
+                        b.stage_key == "conflict_screen" for b in bundle.prompt_bindings
+                    ),
+                )
             assembly = assemble_evidence(
                 selected_evidence,
                 parents,
                 context_token_limit=limit,
                 reserved_tokens=reserve,
+                **options,
             )
+            if conflict_result is not None and conflict_result.blocked:
+                # 冲突两侧保留供回放，Graph 禁止继续充分性和回答模型调用。
+                assembly = replace(
+                    pending,
+                    context_token_limit=limit,
+                    used_tokens=pending.used_tokens + reserve,
+                )
         elif any(item is not None for item in parent_ids):
             raise ValueError("MIXED_PARENT_INDEX_INVALID")
         return RetrievalTrace(
@@ -337,6 +375,7 @@ class CustomerServiceRetrieval:
             decisions,
             tuple(exclusions),
             equivalence_errors,
+            conflict_result,
         )
 
 

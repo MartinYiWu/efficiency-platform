@@ -323,7 +323,7 @@ async def test_replace_parent_child_chunks_writes_parent_before_children() -> No
     assert "INSERT INTO customer_service.document_chunk" in statements[4]
     assert "block_kind" in statements[3]
     assert "evidence_mode" in statements[3]
-    assert connection.calls[3][1][0][-2:] == ("NUMBERED_RULE", "FULL_ONLY")
+    assert connection.calls[3][1][0][-3:] == ("NUMBERED_RULE", "FULL_ONLY", None)
 
 
 @pytest.mark.asyncio
@@ -381,6 +381,8 @@ async def test_get_parents_restricts_to_bound_index_version(
                         4,
                         block_kind,
                         evidence_mode,
+                        1,
+                        None,
                     )
                 ]
             )

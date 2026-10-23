@@ -24,6 +24,7 @@ class _Block:
     page_end: int | None = None
     source_start: int | None = None
     source_offsets: tuple[tuple[int, int], ...] = ()
+    source_table_id: int | None = None
 
 
 def count_tokens(text: str) -> int:
@@ -140,6 +141,7 @@ def parent_child_document(
             next_chunk_no += 1
         parents.append(
             ParentDraft(
+                source_table_id=block.source_table_id,
                 parent_no=parent_no,
                 block_kind=_block_kind(block.text),
                 evidence_mode=evidence_mode,
@@ -238,6 +240,7 @@ def _expand_parent_blocks(
                         (local_offset, block.source_start + source_offset)
                         for local_offset, source_offset, _ in row_positions
                     ),
+                    block.source_table_id,
                 )
             )
     return tuple(expanded)
@@ -275,6 +278,7 @@ def _parent_blocks(
                     page_for(content_start),
                     page_for(max(content_start, pending_end - 1)),
                     content_start,
+                    source_table_id=content_start if _is_table(content) else None,
                 )
             )
         pending.clear()

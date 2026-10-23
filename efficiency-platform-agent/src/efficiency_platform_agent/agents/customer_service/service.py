@@ -214,6 +214,22 @@ class CustomerServiceRunService:
                 for item in (trace.equivalence_decisions if trace else ())
             ],
             "equivalence_errors": list(trace.equivalence_errors if trace else ()),
+            "final_parent_candidates": [
+                str(p.parent_id)
+                for p in (assembly.candidate_parents if assembly else ())
+            ],
+            "evidence_groups": [
+                g.model_dump(mode="json") for g in (assembly.groups if assembly else ())
+            ],
+            "grouping_decisions": [
+                {"parent_id": str(pid), "reason": reason}
+                for pid, reason in (
+                    assembly.grouping_reasons.items() if assembly else ()
+                )
+            ],
+            "conflict_screen": trace.conflict_screen.model_dump(mode="json")
+            if trace and trace.conflict_screen
+            else None,
             "version_exclusions": [
                 row | {"reason": "NOT_BOUND_INDEX_MEMBER"}
                 for row in _candidate_rows(trace.version_exclusions if trace else ())
@@ -254,7 +270,9 @@ class CustomerServiceRunService:
                         else (
                             "DUPLICATE_PARENT_CONTENT"
                             if parent_id in assembly.duplicate_parent_ids
-                            else "CONTEXT_BUDGET_EXCEEDED"
+                            else assembly.exclusion_reasons.get(
+                                parent_id, "CONTEXT_BUDGET_EXCEEDED"
+                            )
                         )
                     ),
                 }
