@@ -149,7 +149,7 @@ class KnowledgeReleaseServiceTest {
         return new KnowledgeDocumentVersionPO(
                 id, "document-1", number, "file-2", "a".repeat(64), "text/plain",
                 "更新", null, "READY", null, null, null, "1",
-                KnowledgeFixtures.NOW, null);
+                KnowledgeFixtures.NOW, null, "FULL_ONLY");
     }
 
     private static CustomerServiceIndexVerifyView verified(
