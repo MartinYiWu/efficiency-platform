@@ -19,6 +19,7 @@ EVIDENCE_POLICY_FIELDS = frozenset(
     }
 )
 EVIDENCE_STAGES = frozenset({"equivalence", "conflict_screen", "evidence_extract"})
+ANSWER_EVIDENCE_SCOPE_MESSAGE_KEY = "customer_service.evidence_scope.v1"
 
 
 class PromptVariable(BaseModel):
@@ -151,6 +152,19 @@ class CustomerServiceReleaseBundle(BaseModel):
             ):
                 raise ValueError("旧版 Release 不接受证据策略扩展")
         else:
+            for stage in ("answer_company", "answer_mixed", "answer_repair"):
+                bindings = [
+                    item for item in self.prompt_bindings if item.stage_key == stage
+                ]
+                if len(bindings) != 1 or not any(
+                    message.message_key == ANSWER_EVIDENCE_SCOPE_MESSAGE_KEY
+                    and message.role in {"SYSTEM", "DEVELOPER"}
+                    and message.trusted_instruction
+                    for message in bindings[0].messages
+                ):
+                    raise ValueError(
+                        f"ANSWER_EVIDENCE_SCOPE_CAPABILITY_REQUIRED: {stage}"
+                    )
             if not EVIDENCE_POLICY_FIELDS <= self.rag_policy.model_fields_set:
                 raise ValueError("新版 Release 必须冻结全部证据策略字段")
             for stage in EVIDENCE_STAGES:

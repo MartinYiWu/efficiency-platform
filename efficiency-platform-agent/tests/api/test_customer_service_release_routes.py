@@ -118,7 +118,14 @@ def _v2_payload():
         similarity_pair_limit=20,
         adjacent_group_max_parents=3,
     )
-    for stage in ("equivalence", "conflict_screen", "evidence_extract"):
+    for stage in (
+        "equivalence",
+        "conflict_screen",
+        "evidence_extract",
+        "answer_company",
+        "answer_mixed",
+        "answer_repair",
+    ):
         value["prompt_bindings"].append(
             {
                 "stage_key": stage,
@@ -130,7 +137,9 @@ def _v2_payload():
                     {
                         "ordinal": 1,
                         "role": "SYSTEM",
-                        "message_key": "instruction",
+                        "message_key": "customer_service.evidence_scope.v1"
+                        if stage.startswith("answer_")
+                        else "instruction",
                         "content_template": "仅判断原文",
                         "content_format": "TEXT",
                         "trusted_instruction": True,
@@ -153,6 +162,36 @@ def _v2_payload():
     value["prompt_bindings"].sort(key=lambda item: item["stage_key"])
     _rechecksum(value)
     return value
+
+
+@pytest.mark.parametrize("stage", ["answer_company", "answer_mixed", "answer_repair"])
+@pytest.mark.parametrize("mutation", ["old_key", "untrusted", "user_role", "missing"])
+def test_v2_requires_versioned_answer_evidence_scope_capability(stage, mutation):
+    payload = _v2_payload()
+    binding = next(b for b in payload["prompt_bindings"] if b["stage_key"] == stage)
+    if mutation == "old_key":
+        binding["messages"][0]["message_key"] = "legacy_instruction"
+    elif mutation == "untrusted":
+        binding["messages"][0]["trusted_instruction"] = False
+    elif mutation == "user_role":
+        binding["messages"][0].update(role="USER", trusted_instruction=False)
+    else:
+        payload["prompt_bindings"].remove(binding)
+    with pytest.raises(ValueError, match="ANSWER_EVIDENCE_SCOPE_CAPABILITY_REQUIRED"):
+        CustomerServiceReleaseBundle.model_validate(payload)
+    with pytest.raises(ValueError, match="ANSWER_EVIDENCE_SCOPE_CAPABILITY_REQUIRED"):
+        _decode_snapshot(json.dumps(payload))
+
+
+@pytest.mark.parametrize("role", ["SYSTEM", "DEVELOPER"])
+def test_new_answer_capability_passes_and_v1_keeps_legacy_prompts(role):
+    payload = _v2_payload()
+    for binding in payload["prompt_bindings"]:
+        if binding["stage_key"] in {"answer_company", "answer_mixed", "answer_repair"}:
+            binding["messages"][0]["role"] = role
+    _rechecksum(payload)
+    CustomerServiceReleaseBundle.model_validate(payload).assert_checksum()
+    CustomerServiceReleaseBundle.model_validate(_payload()).assert_checksum()
 
 
 def test_v2_release_and_v1_roundtrip_keep_frozen_checksums():
@@ -224,6 +263,16 @@ def test_java_golden_snapshots_cover_old_checksum_and_decimal_edges():
         / "ai-efficiency-platform/aiep-boot/src/test/resources"
     )
     for version in (1, 2):
+        if version == 2:
+            with pytest.raises(
+                ValueError, match="ANSWER_EVIDENCE_SCOPE_CAPABILITY_REQUIRED"
+            ):
+                CustomerServiceReleaseBundle.model_validate_json(
+                    (fixtures / "customer-service-release-v2.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            continue
         bundle = CustomerServiceReleaseBundle.model_validate_json(
             (fixtures / f"customer-service-release-v{version}.json").read_text(
                 encoding="utf-8"
