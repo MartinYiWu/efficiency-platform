@@ -180,6 +180,16 @@ class AiReleaseServiceTest {
     }
 
     @Test
+    void rejectsLegacyKnowledgeBindingWithNonPositivePriorityBeforeDelivery() {
+        when(repository.listKnowledgeBindings("version-1")).thenReturn(List.of(
+                new AgentVersionKnowledgeBindingPO("version-1", "kb", "index", 0, true)));
+
+        assertThatThrownBy(() -> service.publish("version-1", "dev"))
+                .hasMessageContaining("优先级");
+        verify(ai, never()).publishCustomerServiceRelease(anyString(), any());
+    }
+
+    @Test
     void sharedGoldenSnapshotsKeepOriginalChecksumsIncludingNumericEdges() throws Exception {
         var mapper = new ObjectMapper();
         var checksum = AiReleaseService.class.getDeclaredMethod("checksum", CustomerServiceReleaseRequest.class);

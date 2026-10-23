@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import com.aiep.aihub.application.management.AiPolicyManagementService;
+import com.aiep.aihub.application.management.AiAgentManagementService;
+import com.aiep.aihub.application.management.AiAgentManagementService.KnowledgeBindingInput;
 import com.aiep.aihub.application.management.AiPolicyManagementService.RagPolicyInput;
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -109,5 +111,20 @@ class AiEvidencePolicyContractTest {
         var service = new com.aiep.aihub.application.management.AiAgentManagementService(repository);
         assertThatThrownBy(() -> service.bindModelPolicy("v", "new")).hasMessageContaining("输入上限");
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).upsertModelPolicyBinding("v", "new");
+    }
+
+    @Test
+    void knowledgeBindingRejectsNonPositivePriorityBeforePersistence() {
+        var repository = mock(AiManagementMappers.class);
+        org.mockito.Mockito.when(repository.findAgentVersion("v")).thenReturn(
+                new com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO(
+                        "v", "agent", "2", "customer-service", "2", "DRAFT", "test", "1", null, null));
+        org.mockito.Mockito.when(repository.isIndexReleaseReady("index")).thenReturn(true);
+
+        assertThatThrownBy(() -> new AiAgentManagementService(repository).bindKnowledge(
+                "v", java.util.List.of(new KnowledgeBindingInput("kb", "index", 0, true))))
+                .hasMessageContaining("优先级");
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .replaceKnowledgeBindings(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyList());
     }
 }

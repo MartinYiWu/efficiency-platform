@@ -242,6 +242,10 @@ public class AiReleaseService {
     }
 
     private KnowledgeBinding knowledge(AgentVersionKnowledgeBindingPO value) {
+        if (value.priority() <= 0) {
+            throw new AiManagementException(
+                    "AI_KNOWLEDGE_BINDING_PRIORITY_INVALID", "知识绑定优先级必须大于 0");
+        }
         if (!repository.isIndexReleaseReady(value.indexReleaseId())) {
             throw new AiManagementException("AI_INDEX_RELEASE_NOT_READY", "知识索引未发布");
         }

@@ -369,6 +369,31 @@ async def test_same_index_document_with_two_versions_is_rejected_before_search()
 
 
 @pytest.mark.asyncio
+async def test_same_document_with_two_versions_across_bound_indexes_is_rejected():
+    s = Scenario()
+    second_release_id = uuid4()
+    s.bundle.knowledge_bindings += (
+        SimpleNamespace(
+            index_release_id=second_release_id,
+            knowledge_base_id=s.left.knowledge_base_id,
+        ),
+    )
+    s.members += (
+        (
+            s.left.knowledge_base_id,
+            s.left.document_id,
+            uuid4(),
+            second_release_id,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="INDEX_DOCUMENT_VERSION_CONFLICT") as failure:
+        await s.search()
+
+    assert failure.value.code == "INDEX_DOCUMENT_VERSION_CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_same_parent_children_are_not_compared():
     s = Scenario()
     s.items = (s.left, s.right.model_copy(update={"parent_id": s.left.parent_id}))

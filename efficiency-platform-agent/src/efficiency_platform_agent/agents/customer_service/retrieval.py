@@ -133,7 +133,7 @@ class CustomerServiceRetrieval:
             for kb, document, version, release in members:
                 if (kb, release) not in bindings:
                     raise EvidenceContractError("INDEX_BINDING_MISMATCH")
-                key = (kb, document, release)
+                key = document
                 if key in versions and versions[key] != version:
                     raise EvidenceContractError("INDEX_DOCUMENT_VERSION_CONFLICT")
                 versions[key] = version
