@@ -1,8 +1,31 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { listMessages } from './api';
 import { parseCustomerServiceSse } from './sseClient';
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('customer service chat', () => {
+  it('shows persisted user and assistant messages in conversation order', async () => {
+    const message = (id: string, role: 'USER' | 'ASSISTANT') => ({
+      message: {
+        id, conversationId: 'c', tenantId: 'dev', role, content: id,
+        status: 'COMPLETED', answerMode: null, runId: 'r', clientRequestId: null,
+        createdAt: '2026-10-26T16:00:00Z',
+      },
+      citations: [],
+    });
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 'SUCCESS', data: [message('answer', 'ASSISTANT'), message('question', 'USER')],
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        code: 'SUCCESS', data: [message('question', 'USER'), message('answer', 'ASSISTANT')],
+      }))));
+
+    expect((await listMessages('c')).map((item) => item.message.role)).toEqual(['USER', 'ASSISTANT']);
+    expect((await listMessages('c')).map((item) => item.message.role)).toEqual(['USER', 'ASSISTANT']);
+  });
   it('parses and validates public SSE events', () => {
     const events = parseCustomerServiceSse(
       'id: 1\nevent: run.progress\ndata: {"stage":"retrieval","summary":"正在检索公司资料"}\n\nid: 2\nevent: run.completed\ndata: {"answerMode":"COMPANY_KNOWLEDGE"}\n\n',

@@ -85,6 +85,10 @@
   color: #475467;
   font-size: 13px;
 }
+.progressOutcome {
+  color: #b42318;
+  font-size: 13px;
+}
 .error {
   padding: 8px 22px;
   color: #d92d20;

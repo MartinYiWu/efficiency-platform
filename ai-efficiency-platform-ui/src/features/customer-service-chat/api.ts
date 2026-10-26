@@ -59,7 +59,11 @@ export const listConversations = (keyword = '') =>
 export const createConversation = (title: string) =>
   call('/api/customer-service/conversations', conversationSchema, json('POST', { title }));
 export const listMessages = (id: string) =>
-  call(`/api/customer-service/conversations/${id}/messages`, messageViewSchema.array());
+  call(`/api/customer-service/conversations/${id}/messages`, messageViewSchema.array())
+    .then((items) => items.sort((left, right) =>
+      left.message.createdAt.localeCompare(right.message.createdAt) ||
+      (left.message.role === right.message.role ? 0 : left.message.role === 'USER' ? -1 : 1),
+    ));
 export const submitMessage = (id: string, message: string, clientRequestId: string) =>
   call(
     `/api/customer-service/conversations/${id}/messages`,
