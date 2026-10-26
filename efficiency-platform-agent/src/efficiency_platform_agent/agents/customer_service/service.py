@@ -8,6 +8,7 @@ import traceback
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -21,6 +22,7 @@ from .retrieval_snapshot_repository import (
     evidence_processing_facts,
 )
 from .state import (
+    AnswerMode,
     CustomerServiceRunRequest,
     DebugRequest,
     RunEvent,
@@ -30,6 +32,7 @@ from .state import (
 )
 
 logger = logging.getLogger("CustomerServiceRun")
+latency_logger = logging.getLogger("efficiency_platform_agent.execution")
 
 
 class ReleaseRepositoryPort(Protocol):
@@ -44,6 +47,9 @@ class _Run:
     events: list[RunEvent] = field(default_factory=list)
     changed: asyncio.Event = field(default_factory=asyncio.Event)
     task: asyncio.Task[None] | None = None
+    streamed_blocks: list[str] = field(default_factory=list)
+    submitted_at: float = field(default_factory=perf_counter)
+    first_answer_logged: bool = False
 
 
 class CustomerServiceNotFoundError(LookupError):
@@ -273,9 +279,19 @@ class CustomerServiceRunService:
             bundle = await self.releases.get(run.request.agent_release_id)
             if bundle is None:
                 raise CustomerServiceNotFoundError("Release 不存在")
-            result = await self.graph.run(
-                run.request, bundle, self.gateway_factory(bundle)
-            )
+            if isinstance(self.graph, CustomerServiceGraph):
+                result = await self.graph.run(
+                    run.request,
+                    bundle,
+                    self.gateway_factory(bundle),
+                    on_answer_block=lambda block, mode: self._stream_answer_block(
+                        run, block, mode
+                    ),
+                )
+            else:
+                result = await self.graph.run(
+                    run.request, bundle, self.gateway_factory(bundle)
+                )
             await self.retrieval_snapshots.save(run.view.run_id, result)
             self._publish_result(run, result)
         except asyncio.CancelledError:
@@ -323,7 +339,10 @@ class CustomerServiceRunService:
                     ),
                 ),
             )
-        for delta in answer_deltas(result.rendered):
+        blocks = answer_deltas(result.rendered)
+        if tuple(run.streamed_blocks) != blocks[: len(run.streamed_blocks)]:
+            raise ValueError("STREAM_ANSWER_PREFIX_MISMATCH")
+        for delta in blocks[len(run.streamed_blocks) :]:
             self._append(
                 run,
                 "answer.delta",
@@ -353,9 +372,31 @@ class CustomerServiceRunService:
             ),
         )
 
+    def _stream_answer_block(self, run: _Run, block: str, mode: AnswerMode) -> None:
+        run.streamed_blocks.append(block)
+        self._append(
+            run,
+            "answer.delta",
+            RunStatus.RUNNING,
+            RunEventPayload(delta=block, answer_mode=mode),
+        )
+
     def _append(
         self, run: _Run, event_type: str, status: RunStatus, payload: RunEventPayload
     ) -> None:
+        if event_type == "answer.delta" and not run.first_answer_logged:
+            run.first_answer_logged = True
+            latency_logger.info(
+                "event=customer_service_first_answer run_id=%s elapsed_ms=%.0f",
+                run.view.run_id,
+                (perf_counter() - run.submitted_at) * 1000,
+            )
+        if event_type == "answer.completed":
+            latency_logger.info(
+                "event=customer_service_answer_completed run_id=%s elapsed_ms=%.0f",
+                run.view.run_id,
+                (perf_counter() - run.submitted_at) * 1000,
+            )
         run.events.append(
             RunEvent(
                 run_id=run.view.run_id,

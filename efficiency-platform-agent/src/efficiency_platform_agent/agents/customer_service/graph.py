@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from time import perf_counter
 
 from .answer import generate_answer
 from .evidence_assembly import assemble_evidence, build_evidence_pack
@@ -11,6 +14,7 @@ from .release_bundle import CustomerServiceReleaseBundle
 from .renderer import render_answer
 from .retrieval import CustomerServiceRetrieval, RetrievalTrace
 from .state import (
+    AnswerMode,
     CustomerServiceRunRequest,
     Evidence,
     EvidencePack,
@@ -19,6 +23,8 @@ from .state import (
     SufficiencyDecision,
 )
 from .sufficiency import judge_sufficiency
+
+logger = logging.getLogger("efficiency_platform_agent.execution")
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,8 +46,15 @@ class CustomerServiceGraph:
         request: CustomerServiceRunRequest,
         bundle: CustomerServiceReleaseBundle,
         gateway: StructuredStageGateway,
+        on_answer_block: Callable[[str, AnswerMode], None] | None = None,
     ) -> GraphResult:
+        started = perf_counter()
         intent = await classify_intent(gateway, request)
+        logger.info(
+            "event=customer_service_stage_timing conversation_id=%s stage=intent elapsed_ms=%.0f",
+            request.conversation_id,
+            (perf_counter() - started) * 1000,
+        )
         evidence: tuple[Evidence, ...] = ()
         retrieval_trace = None
         sufficiency = None
@@ -55,6 +68,11 @@ class CustomerServiceGraph:
                 question=intent.normalized_question,
                 gateway=gateway,
                 bundle=bundle,
+            )
+            logger.info(
+                "event=customer_service_stage_timing conversation_id=%s stage=retrieval elapsed_ms=%.0f",
+                request.conversation_id,
+                (perf_counter() - started) * 1000,
             )
             evidence = (
                 retrieval_trace.assembly.selected
@@ -79,6 +97,11 @@ class CustomerServiceGraph:
                     children=retrieval_trace.reranked_evidence,
                     intent=intent,
                 )
+                logger.info(
+                    "event=customer_service_stage_timing conversation_id=%s stage=evidence_pack elapsed_ms=%.0f",
+                    request.conversation_id,
+                    (perf_counter() - started) * 1000,
+                )
                 retrieval_trace = replace(retrieval_trace, evidence_pack=evidence_pack)
                 evidence = evidence_pack.entries
                 if evidence_pack.model_policy != bundle.model_policy:
@@ -90,6 +113,11 @@ class CustomerServiceGraph:
                 conflict_screen=retrieval_trace.conflict_screen,
                 history=request.history,
             )
+            logger.info(
+                "event=customer_service_stage_timing conversation_id=%s stage=sufficiency elapsed_ms=%.0f",
+                request.conversation_id,
+                (perf_counter() - started) * 1000,
+            )
             summaries.append(
                 ("sufficiency", "证据充分" if sufficiency.sufficient else "证据不足")
             )
@@ -100,6 +128,12 @@ class CustomerServiceGraph:
             evidence=evidence_pack if evidence_pack is not None else evidence,
             sufficiency=sufficiency,
             history=request.history,
+            on_block=on_answer_block,
+        )
+        logger.info(
+            "event=customer_service_stage_timing conversation_id=%s stage=answer elapsed_ms=%.0f",
+            request.conversation_id,
+            (perf_counter() - started) * 1000,
         )
         return GraphResult(
             rendered=render_answer(

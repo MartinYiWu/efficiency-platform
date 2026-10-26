@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import Callable
+from time import perf_counter
 from typing import TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
-from efficiency_platform_agent.core.ports import ModelProvider
+from efficiency_platform_agent.core.ports import ModelProvider, StreamingModelProvider
 from efficiency_platform_agent.core.run import (
     JsonObject,
     JsonValue,
@@ -31,6 +34,13 @@ def _freeze(value: object) -> JsonValue:
     if isinstance(value, (list, tuple)):
         return tuple(_freeze(item) for item in value)
     raise TypeError(f"不支持的 JSON 类型: {type(value).__name__}")
+
+
+def _answer_thinking_option(stage_key: str) -> tuple[tuple[str, JsonValue], ...]:
+    # 冲突和充分性判断保留模型默认思考；已冻结证据的表述阶段优先缩短首段等待。
+    if stage_key in {"answer_company", "answer_mixed", "answer_general"}:
+        return (("thinking", JsonObject((("type", "disabled"),))),)
+    return ()
 
 
 class ReleaseStructuredModelGateway:
@@ -88,6 +98,7 @@ class ReleaseStructuredModelGateway:
         input_value: object,
         output_type: type[T],
     ) -> T:
+        started = perf_counter()
         messages = self._request_messages(stage_key, input_value, output_type)
         policy = self.model_policy
         schema = output_type.model_json_schema()
@@ -110,6 +121,7 @@ class ReleaseStructuredModelGateway:
                 ("response_format", JsonObject((("type", "json_object"),))),
                 ("json_schema", _freeze(schema)),
             )
+            + _answer_thinking_option(stage_key)
         )
         for attempt in range(policy.max_retries + 1):
             attempt_messages = messages
@@ -143,14 +155,97 @@ class ReleaseStructuredModelGateway:
                     "MODEL_RESPONSE_INVALID", "模型未返回结构化文本"
                 )
             try:
-                return output_type.model_validate_json(result.message.content)
+                value = output_type.model_validate_json(result.message.content)
+                logging.getLogger("efficiency_platform_agent.execution").info(
+                    "event=customer_service_model_timing stage=%s elapsed_ms=%.0f input_tokens=%s",
+                    stage_key,
+                    (perf_counter() - started) * 1000,
+                    self.input_tokens(stage_key, input_value, output_type),
+                )
+                return value
             except ValueError as error:
+                fields = (
+                    [(tuple(item["loc"]), item["type"]) for item in error.errors()[:5]]
+                    if isinstance(error, ValidationError)
+                    else []
+                )
+                logging.getLogger("efficiency_platform_agent.execution").warning(
+                    "event=customer_service_model_contract_invalid stage=%s attempt=%s error_type=%s fields=%s response_chars=%s",
+                    stage_key,
+                    attempt + 1,
+                    type(error).__name__,
+                    fields,
+                    len(result.message.content),
+                )
                 if attempt < policy.max_retries:
                     continue
                 raise StructuredModelError(
                     "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
                 ) from error
         raise AssertionError("结构化模型重试循环未返回")
+
+    async def stream_complete(
+        self,
+        stage_key: str,
+        input_value: object,
+        output_type: type[T],
+        on_content: Callable[[str], None],
+    ) -> T:
+        if not isinstance(self.provider, StreamingModelProvider):
+            return await self.complete(stage_key, input_value, output_type)
+        started = perf_counter()
+        if (
+            self.bundle.contract_version.endswith("/2")
+            and self.input_tokens(stage_key, input_value, output_type)
+            + self.model_policy.max_output_tokens
+            + max(256, self.model_policy.max_input_tokens // 10)
+            > self.model_policy.max_input_tokens
+        ):
+            raise StructuredModelError(
+                "MODEL_INPUT_BUDGET_EXCEEDED", "完整输入超过模型预算"
+            )
+        request = ProviderRequest(
+            contract_version="provider-request/1",
+            messages=self._request_messages(stage_key, input_value, output_type),
+            options=JsonObject(
+                (
+                    ("logical_model", self.model_policy.model_name),
+                    ("temperature", float(self.model_policy.temperature)),
+                    ("top_p", float(self.model_policy.top_p)),
+                    ("max_tokens", self.model_policy.max_output_tokens),
+                    ("response_format", JsonObject((("type", "json_object"),))),
+                    ("json_schema", _freeze(output_type.model_json_schema())),
+                )
+                + _answer_thinking_option(stage_key)
+            ),
+            timeout_ms=self.model_policy.read_timeout_ms,
+        )
+        parts: list[str] = []
+        finished = False
+        async for chunk in self.provider.stream(request):
+            if chunk.error is not None:
+                raise StructuredModelError(chunk.error.code, chunk.error.safe_message)
+            if chunk.delta:
+                parts.append(chunk.delta)
+                on_content("".join(parts))
+            finished = finished or chunk.finish_reason is not None
+        if not finished:
+            raise StructuredModelError(
+                "PROVIDER_RESPONSE_TRUNCATED", "模型流未正常结束"
+            )
+        try:
+            value = output_type.model_validate_json("".join(parts))
+        except ValueError as error:
+            raise StructuredModelError(
+                "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
+            ) from error
+        logging.getLogger("efficiency_platform_agent.execution").info(
+            "event=customer_service_model_timing stage=%s elapsed_ms=%.0f input_tokens=%s",
+            stage_key,
+            (perf_counter() - started) * 1000,
+            self.input_tokens(stage_key, input_value, output_type),
+        )
+        return value
 
     def _stage_messages(self, stage_key: str) -> tuple[PromptMessage, ...]:
         shared = {"safety", "identity"}

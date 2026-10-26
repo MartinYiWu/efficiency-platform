@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
@@ -141,21 +142,31 @@ class CustomerServiceRetrieval:
         rankings: list[tuple[Evidence, ...]] = []
         vector_candidates: list[Evidence] = []
         fts_candidates: list[Evidence] = []
-        for query_index, (query, vector) in enumerate(
-            zip(queries, vectors, strict=True), 1
-        ):
-            vector_items = await self.repository.vector_search(
-                tenant_id=tenant_id,
-                index_release_ids=release_ids,
-                vector=vector,
-                limit=policy.vector_top_k,
+
+        async def search_query(query: str, vector: tuple[float, ...]):
+            vector_items, fts_items = await asyncio.gather(
+                self.repository.vector_search(
+                    tenant_id=tenant_id,
+                    index_release_ids=release_ids,
+                    vector=vector,
+                    limit=policy.vector_top_k,
+                ),
+                self.repository.fts_search(
+                    tenant_id=tenant_id,
+                    index_release_ids=release_ids,
+                    query=query,
+                    limit=policy.fts_top_k,
+                ),
             )
-            fts_items = await self.repository.fts_search(
-                tenant_id=tenant_id,
-                index_release_ids=release_ids,
-                query=query,
-                limit=policy.fts_top_k,
+            return vector_items, fts_items
+
+        search_results = await asyncio.gather(
+            *(
+                search_query(query, vector)
+                for query, vector in zip(queries, vectors, strict=True)
             )
+        )
+        for query_index, (vector_items, fts_items) in enumerate(search_results, 1):
             if enhanced:
                 vector_items = tuple(
                     item.model_copy(update={"rank": rank, "query_index": query_index})

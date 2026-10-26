@@ -56,7 +56,7 @@ async def test_cross_document_conflict_contract(verdict, invalid, blocked):
         parents, question="问题", gateway=Gateway(), members=members, stage_bound=True
     )
     assert result.blocked is blocked
-    assert calls == ["conflict_screen"]
+    assert calls == ["conflict_screen"] * (2 if invalid else 1)
     if invalid:
         assert result.errors == ("CONFLICT_QUOTE_INVALID",)
 
@@ -102,6 +102,47 @@ async def test_markdown_escaped_quote_matches_same_source_text():
     )
     assert result.errors == ()
     assert not result.blocked
+
+
+@pytest.mark.asyncio
+async def test_malformed_model_uuid_does_not_replace_trusted_pair_identity():
+    from efficiency_platform_agent.agents.customer_service.conflict_screen import (
+        screen_conflicts,
+    )
+
+    _, parents = group_fixture()
+    parents = (
+        parents[0],
+        parents[1].model_copy(update={"document_id": uuid4()}),
+    )
+
+    class Gateway:
+        async def complete(self, stage, value, output_type):
+            return output_type.model_validate(
+                {
+                    "pairs": [
+                        {
+                            "left_parent_id": str(parents[0].parent_id),
+                            "right_parent_id": "aee1ee5c-624d-5a19-b2b0a431639ce",
+                            "same_scope": False,
+                            "verdict": "NO_CONFLICT",
+                            "left_quote": parents[0].content,
+                            "right_quote": parents[1].content,
+                            "reason": "问题域不同",
+                        }
+                    ]
+                }
+            )
+
+    members = {
+        (p.knowledge_base_id, p.document_id, p.document_version_id, p.index_release_id)
+        for p in parents
+    }
+    result = await screen_conflicts(
+        parents, question="问题", gateway=Gateway(), members=members, stage_bound=True
+    )
+    assert not result.blocked
+    assert result.pairs[0].right_parent_id == parents[1].parent_id
 
 
 @pytest.mark.asyncio
@@ -320,7 +361,12 @@ async def test_untrusted_conflict_decisions_cannot_escape_gate(mutation):
     result = await screen_conflicts(
         parents, question="问题", gateway=Gateway(), members=members, stage_bound=True
     )
-    assert result.blocked
+    if mutation == "wrong_id":
+        assert not result.blocked
+        assert result.pairs[0].left_parent_id == parents[0].parent_id
+        assert result.pairs[0].right_parent_id == parents[1].parent_id
+    else:
+        assert result.blocked
 
 
 @pytest.mark.asyncio
@@ -376,7 +422,9 @@ async def test_markdown_formatting_difference_keeps_verbatim_quote_valid():
 
     _, parents = group_fixture()
     parents = (
-        parents[0].model_copy(update={"content": "- **统一工具**：使用 Cursor 企业版。"}),
+        parents[0].model_copy(
+            update={"content": "- **统一工具**：使用 Cursor 企业版。"}
+        ),
         parents[1].model_copy(
             update={"document_id": uuid4(), "content": "群 ID 格式为 oc\\_xxxx。"}
         ),

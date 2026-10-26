@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from hashlib import sha256
 from itertools import combinations
 from math import isfinite, sqrt
@@ -111,22 +112,37 @@ async def verify_equivalence(
             pairs[key] = (similarity, left, right)
     decisions = []
     accepted: set[frozenset[UUID]] = set()
-    for similarity, left, right in sorted(
+    selected_pairs = sorted(
         pairs.values(), key=lambda p: (-p[0], str(p[1].chunk_id), str(p[2].chunk_id))
-    )[:pair_limit]:
+    )[:pair_limit]
+
+    async def check_pair(left: Evidence, right: Evidence):
+        return await gateway.complete(
+            "equivalence",
+            {
+                "question": question,
+                "left": _input(left, by_id[left.parent_id]),
+                "right": _input(right, by_id[right.parent_id]),
+            },
+            EquivalenceResult,
+        )
+
+    results = (
+        await asyncio.gather(
+            *(check_pair(left, right) for _, left, right in selected_pairs),
+            return_exceptions=True,
+        )
+        if stage_bound
+        else (None,) * len(selected_pairs)
+    )
+    for (similarity, left, right), outcome in zip(selected_pairs, results, strict=True):
         result = None
         reason = "PROMPT_STAGE_NOT_BOUND"
         if stage_bound:
             try:
-                result = await gateway.complete(
-                    "equivalence",
-                    {
-                        "question": question,
-                        "left": _input(left, by_id[left.parent_id]),
-                        "right": _input(right, by_id[right.parent_id]),
-                    },
-                    EquivalenceResult,
-                )
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                result = outcome
                 if (
                     result.left_chunk_id != left.chunk_id
                     or result.right_chunk_id != right.chunk_id
