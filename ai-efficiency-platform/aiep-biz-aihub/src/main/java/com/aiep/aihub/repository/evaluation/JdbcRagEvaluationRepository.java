@@ -65,6 +65,9 @@ public class JdbcRagEvaluationRepository implements RagEvaluationRepository {
                     json(value.expectedDocumentVersionIds()), value.minCitationCount(), json(value.tags()), value.enabled(),
                     Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
         }
+        if (changed > 0) {
+            jdbc.update("UPDATE ai_rag_eval_dataset SET updated_at=? WHERE id=?", Timestamp.from(Instant.now()), datasetId);
+        }
         return changed;
     }
 

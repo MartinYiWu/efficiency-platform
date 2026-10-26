@@ -1,6 +1,7 @@
 package com.aiep.aihub.evaluation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -39,6 +40,20 @@ class RagEvaluationManagementServiceTest {
                 .first().isEqualTo("existing-id");
         assertThat(values.getValue()).extracting(EvaluationCase::question)
                 .containsExactly("更新问题", "新增问题");
+    }
+
+    @Test
+    void rejectsDuplicateCaseNumbersInsideOneImport() {
+        RagEvaluationRepository repository = mock(RagEvaluationRepository.class);
+        when(repository.findDataset("dataset")).thenReturn(new Dataset(
+                "dataset", "规范评测", null, "customer-service", "DRAFT", 0, Instant.now(), Instant.now()));
+        when(repository.listCases("dataset")).thenReturn(List.of());
+        RagEvaluationService service = new RagEvaluationService(repository,
+                mock(com.aiep.aihub.application.management.AiRagDebugService.class), Runnable::run);
+
+        assertThatThrownBy(() -> service.importCases("dataset", List.of(
+                input("C-001", "问题一"), input("C-001", "问题二"))))
+                .hasMessage("批量导入中存在重复用例编号");
     }
 
     private static CaseInput input(String caseNo, String question) {

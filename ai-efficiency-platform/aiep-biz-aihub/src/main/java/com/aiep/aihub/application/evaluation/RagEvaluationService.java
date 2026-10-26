@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 import org.slf4j.Logger;
@@ -64,11 +65,15 @@ public class RagEvaluationService {
         }
         Map<String, EvaluationCase> existing = new LinkedHashMap<>();
         repository.listCases(datasetId).forEach(value -> existing.put(value.caseNo(), value));
+        Set<String> importedCaseNumbers = new HashSet<>();
         List<EvaluationCase> values = new ArrayList<>();
         int created = 0;
         int updated = 0;
         for (CaseInput input : inputs) {
             validateCase(input);
+            if (!importedCaseNumbers.add(input.caseNo().trim())) {
+                throw new AiManagementException("AI_RAG_EVAL_CASE_NO_DUPLICATED", "批量导入中存在重复用例编号");
+            }
             EvaluationCase current = existing.get(input.caseNo());
             String id = current == null ? UUID.randomUUID().toString() : current.id();
             if (current == null) created++; else updated++;
@@ -92,6 +97,9 @@ public class RagEvaluationService {
         validateCase(input);
         EvaluationCase current = repository.listCases(datasetId).stream().filter(value -> value.id().equals(caseId))
                 .findFirst().orElseThrow(() -> new AiManagementException("AI_RAG_EVAL_CASE_NOT_FOUND", "评测用例不存在"));
+        if (!current.caseNo().equals(input.caseNo().trim())) {
+            throw new AiManagementException("AI_RAG_EVAL_CASE_NO_IMMUTABLE", "稳定用例编号不允许修改");
+        }
         boolean caseNoConflict = repository.listCases(datasetId).stream()
                 .anyMatch(value -> !value.id().equals(caseId) && value.caseNo().equals(input.caseNo()));
         if (caseNoConflict) throw new AiManagementException("AI_RAG_EVAL_CASE_NO_CONFLICT", "用例编号已存在");

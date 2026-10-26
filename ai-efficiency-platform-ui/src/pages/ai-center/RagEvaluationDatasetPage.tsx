@@ -81,7 +81,7 @@ export function RagEvaluationDatasetPage() {
     ]} />
     <Drawer width={620} title={editing ? '编辑用例' : '新增用例'} open={caseOpen} onClose={() => setCaseOpen(false)} extra={<Button type="primary" onClick={() => void saveCase()}>保存</Button>}>
       <Form form={caseForm} layout="vertical" initialValues={caseInitial()}>
-        <Form.Item name="caseNo" label="稳定编号" rules={[{ required: true }]}><Input /></Form.Item>
+        <Form.Item name="caseNo" label="稳定编号" rules={[{ required: true }]}><Input disabled={Boolean(editing)} /></Form.Item>
         <Form.Item name="question" label="真实提问" rules={[{ required: true }]}><Input.TextArea rows={3} /></Form.Item>
         <Form.Item name="expectedAnswerMode" label="预期回答模式" rules={[{ required: true }]}><Select options={['COMPANY_KNOWLEDGE', 'MIXED', 'GENERAL_ADVICE', 'INSUFFICIENT_EVIDENCE'].map((value) => ({ value }))} /></Form.Item>
         <Form.Item name="expectedFacts" label="必须事实（每行一条）"><Input.TextArea rows={4} /></Form.Item>

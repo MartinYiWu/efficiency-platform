@@ -67,7 +67,7 @@ CREATE TABLE ai_rag_eval_case_result (
     answer_mode VARCHAR(32) NULL,
     answer_markdown LONGTEXT NULL,
     citations_json JSON NULL,
-    metrics_json JSON NOT NULL,
+    metrics_json JSON NULL,
     error_code VARCHAR(128) NULL,
     error_message VARCHAR(1000) NULL,
     created_at DATETIME(6) NOT NULL,

@@ -27,5 +27,7 @@ class RagEvaluationMigrationContractTest {
                 "UNIQUE KEY uk_ai_rag_eval_case_no (dataset_id, case_no)",
                 "KEY idx_ai_rag_eval_run_dataset_created (dataset_id, created_at)",
                 "KEY idx_ai_rag_eval_result_run_passed (run_id, passed)");
+        assertThat(ddl.substring(ddl.indexOf("CREATE TABLE ai_rag_eval_case_result")))
+                .contains("metrics_json JSON NULL");
     }
 }
