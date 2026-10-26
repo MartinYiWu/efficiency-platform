@@ -25,10 +25,11 @@ export function RagEvaluationDatasetPage() {
   const [agentReleases, setAgentReleases] = useState<AgentRelease[]>([]);
   const [ragPolicies, setRagPolicies] = useState<RagPolicy[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
-  const [indexReleases, setIndexReleases] = useState<IndexRelease[]>([]);
+  const [indexReleasesByBase, setIndexReleasesByBase] = useState<Record<string, IndexRelease[]>>({});
   const [importText, setImportText] = useState('[]');
   const [caseForm] = Form.useForm();
   const [runForm] = Form.useForm();
+  const knowledgeBindings = Form.useWatch('knowledgeBindings', runForm) ?? [];
   const load = useCallback(() => getEvaluationDataset(datasetId).then(setDetail).catch((error: Error) => message.error(error.message)), [datasetId]);
   useEffect(() => { void load(); }, [load]);
   const importCount = useMemo(() => { try { const value = JSON.parse(importText); return Array.isArray(value) ? value.length : 0; } catch { return 0; } }, [importText]);
@@ -49,8 +50,10 @@ export function RagEvaluationDatasetPage() {
       if (!agent) throw new Error('未找到数据集所属 Agent');
       const policies = await listPolicies(agent.id);
       setAgentReleases(releases.filter((item) => item.releaseStatus === 'ACTIVE'));
-      setRagPolicies(policies.ragPolicies.filter((item) => item.status === 'ACTIVE'));
+      setRagPolicies(policies.ragPolicies.filter((item) => item.status === 'PUBLISHED'));
       setKnowledgeBases(bases.items);
+      setIndexReleasesByBase({});
+      runForm.setFieldsValue({ knowledgeBindings: [{}] });
       setRunOpen(true);
     } catch (error) { message.error(error instanceof Error ? error.message : '加载评测版本失败'); }
   };
@@ -97,11 +100,36 @@ export function RagEvaluationDatasetPage() {
       try { const value = JSON.parse(importText); if (!Array.isArray(value)) throw new Error('必须是 JSON 数组'); const result = await importEvaluationCases(datasetId, value); setImportOpen(false); await load(); message.success(`已新增 ${result.createdCount} 条，更新 ${result.updatedCount} 条`); } catch (error) { message.error(error instanceof Error ? error.message : '导入失败'); }
     }}><Typography.Paragraph>已解析 {importCount} 条</Typography.Paragraph><Input.TextArea rows={14} value={importText} onChange={(event) => setImportText(event.target.value)} /></Modal>
     <Drawer width={520} title="发起真实评测" open={runOpen} onClose={() => setRunOpen(false)} extra={<Button type="primary" onClick={() => runForm.validateFields().then(async (value) => {
-      const run = await startEvaluationRun({ datasetId, agentKey: detail.dataset.agentKey, agentVersionId: value.agentVersionId, ragPolicyVersionId: value.ragPolicyVersionId, knowledgeBindings: [{ knowledgeBaseId: value.knowledgeBaseId, indexReleaseId: value.indexReleaseId }] });
+      const run = await startEvaluationRun({ datasetId, agentKey: detail.dataset.agentKey, agentVersionId: value.agentVersionId, ragPolicyVersionId: value.ragPolicyVersionId, knowledgeBindings: value.knowledgeBindings });
       setRunOpen(false); navigate(`/ai-center/rag-evaluations/runs/${run.id}`);
     }).catch((error) => { if (error instanceof Error) message.error(error.message); })}>开始</Button>}>
       <Typography.Paragraph type="secondary">批次将冻结以下版本，并在后台按用例串行调用真实 Agent。</Typography.Paragraph>
-      <Form form={runForm} layout="vertical"><Form.Item name="agentVersionId" label="ACTIVE Agent 版本" rules={[{ required: true }]}><Select options={agentReleases.map((item) => ({ value: item.agentVersionId, label: `${item.agentVersionId.slice(0, 8)} · ${item.environment}` }))} /></Form.Item><Form.Item name="ragPolicyVersionId" label="ACTIVE RAG 策略" rules={[{ required: true }]}><Select options={ragPolicies.map((item) => ({ value: item.id, label: `${item.policyKey} · ${item.semanticVersion}` }))} /></Form.Item><Form.Item name="knowledgeBaseId" label="知识库" rules={[{ required: true }]}><Select options={knowledgeBases.map((item) => ({ value: item.id, label: item.name }))} onChange={(id) => { runForm.setFieldValue('indexReleaseId', undefined); void listIndexReleases(id).then(setIndexReleases).catch((error: Error) => message.error(error.message)); }} /></Form.Item><Form.Item name="indexReleaseId" label="索引发布版本" rules={[{ required: true }]}><Select options={indexReleases.map((item) => ({ value: item.id, label: `${item.releaseNo} · ${item.status}` }))} /></Form.Item></Form>
+      <Form form={runForm} layout="vertical">
+        <Form.Item name="agentVersionId" label="ACTIVE Agent 版本" rules={[{ required: true }]}><Select options={agentReleases.map((item) => ({ value: item.agentVersionId, label: `${item.agentVersionId.slice(0, 8)} · ${item.environment}` }))} /></Form.Item>
+        <Form.Item name="ragPolicyVersionId" label="PUBLISHED RAG 策略" rules={[{ required: true }]}><Select options={ragPolicies.map((item) => ({ value: item.id, label: `${item.policyKey} · ${item.semanticVersion}` }))} /></Form.Item>
+        <Form.List name="knowledgeBindings" rules={[{ validator: async (_, value) => { if (!value?.length) throw new Error('至少绑定一个知识库版本'); } }]}>
+          {(fields, { add, remove }, { errors }) => <>
+            {fields.map((field, index) => {
+              const knowledgeBaseId = knowledgeBindings[index]?.knowledgeBaseId as string | undefined;
+              const releases = knowledgeBaseId ? (indexReleasesByBase[knowledgeBaseId] ?? []) : [];
+              return <div key={field.key} className={styles.filters}>
+                <Form.Item {...field} name={[field.name, 'knowledgeBaseId']} label={`知识库 ${index + 1}`} rules={[{ required: true }]} style={{ flex: 1 }}>
+                  <Select options={knowledgeBases.map((item) => ({ value: item.id, label: item.name }))} onChange={(id) => {
+                    runForm.setFieldValue(['knowledgeBindings', field.name, 'indexReleaseId'], undefined);
+                    if (!indexReleasesByBase[id]) void listIndexReleases(id).then((items) => setIndexReleasesByBase((current) => ({ ...current, [id]: items }))).catch((error: Error) => message.error(error.message));
+                  }} />
+                </Form.Item>
+                <Form.Item {...field} name={[field.name, 'indexReleaseId']} label="索引发布版本" rules={[{ required: true }]} style={{ flex: 1 }}>
+                  <Select disabled={!knowledgeBaseId} options={releases.filter((item) => item.status === 'PUBLISHED').map((item) => ({ value: item.id, label: `${item.releaseNo} · ${item.status}` }))} />
+                </Form.Item>
+                {fields.length > 1 && <Button danger onClick={() => remove(field.name)}>移除</Button>}
+              </div>;
+            })}
+            <Button block onClick={() => add({})}>添加知识库版本</Button>
+            <Form.ErrorList errors={errors} />
+          </>}
+        </Form.List>
+      </Form>
     </Drawer>
   </div>;
 }
