@@ -49,6 +49,14 @@ class CustomerServiceApplicationServiceTest {
     }
 
     @Test
+    void marksOnlyOwnedConversationDeleted() {
+        service.deleteConversation("dev", "1", "conversation-1");
+        verify(repository).updateConversation("conversation-1", "dev", "1", null, "DELETED");
+        assertThatThrownBy(() -> service.deleteConversation("dev", "other-user", "conversation-1"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void freezesActiveReleaseAndBoundsCompletedHistoryBeforeAgentCall() {
         when(repository.findMessageByClientRequest("dev", "request-1")).thenReturn(null);
         when(management.findAgentByKey("customer-service")).thenReturn(

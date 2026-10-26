@@ -75,6 +75,11 @@ public class CustomerServiceApplicationService {
         return getConversation(tenantId, userId, id);
     }
 
+    public void deleteConversation(String tenantId, String userId, String id) {
+        getConversation(tenantId, userId, id);
+        repository.updateConversation(id, tenantId, userId, null, "DELETED");
+    }
+
     public List<MessageView> listMessages(String tenantId, String userId, String conversationId, String before, int limit) {
         getConversation(tenantId, userId, conversationId);
         return repository.listMessages(conversationId, tenantId, before, range(limit, 1, 100, "limit")).stream()

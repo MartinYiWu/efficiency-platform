@@ -4,6 +4,7 @@ import type { Conversation, MessageView, PublicProgress } from '../../entities/c
 import {
   cancelRun,
   createConversation,
+  deleteConversation,
   getRun,
   getTimeline,
   listConversations,
@@ -212,9 +213,7 @@ export function useCustomerServiceChat() {
       void refreshConversations()
         .then(async (items) => {
           if (!active) return;
-          let first = items[0];
-          if (!first) first = await createConversation('新对话');
-          if (active) await selectConversation(first.id);
+          if (active && items[0]) await selectConversation(items[0].id);
         })
         .catch((error: Error & { traceId?: string }) =>
           setState((value) => ({
@@ -233,52 +232,72 @@ export function useCustomerServiceChat() {
   }, [refreshConversations, selectConversation]);
   const newConversation = async () => {
     if (busy) return;
-    const conversation = await createConversation('新对话');
-    await refreshConversations();
-    await selectConversation(conversation.id);
+    selectedConversationRef.current = undefined;
+    abortRef.current?.abort();
+    setState((value) => ({ ...value, conversationId: undefined, messages: [], status: 'IDLE',
+      runId: undefined, sequence: 0, progressByRun: {}, error: undefined }));
+  };
+  const removeConversation = async (id: string) => {
+    if (busy) return;
+    try {
+      await deleteConversation(id);
+      const remaining = await refreshConversations();
+      if (state.conversationId !== id) return;
+      if (remaining[0]) await selectConversation(remaining[0].id);
+      else await newConversation();
+    } catch (error) {
+      setState((value) => ({ ...value, error: error instanceof Error ? error.message : '删除会话失败' }));
+    }
   };
   const send = async (text: string) => {
-    if (busy || !state.conversationId || !text.trim()) return;
-    const conversationId = state.conversationId;
+    if (busy || !text.trim()) return;
     const requestId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const user: MessageView = {
-      message: {
-        id: `local-user-${requestId}`,
-        conversationId,
-        tenantId: 'dev',
-        role: 'USER',
-        content: text.trim(),
-        status: 'COMPLETED',
-        answerMode: null,
-        runId: null,
-        clientRequestId: requestId,
-        createdAt: now,
-      },
-      citations: [],
-    };
-    setState((value) => ({
-      ...value,
-      messages: [...value.messages, user, {
+    setState((value) => ({ ...value, status: 'SUBMITTING', error: undefined }));
+    let conversationId = state.conversationId;
+    try {
+      if (!conversationId) {
+        const conversation = await createConversation('');
+        conversationId = conversation.id;
+        selectedConversationRef.current = conversation.id;
+        setState((value) => ({ ...value, conversationId: conversation.id }));
+        await refreshConversations();
+      }
+      const activeConversationId = conversationId;
+      const user: MessageView = {
         message: {
-          id: `local-assistant-${requestId}`,
-          conversationId,
+          id: `local-user-${requestId}`,
+          conversationId: activeConversationId,
           tenantId: 'dev',
-          role: 'ASSISTANT',
-          content: '',
-          status: 'PENDING',
+          role: 'USER',
+          content: text.trim(),
+          status: 'COMPLETED',
           answerMode: null,
           runId: null,
-          clientRequestId: null,
+          clientRequestId: requestId,
           createdAt: now,
         },
         citations: [],
-      }],
-      status: 'SUBMITTING',
-      error: undefined,
-    }));
-    try {
-      const submitted = await submitMessage(conversationId, text.trim(), requestId);
+      };
+      setState((value) => ({
+        ...value,
+        messages: [...value.messages, user, {
+          message: {
+            id: `local-assistant-${requestId}`,
+            conversationId: activeConversationId,
+            tenantId: 'dev',
+            role: 'ASSISTANT',
+            content: '',
+            status: 'PENDING',
+            answerMode: null,
+            runId: null,
+            clientRequestId: null,
+            createdAt: now,
+          },
+          citations: [],
+        }],
+      }));
+      const submitted = await submitMessage(activeConversationId, text.trim(), requestId);
       setState((value) => ({
         ...value,
         messages: value.messages.map((item) =>
@@ -288,7 +307,7 @@ export function useCustomerServiceChat() {
         ),
         runId: submitted.runId,
       }));
-      await consume(submitted.runId, 0, conversationId);
+      await consume(submitted.runId, 0, activeConversationId);
       await refreshConversations();
     } catch (error) {
       const value = error as Error & { traceId?: string };
@@ -307,5 +326,5 @@ export function useCustomerServiceChat() {
     abortRef.current?.abort();
     setState((value) => ({ ...value, status: 'CANCELLED' }));
   };
-  return { state, busy, send, cancel, selectConversation, newConversation };
+  return { state, busy, send, cancel, selectConversation, newConversation, removeConversation };
 }

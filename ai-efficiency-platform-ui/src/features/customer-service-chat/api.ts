@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import {
   citationSchema,
   conversationSchema,
@@ -58,6 +60,8 @@ export const listConversations = (keyword = '') =>
   );
 export const createConversation = (title: string) =>
   call('/api/customer-service/conversations', conversationSchema, json('POST', { title }));
+export const deleteConversation = (id: string) =>
+  call(`/api/customer-service/conversations/${id}`, z.boolean(), { method: 'DELETE' });
 export const listMessages = (id: string) =>
   call(`/api/customer-service/conversations/${id}/messages`, messageViewSchema.array())
     .then((items) => items.sort((left, right) =>

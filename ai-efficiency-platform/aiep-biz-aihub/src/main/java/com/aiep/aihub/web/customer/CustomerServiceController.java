@@ -15,6 +15,7 @@ import com.aiep.platformcore.api.ApiResponse;
 import java.io.IOException;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -53,6 +54,11 @@ public class CustomerServiceController {
     @PatchMapping("/conversations/{id}")
     public ApiResponse<ConversationPO> update(@PathVariable String id, @RequestBody UpdateConversationRequest request) {
         return ApiResponse.success(service.updateConversation(TENANT, USER, id, request.title(), request.status()));
+    }
+    @DeleteMapping("/conversations/{id}")
+    public ApiResponse<Boolean> delete(@PathVariable String id) {
+        service.deleteConversation(TENANT, USER, id);
+        return ApiResponse.success(true);
     }
     @GetMapping("/conversations/{id}/messages")
     public ApiResponse<List<MessageView>> messages(@PathVariable String id,

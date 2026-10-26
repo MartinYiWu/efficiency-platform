@@ -1,0 +1,61 @@
+.content {
+  max-width: 680px;
+  margin: 0 auto;
+  color: #182230;
+}
+.documentLabel {
+  color: #667085;
+  font-size: 12px;
+  letter-spacing: .04em;
+}
+.content h2 {
+  margin: 8px 0 12px;
+  font-size: 22px;
+  line-height: 1.4;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: #475467;
+  font-size: 13px;
+}
+.meta span {
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: #f2f4f7;
+}
+.section {
+  margin-top: 18px;
+  color: #475467;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.divider {
+  height: 1px;
+  margin: 22px 0;
+  background: #eaecf0;
+}
+.content h3 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+.excerpt {
+  padding: 18px 20px;
+  border-left: 3px solid #7b9cf4;
+  border-radius: 0 8px 8px 0;
+  background: #f8faff;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.excerpt p,
+.excerpt ul,
+.excerpt ol {
+  margin: 0 0 10px;
+}
+.excerpt > :last-child {
+  margin-bottom: 0;
+}
+.excerpt li + li {
+  margin-top: 5px;
+}

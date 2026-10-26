@@ -27,18 +27,18 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
                 v.id(), v.tenantId(), v.userId(), v.title(), v.status(), ts(v.lastMessageAt()), ts(v.createdAt()), ts(v.updatedAt()));
     }
     @Override public ConversationPO findConversation(String id, String tenantId, String userId) {
-        return one("SELECT * FROM ai_customer_service_conversation WHERE id=? AND tenant_id=? AND user_id=?",
+        return one("SELECT * FROM ai_customer_service_conversation WHERE id=? AND tenant_id=? AND user_id=? AND status<>'DELETED'",
                 JdbcCustomerServiceMappers::conversation, id, tenantId, userId);
     }
     @Override public List<ConversationPO> listConversations(String tenantId, String userId, String keyword, int offset, int limit) {
         String like = keyword == null ? "%" : "%" + keyword + "%";
-        return jdbc.query("SELECT * FROM ai_customer_service_conversation WHERE tenant_id=? AND user_id=? AND title LIKE ? "
+        return jdbc.query("SELECT * FROM ai_customer_service_conversation WHERE tenant_id=? AND user_id=? AND status<>'DELETED' AND title LIKE ? "
                 + "ORDER BY COALESCE(last_message_at,created_at) DESC LIMIT ? OFFSET ?",
                 JdbcCustomerServiceMappers::conversation, tenantId, userId, like, limit, offset);
     }
     @Override public long countConversations(String tenantId, String userId, String keyword) {
         String like = keyword == null ? "%" : "%" + keyword + "%";
-        return jdbc.queryForObject("SELECT COUNT(*) FROM ai_customer_service_conversation WHERE tenant_id=? AND user_id=? AND title LIKE ?",
+        return jdbc.queryForObject("SELECT COUNT(*) FROM ai_customer_service_conversation WHERE tenant_id=? AND user_id=? AND status<>'DELETED' AND title LIKE ?",
                 Long.class, tenantId, userId, like);
     }
     @Override public void updateConversation(String id, String tenantId, String userId, String title, String status) {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { listMessages } from './api';
+import { deleteConversation, listMessages } from './api';
 import { parseCustomerServiceSse } from './sseClient';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -25,6 +25,14 @@ describe('customer service chat', () => {
 
     expect((await listMessages('c')).map((item) => item.message.role)).toEqual(['USER', 'ASSISTANT']);
     expect((await listMessages('c')).map((item) => item.message.role)).toEqual(['USER', 'ASSISTANT']);
+  });
+  it('deletes one conversation through the employee API', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'SUCCESS', data: true })));
+    vi.stubGlobal('fetch', fetcher);
+
+    expect(await deleteConversation('conversation-1')).toBe(true);
+    expect(fetcher).toHaveBeenCalledWith('/api/customer-service/conversations/conversation-1',
+      expect.objectContaining({ method: 'DELETE' }));
   });
   it('parses and validates public SSE events', () => {
     const events = parseCustomerServiceSse(

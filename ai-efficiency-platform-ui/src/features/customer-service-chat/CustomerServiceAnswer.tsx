@@ -1,7 +1,8 @@
-import { Alert, Button, Space, Tag, Typography } from 'antd';
+import { Alert, Button, Tag } from 'antd';
 import ReactMarkdown from 'react-markdown';
 
 import type { AnswerMode, Citation } from '../../entities/customer-service/model';
+import styles from '../../pages/customer-service/CustomerServiceChatPage.module.css';
 
 const labels: Record<AnswerMode, { title: string; color: string }> = {
   COMPANY_KNOWLEDGE: { title: '依据公司知识', color: 'blue' },
@@ -25,24 +26,27 @@ export function CustomerServiceAnswer({
 }) {
   const meta = mode ? labels[mode] : null;
   return (
-    <div>
-      {meta && <Tag color={meta.color}>{meta.title}</Tag>}
+    <div className={styles.answer}>
+      {meta && <Tag color={meta.color} className={styles.answerMode}>{meta.title}</Tag>}
       {mode === 'GENERAL_ADVICE' && (
         <Alert type="warning" showIcon message="以下为通用建议，不代表公司制度或正式流程。" />
       )}
-      <div>
+      <div className={styles.answerBody}>
         <ReactMarkdown>{content || (streaming ? '正在生成回答…' : '')}</ReactMarkdown>
       </div>
       {citations.length > 0 && (
-        <Space wrap>
-          <Typography.Text type="secondary">引用：</Typography.Text>
-          {citations.map((citation) => (
-            <Button key={citation.id} size="small" onClick={() => onCitation(citation)}>
-              [{citation.citationNo}] {citation.documentTitle}
-              {citation.citationType === 'EXTRACTED_SPANS' ? ' · 原文节选' : ''}
-            </Button>
-          ))}
-        </Space>
+        <div className={styles.sources}>
+          <div className={styles.sourcesLabel}>参考来源 · {citations.length}</div>
+          <div className={styles.sourceItems}>
+            {citations.map((citation) => (
+              <Button key={citation.id} size="small" className={styles.sourceButton}
+                onClick={() => onCitation(citation)}>
+                [{citation.citationNo}] {citation.documentTitle}
+                {citation.citationType === 'EXTRACTED_SPANS' ? ' · 原文节选' : ''}
+              </Button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );
