@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router';
 
 import type { EvaluationCaseResult, EvaluationRun, EvaluationRunComparison, EvaluationRunDetail } from '../../entities/ai-center/model';
 import { compareEvaluationRuns, getEvaluationRun, listEvaluationRuns } from '../../features/ai-center/api';
+import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 const percent = (value: number | null | undefined) => value == null ? 'N/A' : `${(value * 100).toFixed(1)}%`;
@@ -25,7 +26,7 @@ export function RagEvaluationRunPage() {
   const metrics = detail.run.metrics;
 
   return <div className={styles.page}>
-    <div className={styles.header}><div><Button type="link" onClick={() => navigate(`/ai-center/rag-evaluations/${detail.run.datasetId}`)}>← 返回数据集</Button><Typography.Title level={2}>评测运行详情</Typography.Title></div><Tag>{detail.run.status}</Tag></div>
+    <div className={styles.header}><div><Button type="link" onClick={() => navigate(`/ai-center/rag-evaluations/${detail.run.datasetId}`)}>← 返回数据集</Button><Typography.Title level={2}>评测运行详情</Typography.Title></div><Tag>{aiStatusLabel(detail.run.status)}</Tag></div>
     <div className={styles.grid}>{[
       ['用例通过率', percent(metrics?.casePassRate)], ['执行成功率', percent(metrics?.executionSuccessRate)],
       ['来源召回', percent(metrics?.sourceRecallAtK)], ['引用合规率', percent(metrics?.citationComplianceRate)],
@@ -38,7 +39,7 @@ export function RagEvaluationRunPage() {
     ]} /></Card>
     <div className={styles.filters}><Select allowClear placeholder="失败类型" style={{ width: 220 }} value={failure} onChange={setFailure} options={[
       'EXECUTION_FAILED', 'ANSWER_MODE_MISMATCH', 'EXPECTED_FACT_MISSING', 'PROHIBITED_FACT_MATCHED', 'EXPECTED_SOURCE_MISSING', 'CITATION_COUNT_INSUFFICIENT', 'VERSION_MISMATCH',
-    ].map((value) => ({ value }))} /><Select allowClear placeholder="选择基线批次" style={{ width: 320 }} value={baselineId} onDropdownVisibleChange={(open) => { if (open) void listEvaluationRuns(detail.run.datasetId).then(setBaselineRuns).catch(() => undefined); }} onChange={setBaselineId} options={baselineRuns.filter((item) => item.id !== runId).map((item) => ({ value: item.id, label: `${item.id.slice(0, 8)} · ${item.status} · ${new Date(item.createdAt).toLocaleString()}` }))} /><Button disabled={!baselineId} onClick={() => baselineId && compareEvaluationRuns(baselineId, runId).then(setComparison).catch((error: Error) => message.error(error.message))}>比较</Button></div>
+    ].map((value) => ({ value }))} /><Select allowClear placeholder="选择基线批次" style={{ width: 320 }} value={baselineId} onDropdownVisibleChange={(open) => { if (open) void listEvaluationRuns(detail.run.datasetId).then(setBaselineRuns).catch(() => undefined); }} onChange={setBaselineId} options={baselineRuns.filter((item) => item.id !== runId).map((item) => ({ value: item.id, label: `${item.id.slice(0, 8)} · ${aiStatusLabel(item.status)} · ${new Date(item.createdAt).toLocaleString()}` }))} /><Button disabled={!baselineId} onClick={() => baselineId && compareEvaluationRuns(baselineId, runId).then(setComparison).catch((error: Error) => message.error(error.message))}>比较</Button></div>
     {comparison && <Card title="与基线比较"><Space wrap>{Object.entries(comparison.metricDeltas).map(([key, value]) => <Tag color={value >= 0 ? 'green' : 'red'} key={key}>{key}: {value.toFixed(3)}</Tag>)}</Space></Card>}
     <Table rowKey="id" dataSource={results} pagination={{ pageSize: 10 }} locale={{ emptyText: <Empty description={detail.run.status === 'RUNNING' ? '正在生成真实结果' : '暂无结果'} /> }} columns={[
       { title: '编号', render: (_: unknown, item: EvaluationCaseResult) => caseById.get(item.caseId)?.caseNo ?? item.caseId },

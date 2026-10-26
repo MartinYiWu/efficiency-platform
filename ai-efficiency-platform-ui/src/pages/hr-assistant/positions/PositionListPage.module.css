@@ -4,7 +4,7 @@
   width: 100%;
   min-width: 0;
   height: calc(100dvh - 112px);
-  gap: 18px;
+  gap: 20px;
   overflow: hidden;
 }
 .heading {
@@ -31,20 +31,20 @@
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
+  gap: 16px;
 }
 .metric,
 .metricButton {
   display: flex;
   min-width: 0;
-  padding: 21px 24px;
+  padding: 18px 20px;
   align-items: center;
   gap: 16px;
   text-align: left;
   background: #fff;
-  border: 1px solid #edf0f5;
-  border-radius: 9px;
-  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  box-shadow: var(--ui-shadow);
 }
 .metricButton {
   padding: 0;
@@ -59,10 +59,10 @@
   display: grid;
   width: 48px;
   height: 48px;
-  color: #fff;
+  color: var(--ui-primary);
   font-size: 23px;
   place-items: center;
-  border-radius: 50%;
+  border-radius: 12px;
 }
 .metric div {
   display: grid;
@@ -77,16 +77,20 @@
   color: #0f172a;
 }
 .blue {
-  background: #1677ff;
+  color: #2463eb !important;
+  background: #eaf1ff;
 }
 .purple {
-  background: #6d45e8;
+  color: #7350c9 !important;
+  background: #f1ecff;
 }
 .green {
-  background: #22a85b;
+  color: #1d9a62 !important;
+  background: #e8f7ef;
 }
 .orange {
-  background: #fa8c16;
+  color: #db7b16 !important;
+  background: #fff2e2;
 }
 .filterPanel {
   padding: 20px;
@@ -121,9 +125,6 @@
 .tablePanel :global(.ant-table-wrapper) {
   min-width: 0;
   min-height: 0;
-}
-.tablePanel :global(.ant-table) {
-  min-width: 1150px;
 }
 .tablePanel :global(.ant-table-thead > tr > th) {
   color: #334155;

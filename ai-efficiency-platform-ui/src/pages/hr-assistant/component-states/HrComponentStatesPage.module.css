@@ -1,6 +1,8 @@
 .page {
   display: grid;
   gap: 16px;
+  width: 100%;
+  min-width: 0;
   max-width: 1420px;
   margin: 0 auto;
   color: #262626;
@@ -20,6 +22,8 @@
   gap: 16px;
 }
 .panel {
+  min-width: 0;
+  overflow: hidden;
   padding: 16px;
   background: #fff;
   border: 1px solid #edf0f5;
@@ -369,7 +373,7 @@
 @media (max-width: 767px) {
   .twoColumn,
   .confirmations {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .colors,
   .stateGrid {

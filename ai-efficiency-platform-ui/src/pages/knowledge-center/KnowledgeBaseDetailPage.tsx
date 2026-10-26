@@ -23,6 +23,7 @@ import type {
 } from '../../entities/knowledge/model';
 import { KnowledgeBatchImportModal } from '../../features/knowledge/KnowledgeBatchImportModal';
 import { KnowledgeUploadDrawer } from '../../features/knowledge/KnowledgeUploadDrawer';
+import { knowledgeStatusLabel, knowledgeTypeLabel, visibilityScopeLabel } from '../../features/knowledge/presentation';
 import {
   createDirectory,
   getKnowledgeBase,
@@ -115,9 +116,9 @@ export function KnowledgeBaseDetailPage() {
         size="small"
         column={{ xs: 1, sm: 2, lg: 4 }}
         items={[
-          { key: 'type', label: '类型', children: base.knowledgeType },
-          { key: 'scope', label: '范围', children: base.visibilityScope },
-          { key: 'status', label: '状态', children: base.status },
+          { key: 'type', label: '类型', children: knowledgeTypeLabel(base.knowledgeType) },
+          { key: 'scope', label: '范围', children: visibilityScopeLabel(base.visibilityScope) },
+          { key: 'status', label: '状态', children: knowledgeStatusLabel(base.status) },
           {
             key: 'release',
             label: '当前索引版本',
@@ -161,7 +162,7 @@ export function KnowledgeBaseDetailPage() {
                   columns={[
                     { title: '名称', dataIndex: 'title' },
                     { title: '编码', dataIndex: 'documentCode' },
-                    { title: '状态', dataIndex: 'status' },
+                    { title: '状态', dataIndex: 'status', render: (value: string) => knowledgeStatusLabel(value) },
                     { title: '版本数', render: (_, item) => item.versions.length },
                     {
                       title: '操作',
@@ -194,7 +195,7 @@ export function KnowledgeBaseDetailPage() {
                       dataIndex: 'releaseNo',
                       render: (value: number) => `R${value}`,
                     },
-                    { title: '状态', dataIndex: 'status' },
+                    { title: '状态', dataIndex: 'status', render: (value: string) => knowledgeStatusLabel(value) },
                     {
                       title: '文档/分块',
                       render: (_, item) => `${item.documentCount}/${item.chunkCount}`,

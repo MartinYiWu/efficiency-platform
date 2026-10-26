@@ -18,6 +18,7 @@ import { useNavigate, useParams } from 'react-router';
 import type { KnowledgeDocument } from '../../entities/knowledge/model';
 import { ProcessingTaskDrawer } from '../../features/knowledge/ProcessingTaskDrawer';
 import { EvidenceModeSelect, type EvidenceMode } from '../../features/knowledge/EvidenceModeSelect';
+import { documentSourceLabel, knowledgeStatusLabel } from '../../features/knowledge/presentation';
 import {
   getDocument,
   getKnowledgeBase,
@@ -122,8 +123,8 @@ export function KnowledgeDocumentPage() {
         bordered
         column={{ xs: 1, md: 3 }}
         items={[
-          { key: 'source', label: '来源', children: document.sourceType },
-          { key: 'status', label: '状态', children: <Tag>{document.status}</Tag> },
+          { key: 'source', label: '来源', children: documentSourceLabel(document.sourceType) },
+          { key: 'status', label: '状态', children: <Tag>{knowledgeStatusLabel(document.status)}</Tag> },
           {
             key: 'published',
             label: '已发布版本',
@@ -149,7 +150,7 @@ export function KnowledgeDocumentPage() {
               <div>
                 <Space>
                   <strong>V{version.versionNo}</strong>
-                  <Tag>{version.status}</Tag>
+                  <Tag>{knowledgeStatusLabel(version.status)}</Tag>
                   <span>{version.createdAt}</span>
                 </Space>
                 <p>{version.changeSummary ?? '未填写变更说明'}</p>
@@ -191,7 +192,7 @@ export function KnowledgeDocumentPage() {
           dataSource={document.versions.flatMap((version) => version.processingTasks)}
           columns={[
             { title: '阶段', dataIndex: 'stage' },
-            { title: '状态', dataIndex: 'status' },
+            { title: '状态', dataIndex: 'status', render: (value: string) => knowledgeStatusLabel(value) },
             { title: '进度', dataIndex: 'progressPercent', render: (value: number) => `${value}%` },
             {
               title: '操作',

@@ -320,7 +320,7 @@ export function PositionListPage() {
             },
           }}
           dataSource={rows}
-          scroll={{ x: 1150, y: 'calc(100dvh - 510px)' }}
+          scroll={{ x: 1240, y: 'calc(100dvh - 510px)' }}
           columns={[
             { title: '岗位名称', dataIndex: 'name', width: 168 },
             { title: '岗位族', dataIndex: 'family', width: 108 },
@@ -381,6 +381,7 @@ export function PositionListPage() {
               title: '操作',
               key: 'actions',
               width: 182,
+              fixed: 'right',
               render: (_, record) => (
                 <div className={styles.actions}>
                   <Button

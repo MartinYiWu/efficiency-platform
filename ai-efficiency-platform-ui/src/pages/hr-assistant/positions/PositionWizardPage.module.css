@@ -2,6 +2,7 @@
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
   padding-bottom: 80px;
   color: #17243c;
 }
@@ -213,7 +214,7 @@
   z-index: 11;
   right: 0;
   bottom: 0;
-  left: 220px;
+  left: 228px;
   display: flex;
   justify-content: space-between;
   padding: 12px 24px;
@@ -243,13 +244,16 @@
 }
 @media (max-width: 767px) {
   .page {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .stepPanel {
     padding: 14px;
+    overflow: hidden;
   }
   .stepList {
-    grid-template-columns: repeat(5, minmax(92px, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: 92px;
+    grid-template-columns: none;
     gap: 8px;
     overflow: auto;
   }
@@ -269,8 +273,8 @@
     display: none;
   }
   .skillRow {
-    grid-template-columns: 16px minmax(120px, 1fr) 90px 54px 28px;
-    gap: 8px;
+    grid-template-columns: 16px minmax(85px, 1fr) 70px 48px 24px;
+    gap: 6px;
   }
   .expectationCard :global(.ant-card-body) {
     grid-template-columns: 1fr;

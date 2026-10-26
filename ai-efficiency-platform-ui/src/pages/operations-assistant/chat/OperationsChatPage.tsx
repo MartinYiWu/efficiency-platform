@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, RobotOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, SendOutlined, StopOutlined } from '@ant-design/icons';
 import { Avatar, Button, Card, Input, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -94,7 +94,7 @@ export function OperationsChatPage() {
           aria-label="返回上一页"
           onClick={() => navigate(-1)}
         />
-        <Avatar className={styles.assistantAvatar} icon={<RobotOutlined />} size={48} />
+        <Avatar className={styles.assistantAvatar} size={44}>营</Avatar>
         <div>
           <Typography.Title id="operations-chat-title" level={1} className={styles.title}>
             AI 内容运营助手
@@ -115,7 +115,7 @@ export function OperationsChatPage() {
           <div className={styles.messageGroup}>
             <time>现在</time>
             <div className={styles.assistantMessageRow}>
-              <Avatar className={styles.messageAvatar} icon={<RobotOutlined />} size={34} />
+              <Avatar className={styles.messageAvatar} size={32}>营</Avatar>
               <div className={styles.assistantBubble}>
                 你好，我是 AI
                 内容运营助手。请告诉我目标、渠道和受众，我会协助梳理可直接使用的运营内容。
@@ -137,7 +137,7 @@ export function OperationsChatPage() {
                 }
               >
                 {message.role === 'assistant' && (
-                  <Avatar className={styles.messageAvatar} icon={<RobotOutlined />} size={34} />
+                  <Avatar className={styles.messageAvatar} size={32}>营</Avatar>
                 )}
                 <div
                   className={message.role === 'user' ? styles.userBubble : styles.assistantBubble}
@@ -163,7 +163,7 @@ export function OperationsChatPage() {
           {showThinking && (
             <div className={styles.messageGroup} aria-label="助手正在思考">
               <div className={styles.assistantMessageRow}>
-                <Avatar className={styles.messageAvatar} icon={<RobotOutlined />} size={34} />
+                <Avatar className={styles.messageAvatar} size={32}>营</Avatar>
                 <div className={`${styles.assistantBubble} ${styles.thinkingIndicator}`}>
                   <span className={styles.thinkingDot} />
                   <span className={styles.thinkingDot} />

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 
 import type { AgentDefinition } from '../../entities/ai-center/model';
 import { listAgents } from '../../features/ai-center/api';
+import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 export function AgentListPage() {
@@ -25,12 +26,12 @@ export function AgentListPage() {
         </div>
       </header>
       {agents.length ? (
-        <div className={styles.grid}>
+        <div className={`${styles.grid} ${styles.agentGrid}`}>
           {agents.map((agent) => (
             <Card
               key={agent.id}
               title={agent.name}
-              extra={<Tag>{agent.status}</Tag>}
+              extra={<Tag color={agent.status === 'ACTIVE' ? 'success' : 'default'}>{aiStatusLabel(agent.status)}</Tag>}
               actions={[
                 <Button
                   key="detail"

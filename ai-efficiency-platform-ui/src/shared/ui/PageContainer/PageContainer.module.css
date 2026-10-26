@@ -1,5 +1,5 @@
 .page {
-  width: min(100%, 1600px);
+  width: min(100%, 1520px);
   margin: 0 auto;
   padding: clamp(16px, 2vw, 28px);
 }
@@ -10,13 +10,13 @@
   justify-content: space-between;
   gap: 16px;
   min-width: 0;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .title {
   min-width: 0;
   margin: 0;
-  color: #0f172a;
+  color: var(--ui-text);
   font-size: 24px;
   line-height: 32px;
 }

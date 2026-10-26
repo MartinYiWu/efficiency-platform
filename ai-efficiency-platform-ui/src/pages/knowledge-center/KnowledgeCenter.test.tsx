@@ -20,8 +20,8 @@ describe('KnowledgeCenter', () => {
                 code: 'company-policy',
                 name: '公司制度',
                 description: '正式制度',
-                knowledgeType: 'POLICY',
-                visibilityScope: 'ALL_EMPLOYEES',
+                knowledgeType: 'COMPANY_POLICY',
+                visibilityScope: 'COMPANY_WIDE',
                 status: 'ACTIVE',
                 currentIndexReleaseId: null,
                 createdAt: '2026-10-20T10:00:00',
@@ -41,8 +41,11 @@ describe('KnowledgeCenter', () => {
         <KnowledgeBaseListPage />
       </MemoryRouter>,
     );
-    await waitFor(() => expect(screen.getByText('公司制度')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('公司制度').length).toBeGreaterThan(0));
     expect(screen.getByText('正式制度')).toBeInTheDocument();
+    expect(screen.getByText('全员可见')).toBeInTheDocument();
+    expect(screen.getByText('已启用')).toBeInTheDocument();
+    expect(screen.queryByText('COMPANY_POLICY')).not.toBeInTheDocument();
   });
 
   it('shows a contract error instead of inventing missing fields', async () => {

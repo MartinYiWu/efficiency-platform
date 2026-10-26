@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 
 import type { EvaluationDataset } from '../../entities/ai-center/model';
 import { createEvaluationDataset, listEvaluationDatasets } from '../../features/ai-center/api';
+import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 export function RagEvaluationListPage() {
@@ -22,12 +23,12 @@ export function RagEvaluationListPage() {
       <Button type="primary" onClick={() => setOpen(true)}>新建数据集</Button>
     </div>
     <div className={styles.filters}>
-      <Select allowClear placeholder="数据集状态" value={status} onChange={setStatus} style={{ width: 180 }} options={['DRAFT', 'ACTIVE', 'ARCHIVED'].map((value) => ({ value }))} />
+      <Select allowClear placeholder="数据集状态" value={status} onChange={setStatus} style={{ width: 180 }} options={['DRAFT', 'ACTIVE', 'ARCHIVED'].map((value) => ({ value, label: aiStatusLabel(value) }))} />
     </div>
     <Table rowKey="id" dataSource={filtered} pagination={false} columns={[
       { title: '名称', dataIndex: 'name' },
       { title: 'Agent', dataIndex: 'agentKey' },
-      { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
+      { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{aiStatusLabel(value)}</Tag> },
       { title: '用例数', dataIndex: 'caseCount' },
       { title: '更新时间', dataIndex: 'updatedAt', render: (value: string) => new Date(value).toLocaleString() },
       { title: '操作', render: (_: unknown, item: EvaluationDataset) => <Space><Button type="link" onClick={() => navigate(`/ai-center/rag-evaluations/${item.id}`)}>查看用例</Button></Space> },

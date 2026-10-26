@@ -1,7 +1,15 @@
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
+  min-width: 0;
   padding-bottom: 78px;
+}
+.page > * {
+  min-width: 0;
+}
+.page :global(.ant-table-wrapper) {
+  overflow-x: auto;
 }
 .header,
 .settings,
@@ -120,7 +128,7 @@
   z-index: 11;
   right: 0;
   bottom: 0;
-  left: 220px;
+  left: 228px;
   padding: 12px 24px;
   background: #fff;
   border-top: 1px solid #e4ebf4;

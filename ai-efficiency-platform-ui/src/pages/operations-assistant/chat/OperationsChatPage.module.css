@@ -5,17 +5,17 @@
   height: calc(100dvh - 112px);
   min-height: 620px;
   overflow: hidden;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: var(--ant-border-radius-lg);
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
 }
 
 .header {
   display: flex;
   gap: 12px;
   align-items: center;
-  padding: 20px 28px;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
+  padding: 16px 26px;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .backButton {
@@ -26,13 +26,14 @@
 .assistantAvatar,
 .messageAvatar {
   color: var(--ant-color-text-light-solid);
-  background: var(--ant-color-primary);
+  background: linear-gradient(135deg, #2463eb, #159eaf);
+  font-weight: 700;
 }
 
 .title {
   margin: 0 !important;
   color: var(--ant-color-text);
-  font-size: 20px !important;
+  font-size: 18px !important;
 }
 
 .subtitle,
@@ -44,15 +45,15 @@
 .messageViewport {
   min-height: 0;
   overflow-y: auto;
-  background: var(--ant-color-fill-quaternary);
+  background: var(--ui-surface);
 }
 
 .messageList {
   display: grid;
-  gap: 24px;
-  width: min(100%, 1280px);
+  gap: 22px;
+  width: min(100%, 920px);
   margin: 0 auto;
-  padding: 32px 40px;
+  padding: 28px 28px 36px;
 }
 
 .messageGroup {
@@ -78,17 +79,15 @@
 
 .assistantBubble,
 .userBubble {
-  max-width: min(72%, 760px);
-  padding: 16px 18px;
-  font-size: 15px;
-  line-height: 1.75;
+  max-width: min(82%, 760px);
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .assistantBubble {
   color: var(--ant-color-text);
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 4px var(--ant-border-radius-lg) var(--ant-border-radius-lg);
+  padding: 3px 0;
+  background: transparent;
   white-space: normal;
 }
 
@@ -179,10 +178,10 @@
 }
 
 .userBubble {
-  color: var(--ant-color-success-text);
-  background: var(--ant-color-success-bg);
-  border-radius: var(--ant-border-radius-lg) 4px var(--ant-border-radius-lg)
-    var(--ant-border-radius-lg);
+  padding: 10px 14px;
+  color: var(--ui-text);
+  background: #eef4ff;
+  border-radius: 12px;
   white-space: pre-wrap;
 }
 
@@ -202,9 +201,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: end;
-  padding: 16px 24px;
-  background: var(--ant-color-bg-container);
-  border-top: 1px solid var(--ant-color-border-secondary);
+  padding: 16px max(24px, calc((100% - 864px) / 2));
+  background: var(--ui-surface);
+  border-top: 1px solid var(--ui-border);
 }
 
 .composer :global(.ant-input) {

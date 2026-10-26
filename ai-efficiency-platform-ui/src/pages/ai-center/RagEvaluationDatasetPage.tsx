@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router';
 import type { AgentRelease, EvaluationCase, EvaluationDatasetDetail, EvaluationRun, RagPolicy } from '../../entities/ai-center/model';
 import type { IndexRelease, KnowledgeBase } from '../../entities/knowledge/model';
 import { createEvaluationCase, getEvaluationDataset, importEvaluationCases, listAgentReleases, listAgents, listPolicies, startEvaluationRun, updateEvaluationCase } from '../../features/ai-center/api';
+import { aiStatusLabel } from '../../features/ai-center/presentation';
 import { listIndexReleases, listKnowledgeBases } from '../../features/knowledge/api';
 import styles from './AiCenter.module.css';
 
@@ -61,7 +62,7 @@ export function RagEvaluationDatasetPage() {
   return <div className={styles.page}>
     <div className={styles.header}><div><Button type="link" onClick={() => navigate('/ai-center/rag-evaluations')}>← 返回数据集</Button><Typography.Title level={2}>{detail.dataset.name}</Typography.Title></div><Space><Button onClick={() => setImportOpen(true)}>批量导入</Button><Button onClick={() => { setEditing(null); caseForm.setFieldsValue(caseInitial()); setCaseOpen(true); }}>新增用例</Button><Button type="primary" onClick={() => void prepareRun()}>发起评测</Button></Space></div>
     <Descriptions bordered size="small" items={[
-      { key: 'status', label: '状态', children: <Tag>{detail.dataset.status}</Tag> },
+      { key: 'status', label: '状态', children: <Tag>{aiStatusLabel(detail.dataset.status)}</Tag> },
       { key: 'agent', label: 'Agent', children: detail.dataset.agentKey },
       { key: 'count', label: '用例数', children: detail.dataset.caseCount },
       { key: 'description', label: '说明', children: detail.dataset.description ?? '—' },
@@ -77,7 +78,7 @@ export function RagEvaluationDatasetPage() {
     ]} />
     <Typography.Title level={4}>运行记录</Typography.Title>
     <Table rowKey="id" dataSource={detail.runs} pagination={false} columns={[
-      { title: '批次', dataIndex: 'id', ellipsis: true }, { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
+      { title: '批次', dataIndex: 'id', ellipsis: true }, { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{aiStatusLabel(value)}</Tag> },
       { title: '通过', render: (_: unknown, item: EvaluationRun) => `${item.passedCount}/${item.totalCount}` },
       { title: '创建时间', dataIndex: 'createdAt', render: (value: string) => new Date(value).toLocaleString() },
       { title: '操作', render: (_: unknown, item: EvaluationRun) => <Button type="link" onClick={() => navigate(`/ai-center/rag-evaluations/runs/${item.id}`)}>查看结果</Button> },
@@ -120,7 +121,7 @@ export function RagEvaluationDatasetPage() {
                   }} />
                 </Form.Item>
                 <Form.Item {...field} name={[field.name, 'indexReleaseId']} label="索引发布版本" rules={[{ required: true }]} style={{ flex: 1 }}>
-                  <Select disabled={!knowledgeBaseId} options={releases.filter((item) => item.status === 'PUBLISHED').map((item) => ({ value: item.id, label: `${item.releaseNo} · ${item.status}` }))} />
+                  <Select disabled={!knowledgeBaseId} options={releases.filter((item) => item.status === 'PUBLISHED').map((item) => ({ value: item.id, label: `${item.releaseNo} · ${aiStatusLabel(item.status)}` }))} />
                 </Form.Item>
                 {fields.length > 1 && <Button danger onClick={() => remove(field.name)}>移除</Button>}
               </div>;

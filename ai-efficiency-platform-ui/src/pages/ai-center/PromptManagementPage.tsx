@@ -21,6 +21,7 @@ import {
   listPrompts,
   replacePromptContent,
 } from '../../features/ai-center/api';
+import { promptScopeLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 export function PromptManagementPage() {
@@ -111,6 +112,7 @@ export function PromptManagementPage() {
       <div className={styles.threeColumns}>
         <Card className={styles.panel} title="Prompt 资产">
           <List
+            className={styles.promptAssetList}
             dataSource={prompts}
             locale={{ emptyText: '暂无 Prompt' }}
             renderItem={(item) => (
@@ -123,7 +125,7 @@ export function PromptManagementPage() {
               >
                 <List.Item.Meta
                   title={item.name}
-                  description={`${item.scope} · ${item.stageKey}`}
+                  description={`${promptScopeLabel(item.scope)} · ${item.stageKey}`}
                 />
               </List.Item>
             )}

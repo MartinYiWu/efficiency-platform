@@ -12,7 +12,7 @@
   margin: 5px 0;
 }
 .info,
-footer {
+.page > footer {
   background: #eff6ff;
   border-radius: 7px;
   color: #2563eb;

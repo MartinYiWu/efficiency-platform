@@ -8,6 +8,7 @@ import {
   Select,
   Space,
   Spin,
+  Tag,
   Typography,
   message,
 } from 'antd';
@@ -16,6 +17,7 @@ import { useNavigate } from 'react-router';
 
 import type { KnowledgeBase } from '../../entities/knowledge/model';
 import { createKnowledgeBase, listKnowledgeBases } from '../../features/knowledge/api';
+import { knowledgeStatusLabel, knowledgeTypeLabel, visibilityScopeLabel } from '../../features/knowledge/presentation';
 import styles from './KnowledgeCenter.module.css';
 
 export function KnowledgeBaseListPage() {
@@ -96,12 +98,12 @@ export function KnowledgeBaseListPage() {
                 hoverable
                 onClick={() => navigate(`/knowledge-center/knowledge-bases/${item.id}`)}
                 title={item.name}
-                extra={item.status}
+                extra={<Tag color={item.status === 'ACTIVE' ? 'success' : 'default'}>{knowledgeStatusLabel(item.status)}</Tag>}
               >
                 <p className={styles.cardMeta}>{item.description ?? '暂无描述'}</p>
                 <Space>
-                  <span>{item.knowledgeType}</span>
-                  <span>{item.visibilityScope}</span>
+                  <Tag variant="filled">{knowledgeTypeLabel(item.knowledgeType)}</Tag>
+                  <span>{visibilityScopeLabel(item.visibilityScope)}</span>
                 </Space>
               </Card>
             ))}
@@ -121,7 +123,7 @@ export function KnowledgeBaseListPage() {
           </Button>
         }
       >
-        <Form form={form} layout="vertical" initialValues={{ knowledgeType: 'INTERNAL' }}>
+        <Form form={form} layout="vertical" initialValues={{ knowledgeType: 'COMPANY_POLICY' }}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -135,11 +137,10 @@ export function KnowledgeBaseListPage() {
           <Form.Item name="knowledgeType" label="知识类型" rules={[{ required: true }]}>
             <Select
               options={[
-                { value: 'POLICY', label: '公司制度' },
-                { value: 'PROCESS', label: '业务流程' },
-                { value: 'PRODUCT', label: '产品文档' },
-                { value: 'TECHNICAL', label: '技术文档' },
-                { value: 'INTERNAL', label: '综合知识' },
+                { value: 'COMPANY_POLICY', label: '公司制度' },
+                { value: 'BUSINESS_PROCESS', label: '业务流程' },
+                { value: 'PRODUCT_DOCUMENTATION', label: '产品文档' },
+                { value: 'TECHNICAL_DOCUMENTATION', label: '技术文档' },
               ]}
             />
           </Form.Item>

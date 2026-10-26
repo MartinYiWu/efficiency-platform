@@ -15,6 +15,7 @@ import { useSearchParams } from 'react-router';
 
 import type { AgentDefinition, RagPolicy } from '../../entities/ai-center/model';
 import { listAgents, listPolicies, saveRagPolicy } from '../../features/ai-center/api';
+import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 const numberFields = [
@@ -137,7 +138,7 @@ export function RagPolicyPage() {
                 {
                   title: '状态',
                   dataIndex: 'status',
-                  render: (value: string) => <Tag>{value}</Tag>,
+                  render: (value: string) => <Tag>{aiStatusLabel(value)}</Tag>,
                 },
               ]}
             />

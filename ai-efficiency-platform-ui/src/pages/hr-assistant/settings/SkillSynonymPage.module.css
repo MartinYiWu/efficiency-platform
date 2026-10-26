@@ -29,26 +29,26 @@
   gap: 14px;
   grid-template-columns: 200px minmax(0, 1fr);
 }
-aside,
-main {
+.layout > aside,
+.layout > main {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 9px;
 }
-aside {
+.layout > aside {
   padding: 12px;
 }
-aside h2 {
+.layout > aside h2 {
   font-size: 15px;
   margin: 4px 0 10px;
 }
-aside h3 {
+.layout > aside h3 {
   border-top: 1px solid #f1f5f9;
   font-size: 13px;
   margin: 12px 0 5px;
   padding-top: 12px;
 }
-aside button {
+.layout > aside button {
   background: transparent;
   border: 0;
   border-radius: 5px;
@@ -61,7 +61,7 @@ aside button {
   text-align: left;
   width: 100%;
 }
-aside button.active {
+.layout > aside button.active {
   background: #eff6ff;
   color: #2563eb;
 }
@@ -89,7 +89,7 @@ aside button.active {
 .search .ant-select {
   width: 130px;
 }
-main {
+.layout > main {
   min-width: 0;
   overflow: hidden;
 }
@@ -148,19 +148,19 @@ main {
   .layout {
     grid-template-columns: 1fr;
   }
-  aside {
+  .layout > aside {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
   }
-  aside h2,
-  aside input {
+  .layout > aside h2,
+  .layout > aside input {
     flex-basis: 100%;
   }
-  aside h3 {
+  .layout > aside h3 {
     display: none;
   }
-  aside button {
+  .layout > aside button {
     width: auto;
   }
   .stats {

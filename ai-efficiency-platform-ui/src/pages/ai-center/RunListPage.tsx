@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router';
 
 import type { AiRun } from '../../entities/ai-center/model';
 import { listRuns } from '../../features/ai-center/api';
+import { aiStatusLabel, answerModeLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 export function RunListPage() {
@@ -57,6 +58,7 @@ export function RunListPage() {
           style={{ width: 180 }}
           options={['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED'].map((value) => ({
             value,
+            label: aiStatusLabel(value),
           }))}
         />
         <Select
@@ -65,13 +67,10 @@ export function RunListPage() {
           value={answerMode || undefined}
           onChange={(value) => setAnswerMode(value ?? '')}
           style={{ width: 200 }}
-          options={[
-            'KNOWLEDGE_ANSWER',
-            'GENERAL_ADVICE',
-            'CLARIFICATION',
-            'REFUSAL',
-            'INSUFFICIENT_EVIDENCE',
-          ].map((value) => ({ value }))}
+          options={['COMPANY_KNOWLEDGE', 'MIXED', 'GENERAL_ADVICE', 'INSUFFICIENT_EVIDENCE'].map((value) => ({
+            value,
+            label: answerModeLabel(value),
+          }))}
         />
         <Button type="primary" onClick={() => void load()}>
           查询
@@ -82,11 +81,11 @@ export function RunListPage() {
         dataSource={items}
         columns={[
           { title: 'Run ID', dataIndex: 'id', ellipsis: true },
-          { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
+          { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{aiStatusLabel(value)}</Tag> },
           {
             title: '回答模式',
             dataIndex: 'answerMode',
-            render: (value: string | null) => value ?? '-',
+            render: (value: string | null) => value ? answerModeLabel(value) : '-',
           },
           { title: 'Release', dataIndex: 'agentReleaseId', ellipsis: true },
           {

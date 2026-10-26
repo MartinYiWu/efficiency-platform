@@ -6,8 +6,8 @@
 .header,
 .person,
 .header > div:last-child,
-footer,
-footer > div {
+.page > footer,
+.page > footer > div {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -257,7 +257,7 @@ footer > div {
   background: #f1f5f9;
   font-size: 11px;
 }
-footer {
+.page > footer {
   position: sticky;
   bottom: 0;
   justify-content: space-between;
@@ -284,13 +284,13 @@ footer {
 }
 @media (max-width: 767px) {
   .header > div:last-child,
-  footer,
-  footer > div {
+  .page > footer,
+  .page > footer > div {
     width: 100%;
     flex-direction: column;
   }
   .header > div:last-child .ant-btn,
-  footer .ant-btn {
+  .page > footer .ant-btn {
     width: 100%;
   }
   .scoreCard {
@@ -316,7 +316,7 @@ footer {
     display: block;
     position: static;
   }
-  footer {
+  .page > footer {
     position: static;
   }
 }

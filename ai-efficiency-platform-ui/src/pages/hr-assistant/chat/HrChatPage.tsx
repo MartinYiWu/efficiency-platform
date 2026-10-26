@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, SendOutlined } from '@ant-design/icons';
 import { Avatar, Button, Input, Typography } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -55,7 +55,7 @@ export function AssistantChatPage({ config }: { config: AssistantChatConfig }) {
           aria-label="返回上一页"
           onClick={() => navigate(-1)}
         />
-        <Avatar className={styles.assistantAvatar} icon={<RobotOutlined />} size={48} />
+        <Avatar className={styles.assistantAvatar} size={44}>人</Avatar>
         <div>
           <Typography.Title id="assistant-chat-title" level={1} className={styles.title}>
             {config.title}
@@ -75,7 +75,7 @@ export function AssistantChatPage({ config }: { config: AssistantChatConfig }) {
                 }
               >
                 {message.role === 'assistant' && (
-                  <Avatar className={styles.messageAvatar} icon={<RobotOutlined />} size={34} />
+                  <Avatar className={styles.messageAvatar} size={32}>人</Avatar>
                 )}
                 <div
                   className={message.role === 'user' ? styles.userBubble : styles.assistantBubble}

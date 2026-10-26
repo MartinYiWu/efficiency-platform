@@ -193,7 +193,7 @@
   color: #2563eb;
   background: #eff6ff;
 }
-footer {
+.page > footer {
   padding: 14px 16px;
   color: #64748b;
   background: #eff6ff;

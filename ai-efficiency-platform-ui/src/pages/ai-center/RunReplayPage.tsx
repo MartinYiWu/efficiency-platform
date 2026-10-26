@@ -16,6 +16,7 @@ import { useNavigate, useParams } from 'react-router';
 import type { RunReplay } from '../../entities/ai-center/model';
 import { parseRetrievalFacts } from '../../entities/ai-center/schemas';
 import { getRunReplay } from '../../features/ai-center/api';
+import { aiStatusLabel, answerModeLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 import { EvidenceFactsPanel } from '../../features/ai-center/EvidenceFactsPanel';
 
@@ -44,8 +45,8 @@ export function RunReplayPage() {
         bordered
         items={[
           { key: 'id', label: 'Run ID', children: replay.run.id },
-          { key: 'status', label: '状态', children: <Tag>{replay.run.status}</Tag> },
-          { key: 'mode', label: '回答模式', children: replay.run.answerMode ?? '-' },
+          { key: 'status', label: '状态', children: <Tag>{aiStatusLabel(replay.run.status)}</Tag> },
+          { key: 'mode', label: '回答模式', children: replay.run.answerMode ? answerModeLabel(replay.run.answerMode) : '-' },
           { key: 'release', label: 'Agent Release', children: replay.run.agentReleaseId },
         ]}
       />

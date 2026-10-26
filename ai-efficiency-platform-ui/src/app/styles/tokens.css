@@ -1,5 +1,14 @@
 :root {
-  color: #0f172a;
-  background: #f8fafc;
+  --ui-canvas: #f5f7fb;
+  --ui-surface: #ffffff;
+  --ui-surface-muted: #f9fafc;
+  --ui-border: #e5eaf1;
+  --ui-text: #182230;
+  --ui-muted: #667085;
+  --ui-primary: #2463eb;
+  --ui-radius: 12px;
+  --ui-shadow: 0 2px 12px rgb(16 24 40 / 4%);
+  color: var(--ui-text);
+  background: var(--ui-canvas);
   font-family: Inter, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }

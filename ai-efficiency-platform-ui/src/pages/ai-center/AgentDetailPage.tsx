@@ -16,6 +16,7 @@ import { useNavigate, useParams } from 'react-router';
 
 import type { AgentDetail } from '../../entities/ai-center/model';
 import { createAgentVersion, getAgent, transitionAgentVersion } from '../../features/ai-center/api';
+import { agentTypeLabel, aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 export function AgentDetailPage() {
@@ -61,19 +62,20 @@ export function AgentDetailPage() {
         bordered
         items={[
           { key: 'key', label: 'Agent Key', children: detail.definition.agentKey },
-          { key: 'type', label: '类型', children: detail.definition.agentType },
-          { key: 'status', label: '状态', children: detail.definition.status },
+          { key: 'type', label: '类型', children: agentTypeLabel(detail.definition.agentType) },
+          { key: 'status', label: '状态', children: aiStatusLabel(detail.definition.status) },
         ]}
       />
       <Card title="版本">
         <Table
           rowKey="id"
-          pagination={false}
+          pagination={{ pageSize: 8, hideOnSinglePage: true }}
+          scroll={{ x: 780 }}
           dataSource={detail.versions}
           columns={[
             { title: '语义版本', dataIndex: 'semanticVersion' },
             { title: 'Graph', render: (_, item) => `${item.graphKey}@${item.graphVersion}` },
-            { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{value}</Tag> },
+            { title: '状态', dataIndex: 'status', render: (value: string) => <Tag>{aiStatusLabel(value)}</Tag> },
             { title: '变更', dataIndex: 'changeSummary' },
             {
               title: '操作',
@@ -113,7 +115,7 @@ export function AgentDetailPage() {
         ) : (
           <Table
             rowKey={(item, index) => item.sourceType + item.sourceId + index}
-            pagination={false}
+            pagination={{ pageSize: 10, hideOnSinglePage: true }}
             scroll={{ x: 720 }}
             dataSource={detail.evidenceBindings}
             columns={[
