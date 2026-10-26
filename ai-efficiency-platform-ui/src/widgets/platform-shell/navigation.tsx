@@ -1,6 +1,6 @@
 import {
   AppstoreOutlined, DatabaseOutlined, ExperimentOutlined, FileSearchOutlined,
-  FolderOpenOutlined, FundProjectionScreenOutlined, HomeOutlined, MessageOutlined,
+  FolderOpenOutlined, FundProjectionScreenOutlined, HomeOutlined, LineChartOutlined, MessageOutlined,
   RobotOutlined, SafetyCertificateOutlined, SettingOutlined, TeamOutlined, UserOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
@@ -33,6 +33,7 @@ export const workspaceItems: MenuProps['items'] = [
     { key: 'ai-agents', label: 'Agent 管理' }, { key: 'ai-prompts', label: 'Prompt 管理' },
     { key: 'ai-models', label: '模型策略' }, { key: 'ai-rag', label: 'RAG 策略' },
     { key: 'ai-debug', icon: <ExperimentOutlined />, label: 'RAG 调试' },
+    { key: 'ai-evaluations', icon: <LineChartOutlined />, label: 'RAG 评测' },
     { key: 'ai-runs', label: '运行回放' }, { key: 'ai-feedback', label: '用户反馈' },
   ] },
   { key: 'assets', icon: <DatabaseOutlined />, label: '素材中心' },
@@ -50,7 +51,7 @@ export const navigationPaths: Record<string, string> = {
   'knowledge-bases': '/knowledge-center/knowledge-bases',
   'ai-agents': '/ai-center/agents', 'ai-prompts': '/ai-center/prompts',
   'ai-models': '/ai-center/model-policies', 'ai-rag': '/ai-center/rag-policies',
-  'ai-debug': '/ai-center/rag-debug', 'ai-runs': '/ai-center/runs', 'ai-feedback': '/ai-center/feedback',
+  'ai-debug': '/ai-center/rag-debug', 'ai-evaluations': '/ai-center/rag-evaluations', 'ai-runs': '/ai-center/runs', 'ai-feedback': '/ai-center/feedback',
   'hr-workbench': '/ai-assistants/hr/workbench', 'hr-chat': '/ai-assistants/hr/chat',
   'hr-positions': '/ai-assistants/hr/positions', 'hr-resumes': '/ai-assistants/hr/resumes/upload',
   'hr-matching': '/ai-assistants/hr/matching', 'hr-interviews': '/ai-assistants/hr/interviews',

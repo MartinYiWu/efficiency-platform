@@ -40,6 +40,9 @@ import { RagDebugPage } from '../../pages/ai-center/RagDebugPage';
 import { RunListPage } from '../../pages/ai-center/RunListPage';
 import { RunReplayPage } from '../../pages/ai-center/RunReplayPage';
 import { FeedbackPage } from '../../pages/ai-center/FeedbackPage';
+import { RagEvaluationListPage } from '../../pages/ai-center/RagEvaluationListPage';
+import { RagEvaluationDatasetPage } from '../../pages/ai-center/RagEvaluationDatasetPage';
+import { RagEvaluationRunPage } from '../../pages/ai-center/RagEvaluationRunPage';
 import { CustomerServiceChatPage } from '../../pages/customer-service/CustomerServiceChatPage';
 import { HrAssistantShell } from '../../widgets/hrAssistantShell';
 
@@ -142,6 +145,18 @@ export function AppRouter() {
             <RagDebugPage />
           </HrAssistantShell>
         }
+      />
+      <Route
+        path="/ai-center/rag-evaluations"
+        element={<HrAssistantShell><RagEvaluationListPage /></HrAssistantShell>}
+      />
+      <Route
+        path="/ai-center/rag-evaluations/:datasetId"
+        element={<HrAssistantShell><RagEvaluationDatasetPage /></HrAssistantShell>}
+      />
+      <Route
+        path="/ai-center/rag-evaluations/runs/:runId"
+        element={<HrAssistantShell><RagEvaluationRunPage /></HrAssistantShell>}
       />
       <Route
         path="/ai-center/runs"

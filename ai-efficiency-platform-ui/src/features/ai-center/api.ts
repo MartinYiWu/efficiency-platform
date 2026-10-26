@@ -13,6 +13,15 @@ import {
   replaySchema,
   runSchema,
 } from '../../entities/ai-center/schemas';
+import {
+  evaluationCaseSchema,
+  evaluationDatasetDetailSchema,
+  evaluationDatasetSchema,
+  evaluationImportResultSchema,
+  evaluationRunComparisonSchema,
+  evaluationRunDetailSchema,
+  evaluationRunSchema,
+} from '../../entities/ai-center/evaluationSchemas';
 
 export class AiCenterApiError extends Error {
   constructor(
@@ -91,3 +100,28 @@ export const listRuns = (query = '') => call(`/api/aihub/runs?${query}`, pageSch
 export const getRunReplay = (id: string) => call(`/api/aihub/runs/${id}/replay`, replaySchema);
 export const listFeedback = (query = '') =>
   call(`/api/aihub/feedback?${query}`, pageSchema(feedbackSchema));
+
+const evaluationBase = '/api/aihub/rag-evaluations';
+export const listEvaluationDatasets = () =>
+  call(`${evaluationBase}/datasets`, evaluationDatasetSchema.array());
+export const createEvaluationDataset = (value: object) =>
+  call(`${evaluationBase}/datasets`, evaluationDatasetSchema, json('POST', value));
+export const getEvaluationDataset = (id: string) =>
+  call(`${evaluationBase}/datasets/${encodeURIComponent(id)}`, evaluationDatasetDetailSchema);
+export const createEvaluationCase = (datasetId: string, value: object) =>
+  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases`, evaluationCaseSchema, json('POST', value));
+export const updateEvaluationCase = (datasetId: string, caseId: string, value: object) =>
+  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`,
+    evaluationCaseSchema, json('PUT', value));
+export const importEvaluationCases = (datasetId: string, value: object[]) =>
+  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/import`,
+    evaluationImportResultSchema, json('POST', value));
+export const startEvaluationRun = (value: object) =>
+  call(`${evaluationBase}/runs`, evaluationRunSchema, json('POST', value));
+export const listEvaluationRuns = (datasetId: string) =>
+  call(`${evaluationBase}/runs?datasetId=${encodeURIComponent(datasetId)}`, evaluationRunSchema.array());
+export const getEvaluationRun = (id: string) =>
+  call(`${evaluationBase}/runs/${encodeURIComponent(id)}`, evaluationRunDetailSchema);
+export const compareEvaluationRuns = (baselineRunId: string, candidateRunId: string) =>
+  call(`${evaluationBase}/runs/compare?baselineRunId=${encodeURIComponent(baselineRunId)}&candidateRunId=${encodeURIComponent(candidateRunId)}`,
+    evaluationRunComparisonSchema);
