@@ -87,7 +87,10 @@ public final class RagEvaluationMetrics {
     }
 
     private static String normalize(String value) {
-        return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return value == null ? "" : value
+                .replaceAll("\\\\([\\\\`*_{}\\[\\]()#+\\-.!<>])", "$1")
+                .replaceAll("\\s+", "")
+                .toLowerCase(Locale.ROOT);
     }
 
     public record CaseMetrics(

@@ -136,6 +136,26 @@ def test_parent_child_keeps_complete_numbered_clause_and_exception() -> None:
     assert parents[1].content.startswith("第二条")
 
 
+def test_parent_child_merges_adjacent_paragraphs_in_same_section() -> None:
+    parents = parent_child_document(
+        ParsedDocument(
+            markdown=(
+                "# 重启网关\n\n"
+                "## Windows11（PowerShell）\n\n"
+                "openclaw gateway stop\n\n"
+                "openclaw gateway start"
+            )
+        )
+    )
+
+    assert len(parents) == 1
+    assert parents[0].section_path == "重启网关 / Windows11（PowerShell）"
+    assert parents[0].content == (
+        "openclaw gateway stop\n\nopenclaw gateway start"
+    )
+    assert parents[0].children[0].content == parents[0].content
+
+
 def test_parent_child_keeps_pdf_page_range_for_cross_page_clause() -> None:
     first = "第一条 员工出差前提交申请。\n\n"
     second = "紧急情况允许事后补交审批材料。"

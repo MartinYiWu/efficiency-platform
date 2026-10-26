@@ -145,6 +145,20 @@ class RagEvaluationMetricsTest {
         assertThat(metrics.passed()).isTrue();
     }
 
+    @Test
+    void treatsMarkdownEscapesAsFormattingWhenMatchingExpectedFacts() throws Exception {
+        EvaluationCase testCase = new EvaluationCase(
+                "case-6", "dataset-1", "AGENT-004", "群 ID 格式是什么？", "COMPANY_KNOWLEDGE",
+                List.of("oc_开头"), List.of(), List.of("阿里多Agent"),
+                List.of("version-agent"), 1, List.of(), true);
+
+        var metrics = RagEvaluationMetrics.evaluate(testCase, response(
+                "COMPANY_KNOWLEDGE", "飞书群 ID 要以 oc\\\\_ 开头。", "阿里多Agent", "version-agent"));
+
+        assertThat(metrics.expectedFactRecall()).isEqualTo(1.0);
+        assertThat(metrics.passed()).isTrue();
+    }
+
     private CustomerServiceDebugView response(String mode, String answer, String title, String version) throws Exception {
         String json = """
                 {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-1",

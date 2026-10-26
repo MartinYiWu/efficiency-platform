@@ -366,3 +366,47 @@ async def test_whitespace_cannot_prove_no_conflict(field):
     assert result.errors == (
         "CONFLICT_REASON_INVALID" if field == "reason" else "CONFLICT_QUOTE_INVALID",
     )
+
+
+@pytest.mark.asyncio
+async def test_markdown_formatting_difference_keeps_verbatim_quote_valid():
+    from efficiency_platform_agent.agents.customer_service.conflict_screen import (
+        screen_conflicts,
+    )
+
+    _, parents = group_fixture()
+    parents = (
+        parents[0].model_copy(update={"content": "- **统一工具**：使用 Cursor 企业版。"}),
+        parents[1].model_copy(
+            update={"document_id": uuid4(), "content": "群 ID 格式为 oc\\_xxxx。"}
+        ),
+    )
+
+    class Gateway:
+        async def complete(self, stage, value, output_type):
+            return output_type.model_validate(
+                {
+                    "pairs": [
+                        {
+                            "left_parent_id": parents[0].parent_id,
+                            "right_parent_id": parents[1].parent_id,
+                            "same_scope": False,
+                            "verdict": "NO_CONFLICT",
+                            "left_quote": "统一工具：使用 Cursor 企业版。",
+                            "right_quote": "群 ID 格式为 oc_xxxx。",
+                            "reason": "业务对象不同",
+                        }
+                    ]
+                }
+            )
+
+    members = {
+        (p.knowledge_base_id, p.document_id, p.document_version_id, p.index_release_id)
+        for p in parents
+    }
+    result = await screen_conflicts(
+        parents, question="问题", gateway=Gateway(), members=members, stage_bound=True
+    )
+
+    assert result.errors == ()
+    assert result.blocked is False

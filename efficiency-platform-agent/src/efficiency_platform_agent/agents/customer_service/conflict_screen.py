@@ -20,7 +20,10 @@ class ConflictResponse(StrictModel):
 
 
 def _source_text(value: str) -> str:
-    return re.sub(r"\\([\\`*_{}\[\]()#+\-.!<>])", r"\1", html.unescape(value))
+    unescaped = re.sub(
+        r"\\([\\`*_{}\[\]()#+\-.!<>])", r"\1", html.unescape(value)
+    )
+    return unescaped.replace("**", "").replace("__", "").replace("`", "")
 
 
 async def screen_conflicts(
