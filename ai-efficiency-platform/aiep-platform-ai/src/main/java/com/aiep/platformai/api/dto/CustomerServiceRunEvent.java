@@ -26,6 +26,12 @@ public record CustomerServiceRunEvent(
         if (status == null || occurredAt == null || payload == null) {
             throw new IllegalArgumentException("status、occurred_at 和 payload 不能为空");
         }
+        if ("stage.started".equals(eventType) && !"STARTED".equals(payload.phase())) {
+            throw new IllegalArgumentException("stage.started 必须带 STARTED 阶段状态");
+        }
+        if ("stage.completed".equals(eventType) && payload.phase() != null && !"COMPLETED".equals(payload.phase())) {
+            throw new IllegalArgumentException("stage.completed 阶段状态无效");
+        }
     }
 
     /**
@@ -41,7 +47,19 @@ public record CustomerServiceRunEvent(
             @JsonProperty("citation") Citation citation,
             @JsonProperty("error_code") String errorCode,
             @JsonProperty("error_message") String errorMessage,
-            @JsonProperty("retrieval_facts") RetrievalFacts retrievalFacts) {
+            @JsonProperty("retrieval_facts") RetrievalFacts retrievalFacts,
+            @JsonProperty("phase") String phase) {
+        public Payload {
+            if (phase != null && !List.of("STARTED", "COMPLETED").contains(phase)) {
+                throw new IllegalArgumentException("phase 无效");
+            }
+        }
+
+        public Payload(String stage, Integer progressPercent, String publicSummary, String delta,
+                String answerMode, Citation citation, String errorCode, String errorMessage, RetrievalFacts retrievalFacts) {
+            this(stage, progressPercent, publicSummary, delta, answerMode, citation,
+                    errorCode, errorMessage, retrievalFacts, null);
+        }
     }
 
     /** 仅在内部检索阶段传递，Java 落入运行步骤；公开 SSE 不转发此字段。 */

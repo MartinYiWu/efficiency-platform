@@ -47,6 +47,7 @@ class CustomerServiceGraph:
         bundle: CustomerServiceReleaseBundle,
         gateway: StructuredStageGateway,
         on_answer_block: Callable[[str, AnswerMode], None] | None = None,
+        on_stage: Callable[[str, str], None] | None = None,
     ) -> GraphResult:
         started = perf_counter()
         intent = await classify_intent(gateway, request)
@@ -55,6 +56,8 @@ class CustomerServiceGraph:
             request.conversation_id,
             (perf_counter() - started) * 1000,
         )
+        if on_stage is not None:
+            on_stage("intent", "COMPLETED")
         evidence: tuple[Evidence, ...] = ()
         retrieval_trace = None
         sufficiency = None
@@ -63,6 +66,8 @@ class CustomerServiceGraph:
             ("intent", f"已识别 {intent.intent_type.value}")
         ]
         if intent.intent_type in {IntentType.COMPANY_QUERY, IntentType.MIXED_QUERY}:
+            if on_stage is not None:
+                on_stage("retrieval", "STARTED")
             retrieval_trace = await self.retrieval.search(
                 tenant_id=request.tenant_id,
                 question=intent.normalized_question,
@@ -74,12 +79,16 @@ class CustomerServiceGraph:
                 request.conversation_id,
                 (perf_counter() - started) * 1000,
             )
+            if on_stage is not None:
+                on_stage("retrieval", "COMPLETED")
             evidence = (
                 retrieval_trace.assembly.selected
                 if retrieval_trace.assembly is not None
                 else retrieval_trace.reranked_evidence
             )
             summaries.append(("retrieval", f"已重排 {len(evidence)} 条候选证据"))
+            if on_stage is not None:
+                on_stage("verification", "STARTED")
             if bundle.contract_version.endswith("/2"):
                 assembly = retrieval_trace.assembly or assemble_evidence(
                     (),
@@ -118,9 +127,13 @@ class CustomerServiceGraph:
                 request.conversation_id,
                 (perf_counter() - started) * 1000,
             )
+            if on_stage is not None:
+                on_stage("verification", "COMPLETED")
             summaries.append(
                 ("sufficiency", "证据充分" if sufficiency.sufficient else "证据不足")
             )
+        if on_stage is not None:
+            on_stage("answer", "STARTED")
         answer = await generate_answer(
             gateway,
             question=intent.normalized_question,

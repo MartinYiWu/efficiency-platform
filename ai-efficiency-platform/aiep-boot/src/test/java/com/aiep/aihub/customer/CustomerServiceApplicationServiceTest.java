@@ -1,6 +1,7 @@
 package com.aiep.aihub.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -16,6 +17,7 @@ import com.aiep.aihub.repository.customer.CustomerServiceMappers;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.ConversationPO;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.MessagePO;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.RunPO;
+import com.aiep.aihub.repository.customer.CustomerServicePOs.RunStepPO;
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiReleasePO;
@@ -101,6 +103,45 @@ class CustomerServiceApplicationServiceTest {
         verify(repository).insertRunStep(saved.capture());
         assertThat(saved.getValue().internalPayload()).contains("INTERNAL_ONLY", "frozen-parent");
         assertThat(mapper.writeValueAsString(result.payload())).doesNotContain("INTERNAL_ONLY", "retrieval_facts", "frozen-parent");
+    }
+
+    @Test
+    void projectsLiveStageUsingFixedPublicCopy() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var projector = new CustomerServiceEventProjector(repository, mapper);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 0));
+        when(repository.findAssistantMessageByRun("run-1", "dev")).thenReturn(message("answer-1", "ASSISTANT", ""));
+        when(repository.advanceRun("run-1", 0, 1, "RUNNING", null, null, null)).thenReturn(true);
+        var event = mapper.readValue("""
+                {"contract_version":"customer-service-run-event/1","run_id":"agent-run-1","sequence":1,
+                 "event_type":"stage.started","status":"RUNNING","occurred_at":"2026-10-26T00:00:00Z",
+                 "payload":{"stage":"retrieval","phase":"STARTED","public_summary":"UNTRUSTED CONTENT"}}
+                """, CustomerServiceRunEvent.class);
+        var result = projector.project("run-1", "dev", event);
+        assertThat(result.eventType()).isEqualTo("run.progress");
+        assertThat(result.payload()).isEqualTo(java.util.Map.of(
+                "stage", "retrieval", "phase", "STARTED", "summary", "正在查找公司资料"));
+    }
+
+    @Test
+    void timelineExposesOnlyPublicStagesAndConsistentCursor() {
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 3));
+        when(repository.findAssistantMessageByRun("run-1", "dev"))
+                .thenReturn(message("answer-1", "ASSISTANT", "已生成正文"));
+        when(repository.listCitationsByMessage("answer-1")).thenReturn(List.of());
+        when(repository.listRunSteps("run-1")).thenReturn(List.of(
+                new RunStepPO("step-1", "run-1", 2, "retrieval", "RUNNING", "UNTRUSTED CONTENT",
+                        "{\"stage\":\"retrieval\",\"phase\":\"STARTED\",\"private\":\"secret\"}", now, now),
+                new RunStepPO("step-2", "run-1", 3, "answer.delta", "RUNNING", null,
+                        "{\"delta\":\"内部正文\"}", now, now)));
+        var timeline = service.timeline("dev", "1", "run-1");
+        assertThat(timeline.lastEventSequence()).isEqualTo(3);
+        assertThat(timeline.assistant().message().content()).isEqualTo("已生成正文");
+        assertThat(timeline.steps()).hasSize(1);
+        assertThat(timeline.steps().getFirst().summary()).isEqualTo("正在查找公司资料");
+        assertThat(timeline.toString()).doesNotContain("secret", "内部正文", "UNTRUSTED CONTENT");
+        assertThatThrownBy(() -> service.timeline("dev", "another-user", "run-1"))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

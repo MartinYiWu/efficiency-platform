@@ -50,6 +50,7 @@ class _Run:
     streamed_blocks: list[str] = field(default_factory=list)
     submitted_at: float = field(default_factory=perf_counter)
     first_answer_logged: bool = False
+    stage_events_emitted: bool = False
 
 
 class CustomerServiceNotFoundError(LookupError):
@@ -273,7 +274,10 @@ class CustomerServiceRunService:
                 "run.started",
                 RunStatus.RUNNING,
                 RunEventPayload(
-                    stage="intent", progress_percent=5, public_summary="正在理解问题"
+                    stage="intent",
+                    phase="STARTED",
+                    progress_percent=5,
+                    public_summary="正在理解问题",
                 ),
             )
             bundle = await self.releases.get(run.request.agent_release_id)
@@ -287,6 +291,7 @@ class CustomerServiceRunService:
                     on_answer_block=lambda block, mode: self._stream_answer_block(
                         run, block, mode
                     ),
+                    on_stage=lambda stage, phase: self._stream_stage(run, stage, phase),
                 )
             else:
                 result = await self.graph.run(
@@ -326,19 +331,22 @@ class CustomerServiceRunService:
             )
 
     def _publish_result(self, run: _Run, result: GraphResult) -> None:
-        for key, summary in result.stage_summaries:
-            self._append(
-                run,
-                "stage.completed",
-                RunStatus.RUNNING,
-                RunEventPayload(
-                    stage=key,
-                    public_summary=summary,
-                    retrieval_facts=(
-                        self._retrieval_facts(result) if key == "retrieval" else None
+        if not run.stage_events_emitted:
+            for key, summary in result.stage_summaries:
+                self._append(
+                    run,
+                    "stage.completed",
+                    RunStatus.RUNNING,
+                    RunEventPayload(
+                        stage=key,
+                        public_summary=summary,
+                        retrieval_facts=(
+                            self._retrieval_facts(result)
+                            if key == "retrieval"
+                            else None
+                        ),
                     ),
-                ),
-            )
+                )
         blocks = answer_deltas(result.rendered)
         if tuple(run.streamed_blocks) != blocks[: len(run.streamed_blocks)]:
             raise ValueError("STREAM_ANSWER_PREFIX_MISMATCH")
@@ -379,6 +387,24 @@ class CustomerServiceRunService:
             "answer.delta",
             RunStatus.RUNNING,
             RunEventPayload(delta=block, answer_mode=mode),
+        )
+
+    def _stream_stage(self, run: _Run, stage: str, phase: str) -> None:
+        summaries = {
+            ("intent", "COMPLETED"): "已理解问题",
+            ("retrieval", "STARTED"): "正在查找公司资料",
+            ("retrieval", "COMPLETED"): "资料查找完成",
+            ("verification", "STARTED"): "正在核对资料依据",
+            ("verification", "COMPLETED"): "依据核对完成",
+            ("answer", "STARTED"): "正在撰写回答",
+        }
+        summary = summaries[(stage, phase)]
+        run.stage_events_emitted = True
+        self._append(
+            run,
+            "stage.started" if phase == "STARTED" else "stage.completed",
+            RunStatus.RUNNING,
+            RunEventPayload(stage=stage, phase=phase, public_summary=summary),
         )
 
     def _append(

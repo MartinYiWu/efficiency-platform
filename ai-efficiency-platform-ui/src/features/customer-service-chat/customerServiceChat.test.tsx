@@ -10,6 +10,13 @@ describe('customer service chat', () => {
     expect(events).toHaveLength(2);
     expect(events[1].event).toBe('run.completed');
   });
+  it('parses a live stage with an explicit phase', () => {
+    const events = parseCustomerServiceSse(
+      'id: 3\nevent: run.progress\ndata: {"stage":"retrieval","phase":"STARTED","summary":"正在查找公司资料"}\n\n',
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ stage: 'retrieval', phase: 'STARTED' });
+  });
   it('rejects an unknown answer mode', () => {
     const events = parseCustomerServiceSse(
       'id: 1\nevent: run.completed\ndata: {"answerMode":"MADE_UP"}\n\n',

@@ -6,6 +6,7 @@ import com.aiep.aihub.application.customer.CustomerServiceEventProjector.PublicE
 import com.aiep.aihub.application.customer.CustomerServiceViews.MessageView;
 import com.aiep.aihub.application.customer.CustomerServiceViews.PageView;
 import com.aiep.aihub.application.customer.CustomerServiceViews.SubmitView;
+import com.aiep.aihub.application.customer.CustomerServiceViews.TimelineView;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.CitationPO;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.ConversationPO;
 import com.aiep.aihub.repository.customer.CustomerServicePOs.FeedbackPO;
@@ -64,6 +65,10 @@ public class CustomerServiceController {
     }
     @GetMapping("/runs/{id}")
     public ApiResponse<RunPO> run(@PathVariable String id) { return ApiResponse.success(service.getRun(TENANT, id)); }
+    @GetMapping("/runs/{id}/timeline")
+    public ApiResponse<TimelineView> timeline(@PathVariable String id) {
+        return ApiResponse.success(service.timeline(TENANT, USER, id));
+    }
     @GetMapping("/runs/{id}/events")
     public SseEmitter events(@PathVariable String id,
             @RequestHeader(value = "Last-Event-ID", required = false) Long lastEventId,

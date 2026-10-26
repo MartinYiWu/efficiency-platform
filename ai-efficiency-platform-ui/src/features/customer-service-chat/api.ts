@@ -6,6 +6,7 @@ import {
   pageSchema,
   runSchema,
   submitSchema,
+  timelineSchema,
 } from '../../entities/customer-service/schemas';
 
 export class CustomerServiceApiError extends Error {
@@ -66,6 +67,8 @@ export const submitMessage = (id: string, message: string, clientRequestId: stri
     json('POST', { contractVersion: 'customer-service-message/1', message, clientRequestId }),
   );
 export const getRun = (id: string) => call(`/api/customer-service/runs/${id}`, runSchema);
+export const getTimeline = (id: string) =>
+  call(`/api/customer-service/runs/${id}/timeline`, timelineSchema);
 export const cancelRun = (id: string) =>
   call(`/api/customer-service/runs/${id}/cancel`, runSchema, json('POST'));
 export const submitFeedback = (messageId: string, value: object) =>

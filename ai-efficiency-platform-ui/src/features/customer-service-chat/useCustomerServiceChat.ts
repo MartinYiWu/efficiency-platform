@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { Conversation, MessageView } from '../../entities/customer-service/model';
+import type { Conversation, MessageView, PublicProgress } from '../../entities/customer-service/model';
 import {
   cancelRun,
   createConversation,
   getRun,
+  getTimeline,
   listConversations,
   listMessages,
   submitMessage,
@@ -17,8 +18,7 @@ export interface CustomerServiceChatState {
   conversationId?: string;
   messages: MessageView[];
   status: ChatStatus;
-  stage?: string;
-  summary?: string;
+  progressByRun: Record<string, PublicProgress[]>;
   runId?: string;
   sequence: number;
   error?: string;
@@ -30,6 +30,7 @@ const empty: CustomerServiceChatState = {
   messages: [],
   status: 'IDLE',
   sequence: 0,
+  progressByRun: {},
 };
 
 function findAssistantIndex(messages: MessageView[], runId: string) {
@@ -43,6 +44,7 @@ function findAssistantIndex(messages: MessageView[], runId: string) {
 export function useCustomerServiceChat() {
   const [state, setState] = useState(empty);
   const abortRef = useRef<AbortController | undefined>(undefined);
+  const selectedConversationRef = useRef<string | undefined>(undefined);
   const busy = state.status === 'SUBMITTING' || state.status === 'STREAMING';
   const refreshConversations = useCallback(async () => {
     const page = await listConversations();
@@ -69,7 +71,7 @@ export function useCustomerServiceChat() {
                 ...messages[index],
                 message: {
                   ...messages[index].message,
-                  content: `${messages[index].message.content}${event.payload.delta}`,
+                  content: `${messages[index].message.content}${messages[index].message.content ? '\n\n' : ''}${event.payload.delta}`,
                   status: 'STREAMING',
                 },
               };
@@ -88,20 +90,30 @@ export function useCustomerServiceChat() {
               };
             return { ...current, messages, sequence: event.id };
           }
-          if (event.event === 'run.progress' || event.event === 'run.started')
+          if (event.event === 'run.progress' || event.event === 'run.started') {
+            const phase = event.payload.phase;
+            if (!phase) return { ...current, sequence: event.id };
+            const previous = current.progressByRun[runId] ?? [];
+            const step: PublicProgress = {
+              sequence: event.id,
+              stage: event.payload.stage,
+              phase,
+              summary: event.payload.summary,
+            };
             return {
               ...current,
               sequence: event.id,
-              stage: event.payload.stage,
-              summary: event.payload.summary,
+              progressByRun: {
+                ...current.progressByRun,
+                [runId]: [...previous.filter((item) => item.stage !== step.stage), step],
+              },
             };
+          }
           if (event.event === 'run.completed')
             return {
               ...current,
               sequence: event.id,
               status: 'SUCCEEDED',
-              stage: undefined,
-              summary: undefined,
               messages: current.messages.map((item) =>
                 item.message.runId === runId && item.message.role === 'ASSISTANT'
                   ? {
@@ -120,16 +132,12 @@ export function useCustomerServiceChat() {
               ...current,
               sequence: event.id,
               status: 'CANCELLED',
-              stage: undefined,
-              summary: undefined,
             };
           return {
             ...current,
             sequence: event.id,
             status: 'FAILED',
             error: `${event.payload.errorMessage}（${event.payload.errorCode}）`,
-            stage: undefined,
-            summary: undefined,
           };
         });
       }
@@ -157,27 +165,44 @@ export function useCustomerServiceChat() {
   }, []);
   const selectConversation = useCallback(
     async (conversationId: string) => {
+      selectedConversationRef.current = conversationId;
       abortRef.current?.abort();
       const messages = await listMessages(conversationId);
+      if (selectedConversationRef.current !== conversationId) return;
+      const pending = messages.find((item) =>
+        item.message.role === 'ASSISTANT' && ['PENDING', 'STREAMING'].includes(item.message.status),
+      );
       setState((value) => ({
         ...value,
         conversationId,
         messages,
-        status: 'IDLE',
-        runId: undefined,
+        status: pending ? 'STREAMING' : 'IDLE',
+        runId: pending?.message.runId ?? undefined,
         sequence: 0,
+        progressByRun: {},
         error: undefined,
       }));
-      const last = messages.at(-1)?.message;
-      if (
-        last?.role === 'ASSISTANT' &&
-        last.runId &&
-        ['PENDING', 'STREAMING'].includes(last.status)
-      ) {
-        const run = await getRun(last.runId);
-        if (!['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status))
-          void consume(run.id, run.lastEventSequence, conversationId);
-      }
+      const runIds = [...new Set(messages.flatMap((item) =>
+        item.message.role === 'ASSISTANT' && item.message.runId ? [item.message.runId] : [],
+      ))];
+      const timelines = await Promise.all(runIds.map((runId) => getTimeline(runId).catch(() => null)));
+      if (selectedConversationRef.current !== conversationId) return;
+      setState((value) => {
+        if (value.conversationId !== conversationId) return value;
+        const updated = [...value.messages];
+        const progressByRun = { ...value.progressByRun };
+        for (const timeline of timelines) {
+          if (!timeline) continue;
+          progressByRun[timeline.runId] = timeline.steps;
+          const index = findAssistantIndex(updated, timeline.runId);
+          if (index >= 0) updated[index] = timeline.assistant;
+        }
+        return { ...value, messages: updated, progressByRun };
+      });
+      const active = timelines.find((timeline) =>
+        timeline && ['PENDING', 'RUNNING'].includes(timeline.status),
+      );
+      if (active) void consume(active.runId, active.lastEventSequence, conversationId);
     },
     [consume],
   );
@@ -234,30 +259,33 @@ export function useCustomerServiceChat() {
     };
     setState((value) => ({
       ...value,
-      messages: [...value.messages, user],
-      status: 'SUBMITTING',
-      error: undefined,
-    }));
-    try {
-      const submitted = await submitMessage(conversationId, text.trim(), requestId);
-      const assistant: MessageView = {
+      messages: [...value.messages, user, {
         message: {
           id: `local-assistant-${requestId}`,
           conversationId,
           tenantId: 'dev',
           role: 'ASSISTANT',
           content: '',
-          status: 'STREAMING',
+          status: 'PENDING',
           answerMode: null,
-          runId: submitted.runId,
+          runId: null,
           clientRequestId: null,
           createdAt: now,
         },
         citations: [],
-      };
+      }],
+      status: 'SUBMITTING',
+      error: undefined,
+    }));
+    try {
+      const submitted = await submitMessage(conversationId, text.trim(), requestId);
       setState((value) => ({
         ...value,
-        messages: [...value.messages, assistant],
+        messages: value.messages.map((item) =>
+          item.message.id === `local-assistant-${requestId}`
+            ? { ...item, message: { ...item.message, runId: submitted.runId, status: 'STREAMING' } }
+            : item,
+        ),
         runId: submitted.runId,
       }));
       await consume(submitted.runId, 0, conversationId);
@@ -266,6 +294,7 @@ export function useCustomerServiceChat() {
       const value = error as Error & { traceId?: string };
       setState((current) => ({
         ...current,
+        messages: current.messages.filter((item) => item.message.id !== `local-assistant-${requestId}`),
         status: 'FAILED',
         error: value.message,
         traceId: value.traceId,

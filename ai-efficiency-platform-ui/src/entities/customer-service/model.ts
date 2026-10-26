@@ -6,8 +6,10 @@ import {
   customerServiceSseSchema,
   feedbackSchema,
   messageViewSchema,
+  publicProgressSchema,
   runSchema,
   submitSchema,
+  timelineSchema,
 } from './schemas';
 
 export type AnswerMode = z.infer<typeof answerModeSchema>;
@@ -18,3 +20,5 @@ export type CustomerServiceRun = z.infer<typeof runSchema>;
 export type SubmitResult = z.infer<typeof submitSchema>;
 export type Feedback = z.infer<typeof feedbackSchema>;
 export type CustomerServiceSseEvent = z.infer<typeof customerServiceSseSchema>;
+export type PublicProgress = z.infer<typeof publicProgressSchema>;
+export type Timeline = z.infer<typeof timelineSchema>;

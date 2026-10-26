@@ -69,10 +69,21 @@
   padding: 16px 20px;
   border-top: 1px solid #e4e7ec;
 }
-.status {
-  padding: 8px 22px;
-  background: #f5f8ff;
+.progress {
   color: #475467;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.progress summary {
+  cursor: pointer;
+}
+.progress ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+.progressPending {
+  color: #475467;
+  font-size: 13px;
 }
 .error {
   padding: 8px 22px;

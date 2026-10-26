@@ -115,7 +115,27 @@ export const pageSchema = <T extends z.ZodType>(item: T) =>
   z
     .object({ items: z.array(item), page: z.number(), pageSize: z.number(), total: z.number() })
     .strict();
-const progressPayload = z.object({ stage: z.string(), summary: z.string() }).strict();
+const progressPayload = z
+  .object({ stage: z.string(), phase: z.enum(['STARTED', 'COMPLETED']).optional(), summary: z.string() })
+  .strict();
+export const publicProgressSchema = z
+  .object({
+    sequence: z.number().int().positive(),
+    stage: z.string(),
+    phase: z.enum(['STARTED', 'COMPLETED']),
+    summary: z.string(),
+    occurredAt: z.string().optional(),
+  })
+  .strict();
+export const timelineSchema = z
+  .object({
+    runId: z.string(),
+    status: z.string(),
+    lastEventSequence: z.number().int().nonnegative(),
+    assistant: messageViewSchema,
+    steps: z.array(publicProgressSchema),
+  })
+  .strict();
 export const customerServiceSseSchema = z.discriminatedUnion('event', [
   z.object({
     id: z.number().int().positive(),

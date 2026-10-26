@@ -87,7 +87,26 @@ public class CustomerServiceEventProjector {
             return new PublicEvent(event.sequence(), "run.failed", Map.of("errorCode", value(event.payload().errorCode()), "errorMessage", value(event.payload().errorMessage())));
         if ("run.cancelled".equals(event.eventType())) return new PublicEvent(event.sequence(), "run.cancelled", Map.of());
         String type = "run.started".equals(event.eventType()) ? "run.started" : "run.progress";
+        String phase = event.payload().phase();
+        if (phase != null) {
+            return new PublicEvent(event.sequence(), type, Map.of(
+                    "stage", value(event.payload().stage()), "phase", phase,
+                    "summary", publicStageSummary(event.payload().stage(), phase)));
+        }
         return new PublicEvent(event.sequence(), type, Map.of("stage", value(event.payload().stage()), "summary", value(event.payload().publicSummary())));
+    }
+
+    static String publicStageSummary(String stage, String phase) {
+        return switch (stage + "/" + phase) {
+            case "intent/STARTED" -> "正在理解问题";
+            case "intent/COMPLETED" -> "已理解问题";
+            case "retrieval/STARTED" -> "正在查找公司资料";
+            case "retrieval/COMPLETED" -> "资料查找完成";
+            case "verification/STARTED" -> "正在核对资料依据";
+            case "verification/COMPLETED" -> "依据核对完成";
+            case "answer/STARTED" -> "正在撰写回答";
+            default -> throw new IllegalArgumentException("CUSTOMER_SERVICE_PUBLIC_STAGE_INVALID");
+        };
     }
 
     private static String value(String input) { return input == null ? "" : input; }

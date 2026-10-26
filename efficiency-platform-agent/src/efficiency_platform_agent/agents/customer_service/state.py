@@ -338,6 +338,7 @@ class RunView(StrictModel):
 
 class RunEventPayload(StrictModel):
     stage: str | None = None
+    phase: Literal["STARTED", "COMPLETED"] | None = None
     progress_percent: int | None = Field(default=None, ge=0, le=100)
     public_summary: str | None = None
     delta: str | None = None

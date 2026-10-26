@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Citation } from '../../entities/customer-service/model';
 import { CitationDrawer } from '../../features/customer-service-chat/CitationDrawer';
 import { CustomerServiceAnswer } from '../../features/customer-service-chat/CustomerServiceAnswer';
+import { CustomerServiceProgress } from '../../features/customer-service-chat/CustomerServiceProgress';
 import { FeedbackControl } from '../../features/customer-service-chat/FeedbackControl';
 import { useCustomerServiceChat } from '../../features/customer-service-chat/useCustomerServiceChat';
 import styles from './CustomerServiceChatPage.module.css';
@@ -23,7 +24,7 @@ export function CustomerServiceChatPage() {
   const viewport = useRef<HTMLDivElement>(null);
   useEffect(() => {
     viewport.current?.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
-  }, [state.messages, state.summary]);
+  }, [state.messages, state.progressByRun]);
   const submit = () => {
     const value = draft.trim();
     if (!value || busy) return;
@@ -50,6 +51,7 @@ export function CustomerServiceChatPage() {
               key={item.id}
               type={item.id === state.conversationId ? 'primary' : 'text'}
               className={styles.conversation}
+              disabled={busy}
               onClick={() => void selectConversation(item.id)}
             >
               {item.title || '新对话'}
@@ -77,13 +79,20 @@ export function CustomerServiceChatPage() {
                   {item.message.role === 'USER' ? (
                     item.message.content
                   ) : (
-                    <CustomerServiceAnswer
-                      content={item.message.content}
-                      mode={item.message.answerMode}
-                      citations={item.citations}
-                      streaming={item.message.status === 'STREAMING'}
-                      onCitation={setCitation}
-                    />
+                    <>
+                      <CustomerServiceProgress
+                        steps={item.message.runId ? state.progressByRun[item.message.runId] ?? [] : []}
+                        status={item.message.status === 'COMPLETED' ? 'SUCCEEDED' : item.message.status}
+                        pending={state.status === 'SUBMITTING' && item.message.id.startsWith('local-assistant-')}
+                      />
+                      <CustomerServiceAnswer
+                        content={item.message.content}
+                        mode={item.message.answerMode}
+                        citations={item.citations}
+                        streaming={item.message.status === 'STREAMING' && Boolean(item.message.runId && state.progressByRun[item.message.runId]?.some((step) => step.stage === 'answer'))}
+                        onCitation={setCitation}
+                      />
+                    </>
                   )}
                 </div>
                 {item.message.role === 'ASSISTANT' &&
@@ -95,7 +104,6 @@ export function CustomerServiceChatPage() {
             </article>
           ))}
         </div>
-        {state.summary && busy && <div className={styles.status}>{state.summary}</div>}
         {state.error && (
           <div className={styles.error} role="alert">
             {state.error}

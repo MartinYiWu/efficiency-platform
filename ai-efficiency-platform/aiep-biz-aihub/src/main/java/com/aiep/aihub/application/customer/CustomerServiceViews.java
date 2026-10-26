@@ -14,6 +14,9 @@ public final class CustomerServiceViews {
     public record PageView<T>(List<T> items, int page, int pageSize, long total) { }
     public record SubmitView(String conversationId, String runId, String status, String agentReleaseId) { }
     public record MessageView(MessagePO message, List<CitationPO> citations) { }
+    public record PublicProgress(long sequence, String stage, String phase, String summary, java.time.Instant occurredAt) { }
+    public record TimelineView(String runId, String status, long lastEventSequence,
+            MessageView assistant, List<PublicProgress> steps) { }
     public record ReplayView(
             RunPO run, MessagePO question, MessagePO answer, List<RunStepPO> stages,
             List<CitationPO> citations, FeedbackPO feedback) { }

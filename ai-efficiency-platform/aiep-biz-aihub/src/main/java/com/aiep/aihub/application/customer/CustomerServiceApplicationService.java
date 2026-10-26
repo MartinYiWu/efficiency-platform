@@ -4,6 +4,8 @@ import com.aiep.aihub.application.customer.CustomerServicePendingRunCreator.Pend
 import com.aiep.aihub.application.customer.CustomerServiceViews.MessageView;
 import com.aiep.aihub.application.customer.CustomerServiceViews.PageView;
 import com.aiep.aihub.application.customer.CustomerServiceViews.ReplayView;
+import com.aiep.aihub.application.customer.CustomerServiceViews.TimelineView;
+import com.aiep.aihub.application.customer.CustomerServiceViews.PublicProgress;
 import com.aiep.aihub.application.customer.CustomerServiceViews.SubmitView;
 import com.aiep.aihub.domain.customer.CustomerServiceModels;
 import com.aiep.aihub.repository.customer.CustomerServiceMappers;
@@ -19,15 +21,19 @@ import com.aiep.platformai.api.AiInvokeFacade;
 import com.aiep.platformai.api.dto.CustomerServiceRunEvent;
 import com.aiep.platformai.api.dto.CustomerServiceRunRequest;
 import com.aiep.platformai.api.dto.CustomerServiceRunView;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
 @Service
 public class CustomerServiceApplicationService {
+    private static final ObjectMapper STAGE_MAPPER = new ObjectMapper();
     private final CustomerServiceMappers repository;
     private final AiManagementMappers management;
     private final CustomerServicePendingRunCreator pendingCreator;
@@ -111,6 +117,30 @@ public class CustomerServiceApplicationService {
         RunPO value = repository.findRun(runId, tenantId);
         if (value == null) throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_FOUND");
         return value;
+    }
+
+    @Transactional(readOnly = true)
+    public TimelineView timeline(String tenantId, String userId, String runId) {
+        RunPO run = getRun(tenantId, runId);
+        getConversation(tenantId, userId, run.conversationId());
+        MessagePO answer = repository.findAssistantMessageByRun(runId, tenantId);
+        if (answer == null) throw new IllegalStateException("CUSTOMER_SERVICE_ASSISTANT_MESSAGE_MISSING");
+        List<PublicProgress> steps = new ArrayList<>();
+        for (var step : repository.listRunSteps(runId)) {
+            if (step.internalPayload() == null) continue;
+            try {
+                JsonNode payload = STAGE_MAPPER.readTree(step.internalPayload());
+                String stage = payload.path("stage").asText("");
+                String phase = payload.path("phase").asText("");
+                if (phase.isBlank()) continue;
+                String summary = CustomerServiceEventProjector.publicStageSummary(stage, phase);
+                steps.add(new PublicProgress(step.sequenceNo(), stage, phase, summary, step.startedAt()));
+            } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ignored) {
+                // 历史内部步骤不进入员工公开时间线。
+            }
+        }
+        return new TimelineView(run.id(), run.status(), run.lastEventSequence(),
+                new MessageView(answer, repository.listCitationsByMessage(answer.id())), List.copyOf(steps));
     }
 
     public Flux<CustomerServiceRunEvent> stream(String tenantId, String runId, long afterSequence) {
