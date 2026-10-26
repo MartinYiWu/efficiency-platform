@@ -196,6 +196,9 @@ class CustomerServiceRunService:
             **facts,
             "answer_mode": result.rendered.answer.answer_mode.value,
             "answer_markdown": result.rendered.markdown,
+            "citations": [
+                item.model_dump(mode="json") for item in result.rendered.citations
+            ],
             "error_code": None,
             "error_message": None,
         }

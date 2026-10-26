@@ -73,6 +73,32 @@ class CustomerServiceDebugViewTest {
     }
 
     @Test
+    void readsFinalCitationSnapshotsAndKeepsLegacyResponsesCompatible() throws Exception {
+        String response = """
+                {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-1",
+                 "status":"SUCCEEDED","stages":[],"answer_mode":"COMPANY_KNOWLEDGE",
+                 "answer_markdown":"答复[1]","error_code":null,"error_message":null,
+                 "citations":[{"citation_no":1,"knowledge_base_id":"kb","document_id":"doc",
+                   "document_version_id":"version","index_release_id":"index","chunk_id":"chunk",
+                   "document_title":"研发规范","version_no":2,"section_path":"安全","page_no":3,
+                   "quoted_text":"禁止输入敏感信息","content_hash":"hash","parent_id":"parent",
+                   "citation_type":"EXTRACTED_SPANS","original_spans":[{"start_offset":0,
+                   "end_offset":8,"content_hash":"span-hash"}]}]}
+                """;
+        CustomerServiceDebugView parsed = mapper.readValue(response, CustomerServiceDebugView.class);
+        assertEquals("研发规范", parsed.citations().getFirst().documentTitle());
+        assertEquals("version", parsed.citations().getFirst().documentVersionId());
+        assertEquals("EXTRACTED_SPANS", parsed.citations().getFirst().citationType());
+
+        String legacy = """
+                {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-0",
+                 "status":"SUCCEEDED","stages":[],"answer_mode":null,"answer_markdown":null,
+                 "error_code":null,"error_message":null}
+                """;
+        assertNull(mapper.readValue(legacy, CustomerServiceDebugView.class).citations());
+    }
+
+    @Test
     void readsInternalRetrievalFactsFromAgentEvent() throws Exception {
         String event = """
                 {"contract_version":"customer-service-run-event/1","run_id":"run-1","sequence":2,

@@ -53,9 +53,30 @@ describe('debugViewSchema', () => {
       assembly_decisions: [{ parent_id: 'parent-1', selected: true, reason: 'SELECTED' }],
       budget_usage: { context_token_limit: 8000, used_tokens: 4500 },
       sufficiency: null,
+      citations: [
+        {
+          citation_no: 1,
+          knowledge_base_id: 'kb',
+          document_id: 'doc',
+          document_version_id: 'version-1',
+          index_release_id: 'index-1',
+          chunk_id: 'child-1',
+          document_title: '制度',
+          version_no: 2,
+          section_path: '请假',
+          page_no: 1,
+          quoted_text: '完整条款',
+          content_hash: 'hash',
+          parent_id: 'parent-1',
+          citation_type: 'FULL_PARENT',
+          original_spans: [{ start_offset: 0, end_offset: 4, content_hash: 'span-hash' }],
+        },
+      ],
     });
     expect(result.parent_evidence[0].content).toBe('完整条款');
     expect(result.child_hits[0].parent_id).toBe('parent-1');
+    expect(result.citations[0].document_title).toBe('制度');
+    expect(debugViewSchema.parse(baseline).citations).toEqual([]);
   });
 });
 

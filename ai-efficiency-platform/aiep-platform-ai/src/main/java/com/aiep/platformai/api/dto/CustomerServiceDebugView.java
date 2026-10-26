@@ -23,6 +23,7 @@ public record CustomerServiceDebugView(
         @JsonProperty("stages") List<Stage> stages,
         @JsonProperty("answer_mode") String answerMode,
         @JsonProperty("answer_markdown") String answerMarkdown,
+        @JsonProperty("citations") List<CustomerServiceRunEvent.Citation> citations,
         @JsonProperty("error_code") String errorCode,
         @JsonProperty("error_message") String errorMessage,
         @JsonProperty("vector_candidates") List<ChildHit> vectorCandidates,

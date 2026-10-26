@@ -314,6 +314,8 @@ async def test_rag_debug_exposes_child_parent_mapping_and_budget() -> None:
     assert response["parent_evidence"][0]["page_start"] == 1
     assert response["parent_evidence"][0]["page_end"] == 2
     assert response["budget_usage"]["used_tokens"] == 4500
+    assert "citations" in response
+    assert response["citations"] == []
     run = await service.submit(
         CustomerServiceRunRequest(
             contract_version="customer-service-run/1",
