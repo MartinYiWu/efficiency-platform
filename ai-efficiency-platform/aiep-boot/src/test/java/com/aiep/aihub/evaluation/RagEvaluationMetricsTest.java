@@ -117,6 +117,34 @@ class RagEvaluationMetricsTest {
         assertThat(metrics.failures()).contains("CITATION_COUNT_INSUFFICIENT");
     }
 
+    @Test
+    void acceptsExpectedVersionWhenAnswerAlsoCitesAnotherFrozenDocument() throws Exception {
+        EvaluationCase testCase = new EvaluationCase(
+                "case-5", "dataset-1", "TEAM-003", "PR 有哪些要求？", "COMPANY_KNOWLEDGE",
+                List.of("至少指定一名审查者"), List.of(), List.of("研发团队标准规范文档"),
+                List.of("version-team"), 1, List.of(), true);
+        CustomerServiceDebugView view = mapper.readValue("""
+                {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-2",
+                 "status":"SUCCEEDED","stages":[],"answer_mode":"COMPANY_KNOWLEDGE",
+                 "answer_markdown":"至少指定一名审查者",
+                 "citations":[
+                   {"citation_no":1,"knowledge_base_id":"kb","document_id":"team",
+                    "document_version_id":"version-team","index_release_id":"index","chunk_id":"chunk-1",
+                    "document_title":"研发团队标准规范文档","version_no":1,"section_path":"PR","page_no":1,
+                    "quoted_text":"原文","content_hash":"hash-1"},
+                   {"citation_no":2,"knowledge_base_id":"kb","document_id":"ai",
+                    "document_version_id":"version-ai","index_release_id":"index","chunk_id":"chunk-2",
+                    "document_title":"研发内部AI使用规范","version_no":1,"section_path":"协作","page_no":1,
+                    "quoted_text":"原文","content_hash":"hash-2"}],
+                 "error_code":null,"error_message":null}
+                """, CustomerServiceDebugView.class);
+
+        var metrics = RagEvaluationMetrics.evaluate(testCase, view, Set.of("index"));
+
+        assertThat(metrics.versionMatched()).isTrue();
+        assertThat(metrics.passed()).isTrue();
+    }
+
     private CustomerServiceDebugView response(String mode, String answer, String title, String version) throws Exception {
         String json = """
                 {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-1",

@@ -1,5 +1,7 @@
 """对最终父证据集合逐对核验跨文档冲突。"""
 
+import html
+import re
 from itertools import combinations
 from uuid import UUID
 
@@ -15,6 +17,10 @@ from .state import (
 
 class ConflictResponse(StrictModel):
     pairs: tuple[ConflictPair, ...]
+
+
+def _source_text(value: str) -> str:
+    return re.sub(r"\\([\\`*_{}\[\]()#+\-.!<>])", r"\1", html.unescape(value))
 
 
 async def screen_conflicts(
@@ -63,8 +69,8 @@ async def screen_conflicts(
             if (
                 not pair.left_quote.strip()
                 or not pair.right_quote.strip()
-                or pair.left_quote not in left.content
-                or pair.right_quote not in right.content
+                or _source_text(pair.left_quote) not in _source_text(left.content)
+                or _source_text(pair.right_quote) not in _source_text(right.content)
             ):
                 raise EvidenceContractError("CONFLICT_QUOTE_INVALID")
             if not pair.reason.strip():

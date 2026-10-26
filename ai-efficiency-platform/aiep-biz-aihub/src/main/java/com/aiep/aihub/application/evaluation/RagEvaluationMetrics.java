@@ -39,8 +39,7 @@ public final class RagEvaluationMetrics {
                         && item.quotedText() != null && !item.quotedText().isBlank());
         Set<String> versions = citations.stream().map(item -> item.documentVersionId()).collect(Collectors.toSet());
         Boolean versionMatched = testCase.expectedDocumentVersionIds().isEmpty() ? null
-                : versions.containsAll(testCase.expectedDocumentVersionIds())
-                && testCase.expectedDocumentVersionIds().containsAll(versions);
+                : versions.containsAll(testCase.expectedDocumentVersionIds());
         List<String> failures = new ArrayList<>();
         if (!answerModeMatched) failures.add("ANSWER_MODE_MISMATCH");
         if (expectedFactRecall != null && expectedFactRecall < 1) failures.add("EXPECTED_FACT_MISSING");
