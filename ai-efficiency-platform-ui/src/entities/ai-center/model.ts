@@ -12,6 +12,15 @@ import {
   replaySchema,
   runSchema,
 } from './schemas';
+import {
+  evaluationCaseResultSchema,
+  evaluationCaseSchema,
+  evaluationDatasetDetailSchema,
+  evaluationDatasetSchema,
+  evaluationRunComparisonSchema,
+  evaluationRunDetailSchema,
+  evaluationRunSchema,
+} from './evaluationSchemas';
 
 export type AgentDefinition = z.infer<typeof agentDefinitionSchema>;
 export type AgentDetail = z.infer<typeof agentDetailSchema>;
@@ -24,3 +33,10 @@ export type DebugView = z.infer<typeof debugViewSchema>;
 export type AiRun = z.infer<typeof runSchema>;
 export type AiFeedback = z.infer<typeof feedbackSchema>;
 export type RunReplay = z.infer<typeof replaySchema>;
+export type EvaluationDataset = z.infer<typeof evaluationDatasetSchema>;
+export type EvaluationCase = z.infer<typeof evaluationCaseSchema>;
+export type EvaluationRun = z.infer<typeof evaluationRunSchema>;
+export type EvaluationCaseResult = z.infer<typeof evaluationCaseResultSchema>;
+export type EvaluationDatasetDetail = z.infer<typeof evaluationDatasetDetailSchema>;
+export type EvaluationRunDetail = z.infer<typeof evaluationRunDetailSchema>;
+export type EvaluationRunComparison = z.infer<typeof evaluationRunComparisonSchema>;

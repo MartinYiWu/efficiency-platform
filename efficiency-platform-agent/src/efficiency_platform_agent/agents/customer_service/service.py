@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from .graph import CustomerServiceGraph, GraphResult
 from .intent import StructuredStageGateway
-from .release_bundle import CustomerServiceReleaseBundle
+from .release_bundle import CustomerServiceReleaseBundle, KnowledgeBinding
 from .renderer import answer_deltas
 from .retrieval_snapshot_repository import (
     InMemoryRetrievalSnapshotRepository,
@@ -145,16 +145,16 @@ class CustomerServiceRunService:
         if bundle is None:
             raise CustomerServiceNotFoundError("Release 不存在")
         release_id = request.agent_release_id
-        requested_bindings = {
-            (item.knowledge_base_id, item.index_release_id)
-            for item in request.knowledge_bindings
-        }
-        frozen_bindings = {
-            (item.knowledge_base_id, item.index_release_id)
-            for item in bundle.knowledge_bindings
-        }
-        if requested_bindings != frozen_bindings:
-            raise ValueError("CUSTOMER_SERVICE_DEBUG_BINDING_MISMATCH")
+        debug_bindings = tuple(
+            KnowledgeBinding(
+                knowledge_base_id=item.knowledge_base_id,
+                index_release_id=item.index_release_id,
+                priority=ordinal,
+                required=True,
+            )
+            for ordinal, item in enumerate(request.knowledge_bindings, start=1)
+        )
+        bundle = bundle.model_copy(update={"knowledge_bindings": debug_bindings})
         run_request = CustomerServiceRunRequest(
             contract_version="customer-service-run/1",
             request_id=f"debug-{uuid4().hex}",
@@ -196,6 +196,9 @@ class CustomerServiceRunService:
             **facts,
             "answer_mode": result.rendered.answer.answer_mode.value,
             "answer_markdown": result.rendered.markdown,
+            "citations": [
+                item.model_dump(mode="json") for item in result.rendered.citations
+            ],
             "error_code": None,
             "error_message": None,
         }

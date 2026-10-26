@@ -140,6 +140,49 @@ public class KnowledgeDocumentService {
         return versionView(repository.findVersion(submitted.documentVersionId()));
     }
 
+    public KnowledgeViews.DocumentVersionView reindex(String documentId, String changeSummary) {
+        String summary = requireChangeSummary(changeSummary);
+        KnowledgeDocumentPO document = requiredDocument(documentId);
+        if ("ARCHIVED".equals(document.status())) {
+            throw new KnowledgeException("KB_DOCUMENT_ARCHIVED", "归档文档不能重建索引");
+        }
+        if (document.currentPublishedVersionId() == null) {
+            throw new KnowledgeException("KB_DOCUMENT_NOT_PUBLISHED", "文档尚无已发布版本");
+        }
+        KnowledgeDocumentVersionPO source = requiredVersion(document.currentPublishedVersionId());
+        FileObjectView file = files.get(KnowledgeBaseService.TENANT_ID, source.fileId());
+        String batchId = UUID.randomUUID().toString();
+        String itemId = UUID.randomUUID().toString();
+        LocalDateTime now = LocalDateTime.now();
+        repository.insertBatch(new KnowledgeIngestBatchPO(
+                batchId, document.knowledgeBaseId(), "REINDEX", 1, 0, 0,
+                "RUNNING", KnowledgeBaseService.USER_ID, now, null));
+        repository.insertItem(new KnowledgeIngestItemPO(
+                itemId, batchId, file.id(), document.id(), null, "QUEUED", null, null,
+                null, now, now, null));
+        PreparedIngest prepared = transactions.execute(status -> {
+            repository.lockBase(document.knowledgeBaseId());
+            repository.lockDocument(document.id());
+            KnowledgeDocumentVersionPO version = new KnowledgeDocumentVersionPO(
+                    UUID.randomUUID().toString(), document.id(), repository.nextVersionNo(document.id()),
+                    source.fileId(), source.fileSha256(), source.contentType(), summary, source.effectiveDate(),
+                    "PROCESSING", null, null, null, KnowledgeBaseService.USER_ID, now, null,
+                    source.evidenceMode());
+            KnowledgeProcessingTaskPO task = task(version.id(), repository.nextAttemptNo(version.id()), null);
+            KnowledgeIngestItemPO item = new KnowledgeIngestItemPO(
+                    itemId, batchId, file.id(), document.id(), version.id(), "PROCESSING",
+                    null, null, null, now, now, null);
+            repository.insertVersion(version);
+            repository.insertTask(task);
+            repository.updateItem(item);
+            return new PreparedIngest(document, version, task, item, file);
+        });
+        if (prepared == null) throw new IllegalStateException("文档重建索引事务未执行");
+        KnowledgeIngestItemPO submitted = submit(prepared);
+        repository.finishBatch(batchId, 1, 0, "RUNNING");
+        return versionView(repository.findVersion(submitted.documentVersionId()));
+    }
+
     public KnowledgeIngestItemPO retryFailedItem(KnowledgeIngestItemPO failed, String newItemId) {
         if (!"FAILED".equals(failed.status())) {
             throw new KnowledgeException("KB_RETRY_NOT_ALLOWED", "只有失败项可以重试");

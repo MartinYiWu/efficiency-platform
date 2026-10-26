@@ -88,7 +88,10 @@ def parent_child_document(
     parents: list[ParentDraft] = []
     next_chunk_no = 1
     for block in _expand_parent_blocks(
-        _parent_blocks(document.markdown, document.page_markers),
+        _merge_adjacent_parent_paragraphs(
+            _parent_blocks(document.markdown, document.page_markers),
+            parent_max_tokens,
+        ),
         parent_max_tokens,
         document.page_markers,
     ):
@@ -157,6 +160,51 @@ def parent_child_document(
     if not parents:
         raise ValueError("DOCUMENT_HAS_NO_CHUNKS")
     return tuple(parents)
+
+
+def _merge_adjacent_parent_paragraphs(
+    blocks: tuple[_Block, ...], parent_max_tokens: int
+) -> tuple[_Block, ...]:
+    merged: list[_Block] = []
+    for block in blocks:
+        previous = merged[-1] if merged else None
+        if (
+            previous is None
+            or previous.section_path != block.section_path
+            or (
+                previous.page_end is not None
+                and block.page_no is not None
+                and previous.page_end != block.page_no
+            )
+            or _block_kind(previous.text) != "PARAGRAPH"
+            or _block_kind(block.text) != "PARAGRAPH"
+            or count_tokens(previous.text) + count_tokens(block.text)
+            > parent_max_tokens
+        ):
+            merged.append(block)
+            continue
+        separator = "\n\n"
+        local_offset = len(previous.text) + len(separator)
+        offsets = previous.source_offsets or (
+            ((0, previous.source_start),) if previous.source_start is not None else ()
+        )
+        next_offsets = block.source_offsets or (
+            ((0, block.source_start),) if block.source_start is not None else ()
+        )
+        merged[-1] = _Block(
+            previous.text + separator + block.text,
+            previous.section_path,
+            previous.page_no,
+            block.page_end,
+            None,
+            offsets
+            + tuple(
+                (local_offset + offset, source_offset)
+                for offset, source_offset in next_offsets
+                if source_offset is not None
+            ),
+        )
+    return tuple(merged)
 
 
 def _block_kind(text: str) -> BlockKind:

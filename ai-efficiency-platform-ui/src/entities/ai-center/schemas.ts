@@ -232,6 +232,40 @@ export const debugViewSchema = z
     ),
     answer_mode: z.string().nullable(),
     answer_markdown: z.string().nullable(),
+    citations: z
+      .array(
+        z
+          .object({
+            citation_no: z.number().int().positive(),
+            knowledge_base_id: z.string(),
+            document_id: z.string(),
+            document_version_id: z.string(),
+            index_release_id: z.string(),
+            chunk_id: z.string(),
+            document_title: z.string(),
+            version_no: z.number().int().positive(),
+            section_path: z.string().nullable(),
+            page_no: z.number().int().positive().nullable(),
+            quoted_text: z.string(),
+            content_hash: z.string(),
+            parent_id: z.string().nullish(),
+            citation_type: z.enum(['FULL_PARENT', 'EXTRACTED_SPANS']).nullish(),
+            original_spans: z
+              .array(
+                z
+                  .object({
+                    start_offset: z.number().int().nonnegative(),
+                    end_offset: z.number().int().positive(),
+                    content_hash: z.string(),
+                  })
+                  .strict(),
+              )
+              .nullish(),
+          })
+          .strict(),
+      )
+      .nullish()
+      .transform((items) => items ?? []),
     error_code: z.string().nullable(),
     error_message: z.string().nullable(),
     vector_candidates: z

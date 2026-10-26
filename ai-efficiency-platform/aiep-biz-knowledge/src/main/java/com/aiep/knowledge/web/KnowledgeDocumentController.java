@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -65,6 +66,13 @@ public class KnowledgeDocumentController {
         return ApiResponse.success(documents.uploadVersion(id, file, request.changeSummary(), request.effectiveDate(), request.evidenceMode()));
     }
 
+    @PostMapping("/documents/{id}/reindex")
+    public ApiResponse<KnowledgeViews.DocumentVersionView> reindex(
+            @PathVariable String id,
+            @RequestBody ReindexRequest request) {
+        return ApiResponse.success(documents.reindex(id, request.changeSummary()));
+    }
+
     @GetMapping("/processing-tasks/{id}")
     public ApiResponse<KnowledgeViews.ProcessingTaskView> getTask(@PathVariable String id) {
         return ApiResponse.success(documents.getTask(id));
@@ -80,4 +88,6 @@ public class KnowledgeDocumentController {
             @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate effectiveDate,
             /** 可空时使用 FULL_ONLY；制度和流程不允许原文节选模式。 */
             String evidenceMode) { }
+
+    public record ReindexRequest(String changeSummary) { }
 }
