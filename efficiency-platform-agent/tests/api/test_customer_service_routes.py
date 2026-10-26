@@ -159,17 +159,25 @@ async def test_background_failure_writes_safe_diagnostic_log(caplog) -> None:
 async def test_rag_debug_uses_requested_tenant_for_retrieval() -> None:
     knowledge_base_id = UUID("80000000-0000-0000-0000-000000000003")
     index_release_id = UUID("80000000-0000-0000-0000-000000000004")
+    requested_knowledge_base_id = UUID("80000000-0000-0000-0000-000000000013")
+    requested_index_release_id = UUID("80000000-0000-0000-0000-000000000014")
 
     class DebugGraph(Graph):
         request = None
+        bundle = None
 
         async def run(self, request, bundle, gateway):
             self.request = request
+            self.bundle = bundle
             return await super().run(request, bundle, gateway)
+
+    class DebugBundle(SimpleNamespace):
+        def model_copy(self, *, update):
+            return DebugBundle(**(vars(self) | update))
 
     class DebugReleases:
         async def get(self, release_id):
-            return SimpleNamespace(
+            return DebugBundle(
                 knowledge_bindings=(
                     SimpleNamespace(
                         knowledge_base_id=knowledge_base_id,
@@ -193,8 +201,8 @@ async def test_rag_debug_uses_requested_tenant_for_retrieval() -> None:
             rag_policy_version_id=RELEASE_ID,
             knowledge_bindings=(
                 DebugKnowledgeBinding(
-                    knowledge_base_id=knowledge_base_id,
-                    index_release_id=index_release_id,
+                    knowledge_base_id=requested_knowledge_base_id,
+                    index_release_id=requested_index_release_id,
                 ),
             ),
         )
@@ -202,6 +210,8 @@ async def test_rag_debug_uses_requested_tenant_for_retrieval() -> None:
 
     assert graph.request is not None
     assert graph.request.tenant_id == "dev"
+    assert graph.bundle.knowledge_bindings[0].knowledge_base_id == requested_knowledge_base_id
+    assert graph.bundle.knowledge_bindings[0].index_release_id == requested_index_release_id
 
 
 async def test_rag_debug_exposes_child_parent_mapping_and_budget() -> None:
@@ -274,9 +284,13 @@ async def test_rag_debug_exposes_child_parent_mapping_and_budget() -> None:
                 baseline.rendered, (("retrieval", "证据已组装"),), (selected,), trace
             )
 
+    class DebugBundle(SimpleNamespace):
+        def model_copy(self, *, update):
+            return DebugBundle(**(vars(self) | update))
+
     class DebugReleases:
         async def get(self, release_id):
-            return SimpleNamespace(
+            return DebugBundle(
                 knowledge_bindings=(
                     SimpleNamespace(
                         knowledge_base_id=child.knowledge_base_id,
