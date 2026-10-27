@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -309,6 +310,20 @@ class CompanySection(StrictModel):
 class GeneralAdvice(StrictModel):
     title: Literal["通用建议，非公司制度"] = "通用建议，非公司制度"
     paragraphs: tuple[str, ...] = Field(min_length=1)
+    clarification_question: None = Field(default=None, exclude=True)
+    insufficiency_reason: None = Field(default=None, exclude=True)
+
+    @model_validator(mode="after")
+    def log_explicit_null_metadata(self) -> GeneralAdvice:
+        fields = sorted(
+            self.model_fields_set & {"clarification_question", "insufficiency_reason"}
+        )
+        if fields:
+            logging.getLogger("efficiency_platform_agent.execution").info(
+                "event=customer_service_general_null_metadata_accepted fields=%s",
+                fields,
+            )
+        return self
 
 
 class CustomerServiceAnswer(StrictModel):
