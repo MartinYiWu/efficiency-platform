@@ -37,6 +37,12 @@ class EquivalenceDecision(StrictModel):
     merged_chunk_ids: tuple[UUID, ...] = ()
 
 
+def _parent_id(child: Evidence) -> UUID:
+    if child.parent_id is None:
+        raise EvidenceContractError("PARENT_EVIDENCE_MISMATCH")
+    return child.parent_id
+
+
 def validate_parents(
     children: tuple[Evidence, ...], parents: tuple[ParentEvidence, ...]
 ) -> None:
@@ -44,7 +50,7 @@ def validate_parents(
     for child in children:
         if sha256(child.content.encode()).hexdigest() != child.content_hash:
             raise EvidenceContractError("CHILD_CONTENT_HASH_INVALID")
-        parent = by_id.get(child.parent_id)
+        parent = by_id.get(child.parent_id) if child.parent_id is not None else None
         if parent is None or any(
             getattr(child, field) != getattr(parent, field)
             for field in (
@@ -84,6 +90,8 @@ async def verify_equivalence(
     stage_bound: bool,
 ) -> tuple[tuple[Evidence, ...], tuple[EquivalenceDecision, ...]]:
     by_id = {p.parent_id: p for p in parents}
+    for child in children:
+        _parent_id(child)
     pairs: dict[frozenset[UUID], tuple[float, Evidence, Evidence]] = {}
     for left, right in combinations(children, 2):
         if left.parent_id == right.parent_id or any(
@@ -107,7 +115,7 @@ async def verify_equivalence(
                 "STORED_CHUNK_VECTOR_INVALID", "已存子片段向量无效"
             )
         similarity = sum(x * y for x, y in zip(a, b, strict=True)) / norm
-        key = frozenset((left.parent_id, right.parent_id))
+        key = frozenset((_parent_id(left), _parent_id(right)))
         if similarity >= threshold and (key not in pairs or similarity > pairs[key][0]):
             pairs[key] = (similarity, left, right)
     decisions = []
@@ -116,13 +124,13 @@ async def verify_equivalence(
         pairs.values(), key=lambda p: (-p[0], str(p[1].chunk_id), str(p[2].chunk_id))
     )[:pair_limit]
 
-    async def check_pair(left: Evidence, right: Evidence):
+    async def check_pair(left: Evidence, right: Evidence) -> EquivalenceResult:
         return await gateway.complete(
             "equivalence",
             {
                 "question": question,
-                "left": _input(left, by_id[left.parent_id]),
-                "right": _input(right, by_id[right.parent_id]),
+                "left": _input(left, by_id[_parent_id(left)]),
+                "right": _input(right, by_id[_parent_id(right)]),
             },
             EquivalenceResult,
         )
@@ -133,13 +141,14 @@ async def verify_equivalence(
             return_exceptions=True,
         )
         if stage_bound
-        else (None,) * len(selected_pairs)
+        else []
     )
-    for (similarity, left, right), outcome in zip(selected_pairs, results, strict=True):
-        result = None
+    for index, (similarity, left, right) in enumerate(selected_pairs):
+        result: EquivalenceResult | None = None
         reason = "PROMPT_STAGE_NOT_BOUND"
         if stage_bound:
             try:
+                outcome = results[index]
                 if isinstance(outcome, BaseException):
                     raise outcome
                 result = outcome
@@ -152,8 +161,8 @@ async def verify_equivalence(
                     not result.left_quote.strip()
                     or not result.right_quote.strip()
                     or (
-                        result.left_quote not in by_id[left.parent_id].content
-                        or result.right_quote not in by_id[right.parent_id].content
+                        result.left_quote not in by_id[_parent_id(left)].content
+                        or result.right_quote not in by_id[_parent_id(right)].content
                     )
                 ):
                     reason = "EQUIVALENCE_QUOTE_INVALID"
@@ -161,7 +170,7 @@ async def verify_equivalence(
                     reason = "DIFFERING_CONDITIONS"
                 elif result.verdict == "EQUIVALENT":
                     reason = "VERIFIED_EQUIVALENT"
-                    accepted.add(frozenset((left.parent_id, right.parent_id)))
+                    accepted.add(frozenset((_parent_id(left), _parent_id(right))))
                 else:
                     reason = result.verdict
             except StructuredModelError as error:
@@ -175,8 +184,8 @@ async def verify_equivalence(
             EquivalenceDecision(
                 left=left,
                 right=right,
-                left_parent=by_id[left.parent_id],
-                right_parent=by_id[right.parent_id],
+                left_parent=by_id[_parent_id(left)],
+                right_parent=by_id[_parent_id(right)],
                 similarity=similarity,
                 reason=reason,
                 result=result,
@@ -185,7 +194,7 @@ async def verify_equivalence(
     # 完全连接分组：不能通过 A=B、B=C 推断未经核验的 A=C。
     groups: list[list[UUID]] = []
     parent_order = tuple(
-        dict.fromkeys(c.parent_id for c in sorted(children, key=lambda c: -c.score))
+        dict.fromkeys(_parent_id(c) for c in sorted(children, key=lambda c: -c.score))
     )
     removed: dict[UUID, UUID] = {}
     for parent_id in parent_order:
@@ -202,12 +211,13 @@ async def verify_equivalence(
             c.chunk_id
             for c in children
             if c.parent_id in (decision.left.parent_id, decision.right.parent_id)
-            and c.parent_id in removed
-            and removed[c.parent_id]
+            and _parent_id(c) in removed
+            and removed[_parent_id(c)]
             in (decision.left.parent_id, decision.right.parent_id)
         )
         retained = next(
-            (removed[c.parent_id] for c in children if c.chunk_id in merged), None
+            (removed[_parent_id(c)] for c in children if c.chunk_id in merged),
+            None,
         )
         facts.append(
             decision.model_copy(

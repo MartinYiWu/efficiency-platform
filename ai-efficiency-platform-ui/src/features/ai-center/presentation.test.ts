@@ -13,3 +13,7 @@ it('renders agent and answer mode names in Chinese', () => {
   expect(answerModeLabel('COMPANY_KNOWLEDGE')).toBe('公司知识');
   expect(answerModeLabel('INSUFFICIENT_EVIDENCE')).toBe('证据不足');
 });
+
+it('labels the formal CLARIFY answer mode in AI management', () => {
+  expect(answerModeLabel('CLARIFY')).toBe('需要补充信息');
+});

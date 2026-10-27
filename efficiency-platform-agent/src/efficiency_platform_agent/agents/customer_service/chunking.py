@@ -336,12 +336,13 @@ def _parent_blocks(
     for line in markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
         if fence is not None or fence_match:
-            if fence is None:
+            if fence is None and fence_match is not None:
                 flush()
                 pending_start = position
                 fence = fence_match.group(1)
             elif (
-                fence_match
+                fence is not None
+                and fence_match
                 and fence_match.group(1)[0] == fence[0]
                 and len(fence_match.group(1)) >= len(fence)
             ):

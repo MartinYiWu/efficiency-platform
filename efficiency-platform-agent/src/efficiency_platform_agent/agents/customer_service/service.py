@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 from .graph import CustomerServiceGraph, GraphResult
@@ -249,8 +249,10 @@ class CustomerServiceRunService:
                         for chunk_id in assembly.hit_chunk_ids[item.parent_id]
                     ],
                 }
-                for item in (assembly.selected_parents if assembly else ())
-            ],
+                for item in assembly.selected_parents
+            ]
+            if assembly is not None
+            else [],
             "budget_usage": (
                 {
                     "context_token_limit": assembly.context_token_limit,
@@ -389,7 +391,9 @@ class CustomerServiceRunService:
             RunEventPayload(delta=block, answer_mode=mode),
         )
 
-    def _stream_stage(self, run: _Run, stage: str, phase: str) -> None:
+    def _stream_stage(
+        self, run: _Run, stage: str, phase: Literal["STARTED", "COMPLETED"]
+    ) -> None:
         summaries = {
             ("intent", "COMPLETED"): "已理解问题",
             ("retrieval", "STARTED"): "正在查找公司资料",

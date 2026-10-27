@@ -43,6 +43,88 @@ def _answer_thinking_option(stage_key: str) -> tuple[tuple[str, JsonValue], ...]
     return ()
 
 
+def prompt_input_tokens(
+    bundle: CustomerServiceReleaseBundle,
+    stage_key: str,
+    input_value: object,
+    output_type: type[BaseModel],
+) -> int:
+    return sum(
+        count_tokens(content) + 8
+        for _, content in _request_text_messages(
+            bundle, stage_key, input_value, output_type
+        )
+    )
+
+
+def _request_text_messages(
+    bundle: CustomerServiceReleaseBundle,
+    stage_key: str,
+    input_value: object,
+    output_type: type[BaseModel],
+) -> tuple[tuple[str, str], ...]:
+    input_json = json.dumps(input_value, ensure_ascii=False, separators=(",", ":"))
+    messages = tuple(
+        _render_message(message, input_json)
+        for message in stage_prompt_messages(bundle, stage_key)
+    )
+    return messages + (
+        (
+            "developer",
+            "[OUTPUT CONTRACT]\n只返回一个符合下列 JSON Schema 的 JSON 对象，不要输出 Markdown、解释或代码围栏。\nJSON Schema:\n"
+            + json.dumps(
+                output_type.model_json_schema(),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        ),
+    )
+
+
+def stage_prompt_messages(
+    bundle: CustomerServiceReleaseBundle, stage_key: str
+) -> tuple[PromptMessage, ...]:
+    shared = {"safety", "identity"}
+    if stage_key in {
+        "answer_company",
+        "answer_mixed",
+        "citation_review",
+        "answer_repair",
+        "output_guard",
+    }:
+        shared.add("citation")
+    if stage_key in {"answer_general", "answer_mixed", "output_guard"}:
+        shared.add("general_advice")
+    selected = shared | {stage_key}
+    bindings = sorted(
+        (item for item in bundle.prompt_bindings if item.stage_key in selected),
+        key=lambda item: (
+            item.stage_key not in {"safety", "identity"},
+            item.stage_key,
+            item.ordinal,
+        ),
+    )
+    messages = tuple(message for item in bindings for message in item.messages)
+    if not any(item.stage_key == stage_key for item in bindings):
+        raise StructuredModelError(
+            "PROMPT_STAGE_NOT_BOUND", f"Prompt 阶段未绑定: {stage_key}"
+        )
+    return messages
+
+
+def _render_message(message: PromptMessage, input_json: str) -> tuple[str, str]:
+    content = message.content_template
+    if "{{input_json}}" in content:
+        if message.role != "USER":
+            raise StructuredModelError(
+                "PROMPT_TRUST_BOUNDARY_INVALID", "不可信输入只能进入 USER 消息"
+            )
+        content = content.replace("{{input_json}}", input_json)
+    role = message.role.lower()
+    return role, content
+
+
 class ReleaseStructuredModelGateway:
     """Prompt 正文来自 Release；运行时代码只注入不可信 JSON 数据。"""
 
@@ -66,30 +148,16 @@ class ReleaseStructuredModelGateway:
     def input_tokens(
         self, stage_key: str, input_value: object, output_type: type[BaseModel]
     ) -> int:
-        return sum(
-            count_tokens(message.content) + 8
-            for message in self._request_messages(stage_key, input_value, output_type)
-        )
+        return prompt_input_tokens(self.bundle, stage_key, input_value, output_type)
 
     def _request_messages(
         self, stage_key: str, input_value: object, output_type: type[BaseModel]
     ) -> tuple[ProviderMessage, ...]:
-        input_json = json.dumps(input_value, ensure_ascii=False, separators=(",", ":"))
-        messages = tuple(
-            self._render_message(message, input_json)
-            for message in self._stage_messages(stage_key)
-        )
-        return messages + (
-            ProviderMessage(
-                role="developer",
-                content="[OUTPUT CONTRACT]\n只返回一个符合下列 JSON Schema 的 JSON 对象，不要输出 Markdown、解释或代码围栏。\nJSON Schema:\n"
-                + json.dumps(
-                    output_type.model_json_schema(),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            ),
+        return tuple(
+            ProviderMessage(role=role, content=content)
+            for role, content in _request_text_messages(
+                self.bundle, stage_key, input_value, output_type
+            )
         )
 
     async def complete(
@@ -247,50 +315,6 @@ class ReleaseStructuredModelGateway:
         )
         return value
 
-    def _stage_messages(self, stage_key: str) -> tuple[PromptMessage, ...]:
-        shared = {"safety", "identity"}
-        if stage_key in {
-            "answer_company",
-            "answer_mixed",
-            "citation_review",
-            "answer_repair",
-            "output_guard",
-        }:
-            shared.add("citation")
-        if stage_key in {"answer_general", "answer_mixed", "output_guard"}:
-            shared.add("general_advice")
-        selected = shared | {stage_key}
-        bindings = sorted(
-            (
-                item
-                for item in self.bundle.prompt_bindings
-                if item.stage_key in selected
-            ),
-            key=lambda item: (
-                item.stage_key not in {"safety", "identity"},
-                item.stage_key,
-                item.ordinal,
-            ),
-        )
-        messages = tuple(message for item in bindings for message in item.messages)
-        if not any(item.stage_key == stage_key for item in bindings):
-            raise StructuredModelError(
-                "PROMPT_STAGE_NOT_BOUND", f"Prompt 阶段未绑定: {stage_key}"
-            )
-        return messages
-
-    @staticmethod
-    def _render_message(message: PromptMessage, input_json: str) -> ProviderMessage:
-        content = message.content_template
-        if "{{input_json}}" in content:
-            if message.role != "USER":
-                raise StructuredModelError(
-                    "PROMPT_TRUST_BOUNDARY_INVALID", "不可信输入只能进入 USER 消息"
-                )
-            content = content.replace("{{input_json}}", input_json)
-        role = message.role.lower()
-        return ProviderMessage(role=role, content=content)
-
 
 class StructuredModelError(RuntimeError):
     def __init__(self, code: str, safe_message: str) -> None:
@@ -299,4 +323,9 @@ class StructuredModelError(RuntimeError):
         super().__init__(safe_message)
 
 
-__all__ = ["ReleaseStructuredModelGateway", "StructuredModelError"]
+__all__ = [
+    "ReleaseStructuredModelGateway",
+    "StructuredModelError",
+    "prompt_input_tokens",
+    "stage_prompt_messages",
+]

@@ -101,7 +101,7 @@ def bundle(limit=6000, large=None, padding=""):
         )
         if large
         else None,
-        rag_policy=SimpleNamespace(context_token_limit=50000),
+        rag_policy=SimpleNamespace(context_token_limit=50000, rewrite_query_limit=2),
         prompt_bindings=bindings,
     )
 
@@ -493,6 +493,35 @@ async def test_real_gateway_refuses_oversize_without_provider_or_truncation():
         await gateway.complete(
             "evidence_extract", {"original": "原" * 10000}, ExtractionSelection
         )
+
+
+def test_pure_prompt_budget_matches_messages_sent_to_provider():
+    from efficiency_platform_agent.agents.customer_service import model_gateway
+    from efficiency_platform_agent.agents.customer_service.state import (
+        SufficiencyDecision,
+    )
+
+    counter = getattr(model_gateway, "prompt_input_tokens", None)
+    assert callable(counter), "预算计数必须能在没有 Provider 时使用"
+
+    class Provider:
+        async def complete(self, request):
+            pytest.fail("仅渲染和计数不得调用 Provider")
+
+    config = bundle()
+    value = {"question": "年假申请", "evidence": ["完整条款。"]}
+    gateway = model_gateway.ReleaseStructuredModelGateway(Provider(), config)
+    messages = gateway._request_messages("sufficiency", value, SufficiencyDecision)
+    expected = sum(count_tokens(message.content) + 8 for message in messages)
+    assert counter(config, "sufficiency", value, SufficiencyDecision) == expected
+    assert gateway.input_tokens("sufficiency", value, SufficiencyDecision) == expected
+
+
+async def test_pack_rejects_child_without_parent_identity():
+    source = assembly()
+    child = source.selected[0].model_copy(update={"parent_id": None})
+    with pytest.raises(ValueError, match="PARENT_EVIDENCE_MISSING"):
+        await build(source, children=(child,))
 
 
 async def test_actual_intent_payload_is_included_in_answer_budget():

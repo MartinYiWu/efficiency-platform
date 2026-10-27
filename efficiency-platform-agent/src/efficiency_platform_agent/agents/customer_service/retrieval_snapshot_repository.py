@@ -82,6 +82,7 @@ def evidence_processing_facts(trace: RetrievalTrace | None) -> dict[str, Any]:
     assembly = trace.assembly if trace else None
     selected = {p.parent_id for p in assembly.selected} if assembly else set()
     reasons = assembly.exclusion_reasons if assembly else {}
+    duplicate_parent_ids = assembly.duplicate_parent_ids if assembly else ()
     if trace and trace.evidence_pack is not None:
         selected = {p.parent_id for p in trace.evidence_pack.entries}
         reasons = {e.parent_id: e.reason for e in trace.evidence_pack.exclusions}
@@ -112,7 +113,7 @@ def evidence_processing_facts(trace: RetrievalTrace | None) -> dict[str, Any]:
                 if pid in selected
                 else (
                     "DUPLICATE_PARENT_CONTENT"
-                    if pid in assembly.duplicate_parent_ids
+                    if pid in duplicate_parent_ids
                     else reasons.get(pid, "CONTEXT_BUDGET_EXCEEDED")
                 ),
             }

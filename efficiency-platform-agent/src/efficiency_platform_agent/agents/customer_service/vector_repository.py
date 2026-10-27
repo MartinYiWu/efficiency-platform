@@ -164,16 +164,19 @@ class DocumentChunkRepository:
                         ),
                     )
                 )
-                parameters = tuple(
-                    row
-                    + (
-                        parent_ids[chunk.parent_no],
-                        chunk.child_no,
-                        chunk.start_offset,
-                        chunk.end_offset,
+                parent_parameters = []
+                for row, chunk in zip(parameters, chunks, strict=True):
+                    if chunk.parent_no is None:
+                        raise ValueError("PARENT_CHILD_RELATION_INVALID")
+                    parent_parameters.append(
+                        row
+                        + (
+                            parent_ids[chunk.parent_no],
+                            chunk.child_no,
+                            chunk.start_offset,
+                            chunk.end_offset,
+                        )
                     )
-                    for row, chunk in zip(parameters, chunks, strict=True)
-                )
             await _await(
                 self.connection.executemany(
                     "INSERT INTO customer_service.document_chunk "
@@ -190,7 +193,7 @@ class DocumentChunkRepository:
                     + ") VALUES ("
                     + ", ".join("%s" for _ in range(20 if parents else 16))
                     + ")",
-                    parameters,
+                    tuple(parent_parameters) if parents else parameters,
                 )
             )
 
@@ -294,7 +297,8 @@ class DocumentChunkRepository:
             )
         )
         return tuple(
-            tuple(UUID(str(value)) for value in row) for row in await _rows(result)
+            (UUID(str(kb)), UUID(str(document)), UUID(str(version)), UUID(str(release)))
+            for kb, document, version, release in await _rows(result)
         )
 
     async def get_chunk_vectors(
@@ -321,10 +325,13 @@ class DocumentChunkRepository:
                 ),
             )
         )
-        return {
-            UUID(str(row[0])): tuple(float(value) for value in Vector._from_db(row[1]))
-            for row in await _rows(result)
-        }
+        vectors = {}
+        for row in await _rows(result):
+            vector = Vector._from_db(row[1])
+            if vector is None:
+                raise ValueError("STORED_CHUNK_VECTOR_INVALID")
+            vectors[UUID(str(row[0]))] = tuple(float(value) for value in vector)
+        return vectors
 
     async def vector_search(
         self,

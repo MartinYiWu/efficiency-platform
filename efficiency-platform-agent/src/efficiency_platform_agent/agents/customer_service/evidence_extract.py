@@ -15,7 +15,7 @@ class SourceSentence(StrictModel):
 
 
 def split_sentences(text: str) -> tuple[SourceSentence, ...]:
-    sentences = []
+    sentences: list[SourceSentence] = []
     # 无法可靠区分英文缩写、句点或残句时，整段拒绝抽取。
     for paragraph in re.finditer(r"[^\r\n]+", text):
         offset = paragraph.start()

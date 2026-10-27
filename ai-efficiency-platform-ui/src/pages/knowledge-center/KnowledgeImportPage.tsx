@@ -1,4 +1,4 @@
-import { Button, Empty, Typography, message } from 'antd';
+import { Alert, Button, Empty, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
@@ -44,10 +44,22 @@ export function KnowledgeImportPage() {
           <Typography.Title level={2}>批量导入</Typography.Title>
           <Typography.Text type="secondary">{base.name}</Typography.Text>
         </div>
-        <Button type="primary" onClick={() => setOpen(true)}>
+        <Button type="primary" disabled={base.status !== 'ACTIVE'} onClick={() => setOpen(true)}>
           选择文件并导入
         </Button>
       </header>
+      {base.status !== 'ACTIVE' && (
+        <Alert
+          type="warning"
+          showIcon
+          title="知识库未启用，请返回知识库启用后再批量导入。"
+          action={
+            <Button onClick={() => navigate(`/knowledge-center/knowledge-bases/${baseId}`)}>
+              返回知识库启用
+            </Button>
+          }
+        />
+      )}
       <section className={styles.section} aria-labelledby="import-files">
         <div className={styles.sectionHeading}>
           <Typography.Title level={3} id="import-files">

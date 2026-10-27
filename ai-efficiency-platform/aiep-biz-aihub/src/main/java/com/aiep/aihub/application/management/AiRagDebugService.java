@@ -29,15 +29,15 @@ public class AiRagDebugService {
         var rag = repository.findRagPolicy(request.ragPolicyVersionId());
         if (agent == null || version == null || !agent.id().equals(version.agentDefinitionId())
                 || rag == null || !agent.id().equals(rag.ownerAgentDefinitionId()))
-            throw new IllegalArgumentException("AI_ASSET_OWNER_MISMATCH");
+            throw new AiManagementException("AI_ASSET_OWNER_MISMATCH", "调试 Agent、版本或 RAG 策略不存在或归属不匹配");
         AiReleasePO release = repository.findActiveRelease(agent.id(), "dev");
         var policyBinding = repository.findPolicyBinding(version.id());
         if (release == null || !release.agentVersionId().equals(version.id())
                 || policyBinding == null || !request.ragPolicyVersionId().equals(policyBinding.ragPolicyId()))
-            throw new IllegalArgumentException("AI_RAG_DEBUG_ACTIVE_RELEASE_MISMATCH");
+            throw new AiManagementException("AI_RAG_DEBUG_ACTIVE_RELEASE_MISMATCH", "调试 Agent 版本或 RAG 策略与当前生效发布不匹配");
         if (request.knowledgeBindings() == null || request.knowledgeBindings().isEmpty()
                 || request.knowledgeBindings().stream().anyMatch(item -> !repository.isIndexReleaseReady(item.indexReleaseId())))
-            throw new IllegalArgumentException("AI_RAG_DEBUG_INDEX_NOT_READY");
+            throw new AiManagementException("AI_RAG_DEBUG_INDEX_NOT_READY", "调试知识索引未就绪，请选择已发布且可用的索引");
         CustomerServiceDebugRequest agentRequest = new CustomerServiceDebugRequest(
                 "customer-service-rag-debug/1", request.agentKey(), "dev", request.question(), release.id(), request.agentVersionId(),
                 request.ragPolicyVersionId(), request.knowledgeBindings().stream()
@@ -52,7 +52,7 @@ public class AiRagDebugService {
 
     public CustomerServiceDebugView get(String id) {
         String value = jdbc.query("SELECT response_json FROM ai_rag_debug_run WHERE id=?", rs -> rs.next() ? rs.getString(1) : null, id);
-        if (value == null) throw new IllegalArgumentException("AI_RAG_DEBUG_RUN_NOT_FOUND");
+        if (value == null) throw new AiManagementException("AI_RAG_DEBUG_RUN_NOT_FOUND", "RAG 调试记录不存在");
         try { return objectMapper.readValue(value, CustomerServiceDebugView.class); }
         catch (JsonProcessingException error) { throw new IllegalStateException("AI_RAG_DEBUG_RESULT_INVALID", error); }
     }

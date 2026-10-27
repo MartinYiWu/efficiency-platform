@@ -8,7 +8,7 @@ const labels: Record<AnswerMode, { title: string; color: string }> = {
   COMPANY_KNOWLEDGE: { title: '依据公司知识', color: 'blue' },
   MIXED: { title: '公司知识 + 通用建议', color: 'purple' },
   GENERAL_ADVICE: { title: '通用建议（非公司制度）', color: 'orange' },
-  CLARIFICATION: { title: '需要补充信息', color: 'gold' },
+  CLARIFY: { title: '需要补充信息', color: 'gold' },
   INSUFFICIENT_EVIDENCE: { title: '现有资料不足', color: 'default' },
 };
 export function CustomerServiceAnswer({

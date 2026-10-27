@@ -1,3 +1,4 @@
+import type { KnowledgeBase } from '../../entities/knowledge/model';
 import {
   directorySchema,
   documentSchema,
@@ -45,6 +46,15 @@ export const getKnowledgeBase = (id: string) =>
 export const createKnowledgeBase = (value: object) =>
   call('/api/knowledge/bases', knowledgeBaseSchema, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  });
+export const updateKnowledgeBase = (
+  id: string,
+  value: Pick<KnowledgeBase, 'name' | 'description' | 'knowledgeType' | 'status'>,
+) =>
+  call(`/api/knowledge/bases/${id}`, knowledgeBaseSchema, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(value),
   });

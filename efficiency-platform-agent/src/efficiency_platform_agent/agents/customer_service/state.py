@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -75,6 +75,17 @@ class IntentDecision(StrictModel):
     requires_general_advice: bool
     missing_field: str | None = None
     normalized_question: str = Field(min_length=1)
+    retrieval_queries: tuple[Annotated[str, Field(min_length=1, pattern=r"\S")], ...] = (
+        Field(
+            default=(),
+            max_length=10,
+            description=(
+                "从当前问题与历史解析出的独立检索问句，用于检索公司知识；"
+                "须补全多轮指代且遵守 rewrite_query_limit，不是事实或答案。"
+                "无需检索时为空，旧版意图输出可省略。"
+            ),
+        )
+    )
 
     @model_validator(mode="after")
     def validate_ambiguity(self) -> IntentDecision:

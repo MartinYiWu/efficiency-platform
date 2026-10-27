@@ -4,7 +4,7 @@ export const answerModeSchema = z.enum([
   'COMPANY_KNOWLEDGE',
   'MIXED',
   'GENERAL_ADVICE',
-  'CLARIFICATION',
+  'CLARIFY',
   'INSUFFICIENT_EVIDENCE',
 ]);
 export const conversationSchema = z

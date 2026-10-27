@@ -107,14 +107,18 @@ class CustomerServiceRetrieval:
         question: str,
         gateway: StructuredStageGateway,
         bundle: CustomerServiceReleaseBundle,
+        planned_queries: tuple[str, ...] | None = None,
     ) -> RetrievalTrace:
         policy = bundle.rag_policy
-        rewrite = await gateway.complete(
-            "rewrite",
-            {"question": question, "rewrite_query_limit": policy.rewrite_query_limit},
-            QueryRewrite,
-        )
-        queries = rewrite.queries[: policy.rewrite_query_limit]
+        if planned_queries:
+            queries = planned_queries[: policy.rewrite_query_limit]
+        else:
+            rewrite = await gateway.complete(
+                "rewrite",
+                {"question": question, "rewrite_query_limit": policy.rewrite_query_limit},
+                QueryRewrite,
+            )
+            queries = rewrite.queries[: policy.rewrite_query_limit]
         vectors = await self.embedding.embed(queries)
         release_ids = tuple(item.index_release_id for item in bundle.knowledge_bindings)
         enhanced = (
@@ -130,14 +134,13 @@ class CustomerServiceRetrieval:
                 (b.knowledge_base_id, b.index_release_id)
                 for b in bundle.knowledge_bindings
             }
-            versions = {}
+            versions: dict[UUID, UUID] = {}
             for kb, document, version, release in members:
                 if (kb, release) not in bindings:
                     raise EvidenceContractError("INDEX_BINDING_MISMATCH")
-                key = document
-                if key in versions and versions[key] != version:
+                if document in versions and versions[document] != version:
                     raise EvidenceContractError("INDEX_DOCUMENT_VERSION_CONFLICT")
-                versions[key] = version
+                versions[document] = version
         exclusions: list[Evidence] = []
         rankings: list[tuple[Evidence, ...]] = []
         vector_candidates: list[Evidence] = []
@@ -259,8 +262,8 @@ class CustomerServiceRetrieval:
             for rank, (index, score) in enumerate(reranked, 1)
         )
         assembly = None
-        decisions = ()
-        equivalence_errors = ()
+        decisions: tuple[EquivalenceDecision, ...] = ()
+        equivalence_errors: tuple[str, ...] = ()
         conflict_result = None
         selected_evidence = evidence
         parent_ids = tuple(dict.fromkeys(item.parent_id for item in evidence))
@@ -268,12 +271,12 @@ class CustomerServiceRetrieval:
             parents = await self.repository.get_parents(
                 tenant_id=tenant_id,
                 index_release_ids=release_ids,
-                parent_ids=parent_ids,
+                parent_ids=tuple(item for item in parent_ids if item is not None),
             )
             if enhanced:
                 validate_parents(evidence, parents)
                 try:
-                    vectors = await self.repository.get_chunk_vectors(
+                    stored_vectors = await self.repository.get_chunk_vectors(
                         tenant_id=tenant_id,
                         index_release_ids=release_ids,
                         chunk_ids=tuple(item.chunk_id for item in evidence),
@@ -281,7 +284,7 @@ class CustomerServiceRetrieval:
                     selected_evidence, decisions = await verify_equivalence(
                         evidence,
                         parents,
-                        vectors,
+                        stored_vectors,
                         question=question,
                         threshold=float(policy.similarity_candidate_threshold),
                         pair_limit=policy.similarity_pair_limit,

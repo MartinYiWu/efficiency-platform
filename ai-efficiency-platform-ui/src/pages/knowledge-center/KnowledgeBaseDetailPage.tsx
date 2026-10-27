@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Descriptions,
   Empty,
@@ -33,6 +34,7 @@ import {
   listDocuments,
   listIndexReleases,
   rollbackIndexRelease,
+  updateKnowledgeBase,
 } from '../../features/knowledge/api';
 import styles from './KnowledgeCenter.module.css';
 
@@ -49,6 +51,7 @@ export function KnowledgeBaseDetailPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchId, setBatchId] = useState<string>();
+  const [isActivating, setIsActivating] = useState(false);
   const loadSequence = useRef(0);
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -67,6 +70,7 @@ export function KnowledgeBaseDetailPage() {
       setDocuments(nextDocuments.items);
       setTotal(nextDocuments.total);
       setReleases(nextReleases);
+      return true;
     } catch (error) {
       if (sequence === loadSequence.current) {
         message.error(error instanceof Error ? error.message : '加载失败');
@@ -105,6 +109,23 @@ export function KnowledgeBaseDetailPage() {
     });
   };
   if (!base) return <Empty description="正在加载知识库" />;
+  const isActive = base.status === 'ACTIVE';
+  const activateBase = async () => {
+    setIsActivating(true);
+    try {
+      await updateKnowledgeBase(baseId, {
+        name: base.name,
+        description: base.description,
+        knowledgeType: base.knowledgeType,
+        status: 'ACTIVE',
+      });
+      if (await load()) message.success('知识库已启用');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '启用知识库失败');
+    } finally {
+      setIsActivating(false);
+    }
+  };
   return (
     <section className={styles.page}>
       <header className={styles.header}>
@@ -120,12 +141,26 @@ export function KnowledgeBaseDetailPage() {
           <Typography.Text type="secondary">{base.description ?? '暂无描述'}</Typography.Text>
         </div>
         <Space wrap>
-          <Button onClick={() => setBatchOpen(true)}>批量导入</Button>
-          <Button type="primary" onClick={() => setUploadOpen(true)}>
+          {(base.status === 'DRAFT' || base.status === 'DISABLED') && (
+            <Button loading={isActivating} onClick={() => void activateBase()}>
+              启用知识库
+            </Button>
+          )}
+          <Button disabled={!isActive} onClick={() => setBatchOpen(true)}>
+            批量导入
+          </Button>
+          <Button type="primary" disabled={!isActive} onClick={() => setUploadOpen(true)}>
             上传文档
           </Button>
         </Space>
       </header>
+      {!isActive && (
+        <Alert
+          type="warning"
+          showIcon
+          title="知识库未启用，请先启用知识库后再上传文档或批量导入。"
+        />
+      )}
       <section className={styles.section} aria-labelledby="base-information">
         <div className={styles.sectionHeading}>
           <Typography.Title level={3} id="base-information">

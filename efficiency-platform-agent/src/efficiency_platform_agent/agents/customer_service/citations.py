@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from hashlib import sha256
 
-from .state import AnswerMode, Citation, CustomerServiceAnswer, Evidence, EvidencePack
+from .state import (
+    AnswerMode,
+    Citation,
+    CustomerServiceAnswer,
+    Evidence,
+    EvidencePack,
+    EvidencePackEntry,
+)
 
 
 class CitationGuardError(ValueError):
@@ -14,13 +21,17 @@ class CitationGuardError(ValueError):
 def validate_citation_closure(
     answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
 ) -> None:
-    pack = evidence if isinstance(evidence, EvidencePack) else None
-    if pack is not None:
+    entries: tuple[Evidence, ...]
+    if isinstance(evidence, EvidencePack):
+        pack = evidence
         validate_evidence_pack(pack)
         if pack.blocked and answer.company_sections:
             raise CitationGuardError("冻结证据包禁止公司事实回答")
-        evidence = pack.entries
-    allowed = {item.chunk_id for item in evidence}
+        entries = pack.entries
+    else:
+        pack = None
+        entries = evidence
+    allowed = {item.chunk_id for item in entries}
     referenced = {
         chunk_id
         for section in answer.company_sections
@@ -29,7 +40,7 @@ def validate_citation_closure(
     }
     if not referenced.issubset(allowed):
         raise CitationGuardError("回答包含候选证据之外的引用")
-    for item in evidence:
+    for item in entries:
         if pack is not None:
             continue
         if item.parent_id is None:
@@ -60,11 +71,15 @@ def validate_citation_closure(
 def freeze_citations(
     answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
 ) -> tuple[Citation, ...]:
-    pack = evidence if isinstance(evidence, EvidencePack) else None
-    if pack is not None:
+    entries: tuple[Evidence, ...]
+    if isinstance(evidence, EvidencePack):
+        pack = evidence
         validate_citation_closure(answer, pack)
-        evidence = pack.entries
-    by_id = {item.chunk_id: item for item in evidence}
+        entries = pack.entries
+    else:
+        pack = None
+        entries = evidence
+    by_id = {item.chunk_id: item for item in entries}
     ordered: list[Evidence] = []
     seen = set()
     for section in answer.company_sections:
@@ -87,15 +102,13 @@ def freeze_citations(
             page_no=item.page_no,
             quoted_text=item.content,
             content_hash=item.content_hash,
-            **(
-                {
-                    "parent_id": item.parent_id,
-                    "citation_type": item.citation_type,
-                    "original_spans": item.original_spans,
-                }
-                if pack is not None
-                else {}
-            ),
+            parent_id=item.parent_id if pack is not None else None,
+            citation_type=item.citation_type
+            if pack is not None and isinstance(item, EvidencePackEntry)
+            else "FULL_PARENT",
+            original_spans=item.original_spans
+            if pack is not None and isinstance(item, EvidencePackEntry)
+            else (),
         )
         for index, item in enumerate(ordered, 1)
     )

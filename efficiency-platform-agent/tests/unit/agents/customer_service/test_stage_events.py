@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -30,7 +31,8 @@ async def test_general_question_emits_real_stage_boundaries(monkeypatch) -> None
     release_answer = asyncio.Event()
     stages: list[tuple[str, str]] = []
 
-    async def classify(_gateway, _request):
+    async def classify(_gateway, _request, *, rewrite_query_limit):
+        assert rewrite_query_limit == 2
         return IntentDecision(
             intent_type=IntentType.GENERAL_QUERY,
             requires_company_knowledge=False,
@@ -62,7 +64,7 @@ async def test_general_question_emits_real_stage_boundaries(monkeypatch) -> None
     task = asyncio.create_task(
         CustomerServiceGraph(object()).run(
             request,
-            object(),
+            SimpleNamespace(rag_policy=SimpleNamespace(rewrite_query_limit=2)),
             object(),
             on_stage=lambda stage, phase: stages.append((stage, phase)),
         )

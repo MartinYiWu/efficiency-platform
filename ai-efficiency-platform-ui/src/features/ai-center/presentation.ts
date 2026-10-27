@@ -25,5 +25,6 @@ export const answerModeLabel = (value: string) =>
     COMPANY_KNOWLEDGE: '公司知识',
     MIXED: '公司知识与通用建议',
     GENERAL_ADVICE: '通用建议',
+    CLARIFY: '需要补充信息',
     INSUFFICIENT_EVIDENCE: '证据不足',
   })[value] ?? value;

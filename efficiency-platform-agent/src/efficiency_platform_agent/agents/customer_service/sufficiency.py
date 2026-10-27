@@ -23,11 +23,15 @@ async def judge_sufficiency(
     conflict_screen: ConflictScreen | None = None,
     history: tuple[HistoryMessage, ...] = (),
 ) -> SufficiencyDecision:
-    pack = evidence if isinstance(evidence, EvidencePack) else None
-    if pack is not None:
+    entries: tuple[Evidence, ...]
+    if isinstance(evidence, EvidencePack):
+        pack = evidence
         validate_evidence_pack(pack)
-        evidence = pack.entries
+        entries = pack.entries
         conflict_screen = pack.conflict_screen
+    else:
+        pack = None
+        entries = evidence
     if (pack is not None and pack.blocked) or (
         conflict_screen is not None and conflict_screen.blocked
     ):
@@ -38,7 +42,7 @@ async def judge_sufficiency(
             conflicts=("公司资料存在冲突或尚未完成有效核验",),
             recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
         )
-    if not evidence:
+    if not entries:
         return SufficiencyDecision(
             sufficient=False,
             supported_claims=(),
@@ -53,7 +57,7 @@ async def judge_sufficiency(
                 "question": question,
                 "evidence": pack.model_input()
                 if pack is not None
-                else [item.model_dump(mode="json") for item in evidence],
+                else [item.model_dump(mode="json") for item in entries],
                 **(
                     {"history": [h.model_dump(mode="json") for h in history]}
                     if pack is not None
@@ -72,7 +76,7 @@ async def judge_sufficiency(
             conflicts=(),
             recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
         )
-    allowed = {item.chunk_id for item in evidence}
+    allowed = {item.chunk_id for item in entries}
     if any(
         not set(claim.supporting_chunk_ids).issubset(allowed)
         for claim in decision.supported_claims

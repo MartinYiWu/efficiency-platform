@@ -6,6 +6,10 @@ from uuid import uuid4
 
 import pytest
 
+from efficiency_platform_agent.agents.customer_service.equivalence import (
+    validate_parents,
+    verify_equivalence,
+)
 from efficiency_platform_agent.agents.customer_service.model_gateway import (
     StructuredModelError,
 )
@@ -17,9 +21,37 @@ from efficiency_platform_agent.agents.customer_service.service import (
 )
 from efficiency_platform_agent.agents.customer_service.state import (
     Evidence,
+    EvidenceContractError,
     ParentEvidence,
     QueryRewrite,
 )
+
+
+def test_parent_validation_rejects_child_without_parent_id():
+    child = Scenario().left.model_copy(update={"parent_id": None})
+
+    with pytest.raises(EvidenceContractError, match="PARENT_EVIDENCE_MISMATCH"):
+        validate_parents((child,), ())
+
+
+@pytest.mark.asyncio
+async def test_equivalence_rejects_child_without_parent_id_before_optional_stage():
+    scenario = Scenario()
+    child = scenario.left.model_copy(update={"parent_id": None})
+
+    with pytest.raises(EvidenceContractError, match="PARENT_EVIDENCE_MISMATCH"):
+        await verify_equivalence(
+            (child,),
+            (),
+            {},
+            question="请假如何申请？",
+            threshold=0.96,
+            pair_limit=20,
+            gateway=scenario,
+            stage_bound=False,
+        )
+
+    assert scenario.calls == []
 
 
 @pytest.mark.asyncio

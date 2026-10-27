@@ -6,6 +6,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from time import perf_counter
+from typing import Literal
 
 from .answer import generate_answer
 from .evidence_assembly import assemble_evidence, build_evidence_pack
@@ -47,10 +48,12 @@ class CustomerServiceGraph:
         bundle: CustomerServiceReleaseBundle,
         gateway: StructuredStageGateway,
         on_answer_block: Callable[[str, AnswerMode], None] | None = None,
-        on_stage: Callable[[str, str], None] | None = None,
+        on_stage: Callable[[str, Literal["STARTED", "COMPLETED"]], None] | None = None,
     ) -> GraphResult:
         started = perf_counter()
-        intent = await classify_intent(gateway, request)
+        intent = await classify_intent(
+            gateway, request, rewrite_query_limit=bundle.rag_policy.rewrite_query_limit
+        )
         logger.info(
             "event=customer_service_stage_timing conversation_id=%s stage=intent elapsed_ms=%.0f",
             request.conversation_id,
@@ -73,6 +76,11 @@ class CustomerServiceGraph:
                 question=intent.normalized_question,
                 gateway=gateway,
                 bundle=bundle,
+                **(
+                    {"planned_queries": intent.retrieval_queries}
+                    if intent.retrieval_queries
+                    else {}
+                ),
             )
             logger.info(
                 "event=customer_service_stage_timing conversation_id=%s stage=retrieval elapsed_ms=%.0f",

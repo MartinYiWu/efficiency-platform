@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from hashlib import sha256
 from uuid import UUID
@@ -9,8 +10,8 @@ from uuid import UUID
 from .conflict_screen import ConflictScreen
 from .evidence_extract import ExtractionSelection, select_spans, split_sentences
 from .intent import StructuredStageGateway
-from .model_gateway import ReleaseStructuredModelGateway
-from .release_bundle import CustomerServiceReleaseBundle
+from .model_gateway import prompt_input_tokens, stage_prompt_messages
+from .release_bundle import CustomerServiceReleaseBundle, ModelPolicy
 from .state import (
     CustomerServiceAnswer,
     Evidence,
@@ -42,6 +43,12 @@ class EvidenceAssembly:
     grouping_reasons: dict[UUID, str] = field(default_factory=dict)
 
 
+def _required_parent_id(evidence: Evidence) -> UUID:
+    if evidence.parent_id is None:
+        raise ValueError("PARENT_EVIDENCE_MISSING")
+    return evidence.parent_id
+
+
 def assemble_evidence(
     children: tuple[Evidence, ...],
     parents: tuple[ParentEvidence, ...],
@@ -65,19 +72,18 @@ def assemble_evidence(
     candidates: list[ParentEvidence] = []
     reasons: dict[UUID, str] = {}
     for child in children:
-        if child.parent_id is None:
-            raise ValueError("PARENT_EVIDENCE_MISSING")
-        parent = parent_by_id.get(child.parent_id)
+        parent_id = _required_parent_id(child)
+        parent = parent_by_id.get(parent_id)
         if parent is None or (
             child.document_version_id != parent.document_version_id
             or child.index_release_id != parent.index_release_id
             or child.knowledge_base_id != parent.knowledge_base_id
         ):
             raise ValueError("PARENT_EVIDENCE_MISMATCH")
-        hits.setdefault(child.parent_id, []).append(child.chunk_id)
-        if child.parent_id in seen:
+        hits.setdefault(parent_id, []).append(child.chunk_id)
+        if parent_id in seen:
             continue
-        seen.add(child.parent_id)
+        seen.add(parent_id)
         content_key = (
             parent.document_version_id,
             parent.content_hash,
@@ -150,17 +156,18 @@ def assemble_evidence(
     if len(run) > 1:
         groups.append(EvidenceGroup(parent_ids=tuple(p.parent_id for p in run)))
     if groups:
-        by_id = {x.parent_id: x for x in selected}
+        by_id = {_required_parent_id(x): x for x in selected}
         grouped = {
             pid: group.parent_ids for group in groups for pid in group.parent_ids
         }
         arranged = []
         for item in selected:
-            for pid in grouped.get(item.parent_id, (item.parent_id,)):
+            parent_id = _required_parent_id(item)
+            for pid in grouped.get(parent_id, (parent_id,)):
                 if pid in by_id:
                     arranged.append(by_id.pop(pid))
         selected = arranged
-        selected_parents = [parent_by_id[x.parent_id] for x in selected]
+        selected_parents = [parent_by_id[_required_parent_id(x)] for x in selected]
     return EvidenceAssembly(
         selected=tuple(selected),
         selected_parents=tuple(selected_parents),
@@ -190,14 +197,14 @@ async def build_evidence_pack(
     """从最终候选一次冻结证据；后续阶段不能重新挑选原文。"""
     if not bundle.contract_version.endswith("/2"):
         raise ValueError("EVIDENCE_PACK_REQUIRES_RELEASE_V2")
-    renderer = ReleaseStructuredModelGateway(None, bundle)
     policy = bundle.model_policy
     candidates = assembly.candidate_parents
-    by_parent = {}
+    by_parent: dict[UUID, Evidence] = {}
     for child in children if children is not None else assembly.selected:
-        if child.chunk_id in assembly.hit_chunk_ids.get(child.parent_id, ()):
-            by_parent.setdefault(child.parent_id, child)
-    entries = []
+        parent_id = _required_parent_id(child)
+        if child.chunk_id in assembly.hit_chunk_ids.get(parent_id, ()):
+            by_parent.setdefault(parent_id, child)
+    entries: list[EvidencePackEntry] = []
     for parent in candidates:
         child = by_parent[parent.parent_id]
         if sha256(parent.content.encode()).hexdigest() != parent.content_hash or any(
@@ -238,7 +245,7 @@ async def build_evidence_pack(
             )
         )
 
-    def input_cost(selected):
+    def input_cost(selected: Sequence[EvidencePackEntry]) -> int:
         value = {
             "question": question,
             "history": [h.model_dump(mode="json") for h in history],
@@ -249,26 +256,27 @@ async def build_evidence_pack(
             "sufficiency": None,
         }
         return max(
-            renderer.input_tokens("sufficiency", value, SufficiencyDecision),
+            prompt_input_tokens(bundle, "sufficiency", value, SufficiencyDecision),
             *(
-                renderer.input_tokens(stage, answer_value, CustomerServiceAnswer)
+                prompt_input_tokens(bundle, stage, answer_value, CustomerServiceAnswer)
                 for stage in ("answer_company", "answer_mixed")
             ),
-            renderer.input_tokens(
+            prompt_input_tokens(
+                bundle,
                 "answer_repair",
                 {"original_input": answer_value, "validation_error": "验证失败"},
                 CustomerServiceAnswer,
             ),
         )
 
-    def budget_for(model):
+    def budget_for(model: ModelPolicy) -> tuple[int, int, int]:
         limit = min(bundle.rag_policy.context_token_limit, model.max_input_tokens)
         safety = max(256, limit // 10)
         # 充分性输出和意图进入回答输入；额外预留一份输出及结构字段空间。
         copies = max(
             sum(
                 message.content_template.count("{{input_json}}")
-                for message in renderer._stage_messages(stage)
+                for message in stage_prompt_messages(bundle, stage)
             )
             for stage in ("answer_company", "answer_mixed", "answer_repair")
         )
@@ -278,7 +286,7 @@ async def build_evidence_pack(
     limit, safety, reserved = budget_for(policy)
     empty_cost = input_cost(())
 
-    def cost(selected):
+    def cost(selected: Sequence[EvidencePackEntry]) -> int:
         return input_cost(selected) - empty_cost
 
     protected = [
@@ -303,8 +311,8 @@ async def build_evidence_pack(
         for pid, reason in assembly.exclusion_reasons.items()
         if reason != "BUDGET_EXCLUDED"
     ]
-    selected = []
-    extraction_decisions = []
+    selected: list[EvidencePackEntry] = []
+    extraction_decisions: list[ExtractionSelection] = []
     # 争议双方作为原子集合，预算无法容纳时整组排除，快照仍保留前置冲突事实。
     if blocked:
         if reserved + cost(entries) <= limit:
@@ -312,7 +320,8 @@ async def build_evidence_pack(
         else:
             exclusions.extend(
                 EvidenceExclusion(
-                    parent_id=e.parent_id, reason="CONFLICT_BUDGET_EXCLUDED"
+                    parent_id=e.original_parent.parent_id,
+                    reason="CONFLICT_BUDGET_EXCLUDED",
                 )
                 for e in entries
             )
@@ -339,8 +348,8 @@ async def build_evidence_pack(
                         "available_tokens": available,
                     }
                     extraction_policy = bundle.model_policy
-                    extraction_cost = renderer.input_tokens(
-                        "evidence_extract", value, ExtractionSelection
+                    extraction_cost = prompt_input_tokens(
+                        bundle, "evidence_extract", value, ExtractionSelection
                     )
                     if (
                         extraction_cost
@@ -387,7 +396,7 @@ async def build_evidence_pack(
             exclusions.append(
                 EvidenceExclusion(parent_id=parent.parent_id, reason=reason)
             )
-    selected_ids = {e.parent_id for e in selected}
+    selected_ids = {e.original_parent.parent_id for e in selected}
     groups = tuple(
         EvidenceGroup(
             parent_ids=tuple(pid for pid in g.parent_ids if pid in selected_ids)
@@ -395,11 +404,12 @@ async def build_evidence_pack(
         for g in assembly.groups
         if sum(pid in selected_ids for pid in g.parent_ids) > 1
     )
-    by_id = {entry.parent_id: entry for entry in selected}
+    by_id = {entry.original_parent.parent_id: entry for entry in selected}
     grouped = {pid: group.parent_ids for group in groups for pid in group.parent_ids}
     arranged = []
     for entry in selected:
-        for pid in grouped.get(entry.parent_id, (entry.parent_id,)):
+        parent_id = entry.original_parent.parent_id
+        for pid in grouped.get(parent_id, (parent_id,)):
             if pid in by_id:
                 arranged.append(by_id.pop(pid))
     selected = arranged
