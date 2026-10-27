@@ -90,6 +90,34 @@ export function RunReplayPage() {
         )}
         {retrievalFacts && (
           <AiWorkspaceSection title="检索证据回放">
+            {retrievalFacts.sufficiency && (
+              <Descriptions
+                size="small"
+                items={[
+                  {
+                    key: 'evidence-status',
+                    label: '依据状态',
+                    children: retrievalFacts.sufficiency.evidence_status ?? '旧版本未记录',
+                  },
+                  {
+                    key: 'general-allowed',
+                    label: '通用补充',
+                    children: retrievalFacts.sufficiency.general_advice_allowed ? '允许' : '未允许',
+                  },
+                  {
+                    key: 'scope',
+                    label: '允许补充范围',
+                    children: retrievalFacts.sufficiency.general_advice_scope?.join('；') || '无',
+                  },
+                  {
+                    key: 'unknowns',
+                    label: '公司专属未知项',
+                    children:
+                      retrievalFacts.sufficiency.company_specific_unknowns?.join('；') || '无',
+                  },
+                ]}
+              />
+            )}
             <EvidenceFactsPanel facts={retrievalFacts} />
             {retrievalFacts.budget_usage && (
               <Descriptions

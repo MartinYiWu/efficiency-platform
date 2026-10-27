@@ -107,7 +107,17 @@ public record CustomerServiceDebugView(
             @JsonProperty("supported_claims") List<SupportedClaim> supportedClaims,
             @JsonProperty("unsupported_claims") List<String> unsupportedClaims,
             @JsonProperty("conflicts") List<String> conflicts,
-            @JsonProperty("recommended_mode") String recommendedMode) { }
+            @JsonProperty("recommended_mode") String recommendedMode,
+            @JsonProperty("evidence_status") String evidenceStatus,
+            @JsonProperty("general_advice_allowed") Boolean generalAdviceAllowed,
+            @JsonProperty("general_advice_scope") List<String> generalAdviceScope,
+            @JsonProperty("company_specific_unknowns") List<String> companySpecificUnknowns) {
+        public Sufficiency(boolean sufficient, List<SupportedClaim> supportedClaims,
+                List<String> unsupportedClaims, List<String> conflicts, String recommendedMode) {
+            this(sufficient, supportedClaims, unsupportedClaims, conflicts, recommendedMode,
+                    null, null, null, null);
+        }
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = false)
     public record SupportedClaim(

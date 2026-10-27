@@ -24,6 +24,7 @@ from efficiency_platform_agent.agents.customer_service.service import (
 )
 from efficiency_platform_agent.agents.customer_service.state import (
     AnswerMode,
+    CustomerServiceAnswer,
     SufficiencyDecision,
 )
 
@@ -89,6 +90,13 @@ async def test_mysql_snapshot_persists_task4_facts_and_exclusions(legacy):
         ),
     )
     result = SimpleNamespace(
+        rendered=SimpleNamespace(
+            answer=CustomerServiceAnswer(
+                contract_version="customer-service-answer/1",
+                answer_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
+                insufficiency_reason="公司证据不足。",
+            )
+        ),
         retrieval_trace=trace,
         sufficiency=SufficiencyDecision(
             sufficient=False,

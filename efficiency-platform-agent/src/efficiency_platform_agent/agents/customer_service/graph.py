@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from time import perf_counter
 from typing import Literal
 
-from .answer import generate_answer
+from .answer import generate_answer, select_answer_mode
 from .evidence_assembly import assemble_evidence, build_evidence_pack
 from .intent import StructuredStageGateway, classify_intent
 from .release_bundle import CustomerServiceReleaseBundle
@@ -121,6 +121,17 @@ class CustomerServiceGraph:
                     children=retrieval_trace.reranked_evidence,
                     intent=intent,
                 )
+                if (
+                    retrieval_trace.assembly is None
+                    and retrieval_trace.reranked_evidence
+                ):
+                    evidence_pack = evidence_pack.model_copy(
+                        update={
+                            "blocked": True,
+                            "block_reasons": evidence_pack.block_reasons
+                            + ("MISSING_PARENT_EVIDENCE",),
+                        }
+                    )
                 logger.info(
                     "event=customer_service_stage_timing conversation_id=%s stage=evidence_pack elapsed_ms=%.0f",
                     request.conversation_id,
@@ -136,6 +147,7 @@ class CustomerServiceGraph:
                 evidence_pack if evidence_pack is not None else evidence,
                 conflict_screen=retrieval_trace.conflict_screen,
                 history=request.history,
+                intent=intent,
             )
             logger.info(
                 "event=customer_service_stage_timing conversation_id=%s stage=sufficiency elapsed_ms=%.0f",
@@ -145,10 +157,39 @@ class CustomerServiceGraph:
             if on_stage is not None:
                 on_stage("verification", "COMPLETED")
             summaries.append(
-                ("sufficiency", "证据充分" if sufficiency.sufficient else "证据不足")
+                (
+                    "sufficiency",
+                    "公司资料存在冲突"
+                    if sufficiency.conflicts
+                    else "已有部分公司依据"
+                    if sufficiency.evidence_status == "PARTIAL"
+                    else "未找到相关公司依据"
+                    if sufficiency.evidence_status == "NO_RELEVANT_EVIDENCE"
+                    else "证据充分"
+                    if sufficiency.sufficient
+                    else "证据不足",
+                )
             )
+        mode = select_answer_mode(intent, sufficiency)
+        fallback = sufficiency is not None and not sufficiency.sufficient
         if on_stage is not None:
-            on_stage("answer", "STARTED")
+            on_stage(
+                "answer_general_fallback"
+                if fallback and mode is AnswerMode.GENERAL_ADVICE
+                else "answer_mixed_fallback"
+                if fallback and mode is AnswerMode.MIXED
+                else "answer",
+                "STARTED",
+            )
+        logger.info(
+            "event=customer_service_answer_route conversation_id=%s evidence_status=%s "
+            "recommended_mode=%s selected_mode=%s fallback=%s",
+            request.conversation_id,
+            sufficiency.evidence_status if sufficiency else None,
+            sufficiency.recommended_mode if sufficiency else None,
+            mode.value,
+            fallback,
+        )
         answer = await generate_answer(
             gateway,
             question=intent.normalized_question,

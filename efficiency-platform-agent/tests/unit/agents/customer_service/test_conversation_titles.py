@@ -234,7 +234,6 @@ async def test_real_graph_service_emits_only_first_round_model_title(
         "stage.completed",
         "stage.started",
         "answer.delta",
-        "answer.delta",
         "answer.completed",
     ]
     if not history and expected_title is not None:
@@ -255,8 +254,7 @@ async def test_real_graph_service_emits_only_first_round_model_title(
     assert [
         event.payload.delta for event in events if event.event_type == "answer.delta"
     ] == [
-        "## 通用建议，非公司制度",
-        "先列出任务。",
+        "## 通用建议，非公司制度\n\n先列出任务。",
     ]
     assert all(
         "conversation_title" not in event.model_dump(mode="json")["payload"]

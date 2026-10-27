@@ -51,7 +51,14 @@ class MySqlRetrievalSnapshotRepository:
             "fts_candidates": _evidence_json(trace.fts_candidates),
             "fused_candidates": _evidence_json(trace.fused_candidates),
             "reranked_evidence": _evidence_json(trace.reranked_evidence),
-            "sufficiency": result.sufficiency.model_dump_json(),
+            "sufficiency": json.dumps(
+                result.sufficiency.model_dump(mode="json")
+                | {
+                    "actual_answer_mode": result.rendered.answer.answer_mode.value,
+                    "knowledge_gap": result.rendered.answer.knowledge_gap,
+                },
+                ensure_ascii=False,
+            ),
             "retrieval_facts": json.dumps(
                 evidence_processing_facts(trace), ensure_ascii=False
             ),

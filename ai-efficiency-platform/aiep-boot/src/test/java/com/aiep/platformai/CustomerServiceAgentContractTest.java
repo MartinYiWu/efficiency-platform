@@ -127,6 +127,18 @@ class CustomerServiceAgentContractTest {
         assertEquals("CS_AGENT_UNAVAILABLE", exception.getErrorCode());
     }
 
+    @Test
+    void preservesUnavailableCauseAfterConnectionRetryIsExhausted() {
+        ExchangeFunction exchange = request -> Mono.error(
+                new org.springframework.web.reactive.function.client.WebClientRequestException(
+                        new java.net.ConnectException("controlled unavailable"),
+                        request.method(), request.url(), request.headers()));
+        AgentTransportException error = assertThrows(AgentTransportException.class,
+                () -> createClient(exchange).cancelRun("unavailable-run"));
+        assertEquals(503, error.getStatusCode());
+        assertEquals("CS_AGENT_UNAVAILABLE", error.getErrorCode());
+    }
+
     private HttpCustomerServiceAgentClient createClient(ExchangeFunction exchangeFunction) {
         AgentClientProperties properties = new AgentClientProperties();
         properties.setBaseUrl("http://agent.invalid");

@@ -362,7 +362,12 @@ class CustomerServiceRunService:
         blocks = answer_deltas(result.rendered)
         if tuple(run.streamed_blocks) != blocks[: len(run.streamed_blocks)]:
             raise ValueError("STREAM_ANSWER_PREFIX_MISMATCH")
-        for delta in blocks[len(run.streamed_blocks) :]:
+        remaining = (
+            blocks[len(run.streamed_blocks) :]
+            if run.streamed_blocks
+            else (result.rendered.markdown,)
+        )
+        for delta in remaining:
             self._append(
                 run,
                 "answer.delta",
@@ -378,6 +383,17 @@ class CustomerServiceRunService:
                 RunStatus.RUNNING,
                 RunEventPayload(
                     citation=citation, answer_mode=result.rendered.answer.answer_mode
+                ),
+            )
+        if result.retrieval_trace is not None and result.sufficiency is not None:
+            self._append(
+                run,
+                "retrieval.snapshot",
+                RunStatus.RUNNING,
+                RunEventPayload(
+                    stage="retrieval_snapshot",
+                    public_summary="检索依据已记录",
+                    retrieval_facts=self._retrieval_facts(result),
                 ),
             )
         run.view = run.view.model_copy(update={"status": RunStatus.SUCCEEDED})
@@ -411,6 +427,11 @@ class CustomerServiceRunService:
             ("verification", "STARTED"): "正在核对资料依据",
             ("verification", "COMPLETED"): "依据核对完成",
             ("answer", "STARTED"): "正在撰写回答",
+            (
+                "answer_general_fallback",
+                "STARTED",
+            ): "公司资料存在缺口，正在整理通用建议",
+            ("answer_mixed_fallback", "STARTED"): "正在整理已有公司依据与通用建议",
         }
         summary = summaries[(stage, phase)]
         run.stage_events_emitted = True
@@ -418,7 +439,11 @@ class CustomerServiceRunService:
             run,
             "stage.started" if phase == "STARTED" else "stage.completed",
             RunStatus.RUNNING,
-            RunEventPayload(stage=stage, phase=phase, public_summary=summary),
+            RunEventPayload(
+                stage="answer" if stage.endswith("_fallback") else stage,
+                phase=phase,
+                public_summary=summary,
+            ),
         )
 
     def _append(

@@ -201,12 +201,24 @@ def test_unrelated_unsupported_candidate_does_not_override_supported_answer() ->
     assert result.sufficient is True
 
 
-async def test_empty_evidence_is_insufficient_without_model_call() -> None:
-    gateway = Gateway([])
+async def test_empty_evidence_uses_sufficiency_without_expanding_legacy_permission() -> (
+    None
+):
+    gateway = Gateway(
+        [
+            SufficiencyDecision(
+                sufficient=False,
+                supported_claims=(),
+                unsupported_claims=("缺少公司资料",),
+                conflicts=(),
+                recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
+            )
+        ]
+    )
     result = await judge_sufficiency(gateway, "年假怎么申请？", ())
     assert not result.sufficient
     assert result.recommended_mode is AnswerMode.INSUFFICIENT_EVIDENCE
-    assert gateway.stages == []
+    assert gateway.stages == ["sufficiency"]
 
 
 async def test_sufficiency_cannot_reference_unprovided_chunk() -> None:

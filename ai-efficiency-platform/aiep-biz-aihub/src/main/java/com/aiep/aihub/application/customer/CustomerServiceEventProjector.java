@@ -97,7 +97,7 @@ public class CustomerServiceEventProjector {
         if (phase != null) {
             return new PublicEvent(event.sequence(), type, Map.of(
                     "stage", value(event.payload().stage()), "phase", phase,
-                    "summary", publicStageSummary(event.payload().stage(), phase)));
+                    "summary", publicStageSummary(event.payload().stage(), phase, event.payload().publicSummary())));
         }
         return new PublicEvent(event.sequence(), type, Map.of("stage", value(event.payload().stage()), "summary", value(event.payload().publicSummary())));
     }
@@ -113,6 +113,15 @@ public class CustomerServiceEventProjector {
             case "answer/STARTED" -> "正在撰写回答";
             default -> throw new IllegalArgumentException("CUSTOMER_SERVICE_PUBLIC_STAGE_INVALID");
         };
+    }
+
+    static String publicStageSummary(String stage, String phase, String requestedSummary) {
+        if ("answer".equals(stage) && "STARTED".equals(phase)
+                && ("公司资料存在缺口，正在整理通用建议".equals(requestedSummary)
+                    || "正在整理已有公司依据与通用建议".equals(requestedSummary))) {
+            return requestedSummary;
+        }
+        return publicStageSummary(stage, phase);
     }
 
     private static String value(String input) { return input == null ? "" : input; }

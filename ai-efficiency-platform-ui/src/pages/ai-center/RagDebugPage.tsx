@@ -354,6 +354,26 @@ export function RagDebugPage() {
                   },
                   { key: 'mode', label: '建议模式', children: result.sufficiency.recommended_mode },
                   {
+                    key: 'evidence-status',
+                    label: '依据状态',
+                    children: result.sufficiency.evidence_status ?? '旧版本未记录',
+                  },
+                  {
+                    key: 'general-allowed',
+                    label: '通用补充',
+                    children: result.sufficiency.general_advice_allowed ? '允许' : '未允许',
+                  },
+                  {
+                    key: 'general-scope',
+                    label: '允许补充范围',
+                    children: result.sufficiency.general_advice_scope?.join('；') || '无',
+                  },
+                  {
+                    key: 'company-unknowns',
+                    label: '公司专属未知项',
+                    children: result.sufficiency.company_specific_unknowns?.join('；') || '无',
+                  },
+                  {
                     key: 'conflicts',
                     label: '冲突',
                     children: result.sufficiency.conflicts.join('；') || '无',

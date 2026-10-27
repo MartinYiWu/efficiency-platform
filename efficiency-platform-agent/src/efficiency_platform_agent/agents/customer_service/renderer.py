@@ -5,6 +5,7 @@ from __future__ import annotations
 from .citations import freeze_citations
 from .state import (
     AnswerMode,
+    Citation,
     CustomerServiceAnswer,
     Evidence,
     EvidencePack,
@@ -12,12 +13,13 @@ from .state import (
 )
 
 
-def render_answer(
-    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
-) -> RenderedAnswer:
-    citations = freeze_citations(answer, evidence)
+def _answer_blocks(
+    answer: CustomerServiceAnswer, citations: tuple[Citation, ...]
+) -> tuple[str, ...]:
     citation_by_chunk = {item.chunk_id: item.citation_no for item in citations}
     blocks: list[str] = []
+    if answer.knowledge_gap:
+        blocks.append(answer.knowledge_gap)
     for section in answer.company_sections:
         blocks.append(f"## {section.title}")
         for paragraph in section.paragraphs:
@@ -36,13 +38,22 @@ def render_answer(
     for citation in citations:
         if citation.citation_type == "EXTRACTED_SPANS":
             blocks.append(f"[{citation.citation_no}] 原文节选")
+    return tuple(filter(None, blocks))
+
+
+def render_answer(
+    answer: CustomerServiceAnswer, evidence: tuple[Evidence, ...] | EvidencePack
+) -> RenderedAnswer:
+    citations = freeze_citations(answer, evidence)
     return RenderedAnswer(
-        answer=answer, markdown="\n\n".join(filter(None, blocks)), citations=citations
+        answer=answer,
+        markdown="\n\n".join(_answer_blocks(answer, citations)),
+        citations=citations,
     )
 
 
 def answer_deltas(rendered: RenderedAnswer) -> tuple[str, ...]:
-    return tuple(part for part in rendered.markdown.split("\n\n") if part)
+    return _answer_blocks(rendered.answer, rendered.citations)
 
 
 __all__ = ["answer_deltas", "render_answer"]

@@ -352,6 +352,7 @@ async def test_mysql_snapshot_replays_pack_without_reassembly():
         MySqlRetrievalSnapshotRepository,
     )
     from efficiency_platform_agent.agents.customer_service.state import (
+        AnswerMode,
         SufficiencyDecision,
     )
 
@@ -359,6 +360,12 @@ async def test_mysql_snapshot_replays_pack_without_reassembly():
     trace = RetrievalTrace("问题", (), (), (), (), (), (), evidence_pack=pack)
     result = SimpleNamespace(
         retrieval_trace=trace,
+        rendered=SimpleNamespace(
+            answer=SimpleNamespace(
+                answer_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
+                knowledge_gap=None,
+            )
+        ),
         sufficiency=SufficiencyDecision(
             sufficient=False,
             supported_claims=(),

@@ -146,7 +146,7 @@ public class CustomerServiceApplicationService {
                 String stage = payload.path("stage").asText("");
                 String phase = payload.path("phase").asText("");
                 if (phase.isBlank()) continue;
-                String summary = CustomerServiceEventProjector.publicStageSummary(stage, phase);
+                String summary = CustomerServiceEventProjector.publicStageSummary(stage, phase, payload.path("public_summary").asText(""));
                 steps.add(new PublicProgress(step.sequenceNo(), stage, phase, summary, step.startedAt()));
             } catch (com.fasterxml.jackson.core.JsonProcessingException | IllegalArgumentException ignored) {
                 // 历史内部步骤不进入员工公开时间线。

@@ -166,7 +166,8 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
             String body = request.retrieve()
                     .onStatus(status -> status.isError(), response -> downstreamError(response.statusCode().value()))
                     .bodyToMono(String.class)
-                    .retryWhen(Retry.max(1).filter(WebClientRequestException.class::isInstance))
+                    .retryWhen(Retry.max(1).filter(WebClientRequestException.class::isInstance)
+                            .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                     .onErrorMap(WebClientRequestException.class, ignored -> unavailable())
                     .block();
             if (body == null || body.isBlank()) {

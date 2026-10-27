@@ -332,6 +332,12 @@ export const debugViewSchema = z
         unsupported_claims: z.array(z.string()),
         conflicts: z.array(z.string()),
         recommended_mode: z.string(),
+        evidence_status: z
+          .enum(['SUFFICIENT', 'PARTIAL', 'NO_RELEVANT_EVIDENCE', 'CONFLICT'])
+          .nullish(),
+        general_advice_allowed: z.boolean().nullish(),
+        general_advice_scope: z.array(z.string()).nullish(),
+        company_specific_unknowns: z.array(z.string()).nullish(),
       })
       .strict()
       .nullable()

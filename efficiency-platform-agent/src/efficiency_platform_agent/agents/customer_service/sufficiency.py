@@ -11,6 +11,7 @@ from .state import (
     Evidence,
     EvidencePack,
     HistoryMessage,
+    IntentDecision,
     SufficiencyDecision,
 )
 
@@ -22,6 +23,7 @@ async def judge_sufficiency(
     *,
     conflict_screen: ConflictScreen | None = None,
     history: tuple[HistoryMessage, ...] = (),
+    intent: IntentDecision | None = None,
 ) -> SufficiencyDecision:
     entries: tuple[Evidence, ...]
     if isinstance(evidence, EvidencePack):
@@ -32,22 +34,28 @@ async def judge_sufficiency(
     else:
         pack = None
         entries = evidence
-    if (pack is not None and pack.blocked) or (
-        conflict_screen is not None and conflict_screen.blocked
+    conflict_blocked = conflict_screen is not None and conflict_screen.blocked
+    if conflict_blocked or (
+        pack is not None and (pack.blocked or (not entries and pack.exclusions))
     ):
         return SufficiencyDecision(
             sufficient=False,
             supported_claims=(),
-            unsupported_claims=(),
-            conflicts=("公司资料存在冲突或尚未完成有效核验",),
-            recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
-        )
-    if not entries:
-        return SufficiencyDecision(
-            sufficient=False,
-            supported_claims=(),
-            unsupported_claims=("未检索到可用的完整公司条款",),
-            conflicts=(),
+            unsupported_claims=()
+            if conflict_blocked
+            else ("完整模型输入超过预算",)
+            if pack is not None
+            and any(
+                "BUDGET" in reason or "TOO_LARGE" in reason
+                for reason in (
+                    *pack.block_reasons,
+                    *(item.reason for item in pack.exclusions),
+                )
+            )
+            else ("冻结公司证据未通过原文核验",),
+            conflicts=("公司资料存在冲突或尚未完成有效核验",)
+            if conflict_blocked
+            else (),
             recommended_mode=AnswerMode.INSUFFICIENT_EVIDENCE,
         )
     try:
@@ -58,9 +66,10 @@ async def judge_sufficiency(
                 "evidence": pack.model_input()
                 if pack is not None
                 else [item.model_dump(mode="json") for item in entries],
+                **({"intent": intent.model_dump(mode="json")} if intent else {}),
                 **(
                     {"history": [h.model_dump(mode="json") for h in history]}
-                    if pack is not None
+                    if pack is not None or intent is not None
                     else {}
                 ),
             },
@@ -85,8 +94,26 @@ async def judge_sufficiency(
             update={
                 "sufficient": False,
                 "recommended_mode": AnswerMode.INSUFFICIENT_EVIDENCE,
+                "general_advice_allowed": False,
+                "general_advice_scope": (),
                 "unsupported_claims": decision.unsupported_claims
                 + ("充分性判断引用了未入选的证据",),
+            }
+        )
+    if not entries and (
+        decision.sufficient
+        or decision.supported_claims
+        or decision.evidence_status in {"SUFFICIENT", "PARTIAL"}
+    ):
+        return decision.model_copy(
+            update={
+                "sufficient": False,
+                "supported_claims": (),
+                "recommended_mode": AnswerMode.INSUFFICIENT_EVIDENCE,
+                "general_advice_allowed": False,
+                "general_advice_scope": (),
+                "unsupported_claims": decision.unsupported_claims
+                + ("未检索到可支持公司事实的证据",),
             }
         )
     return decision

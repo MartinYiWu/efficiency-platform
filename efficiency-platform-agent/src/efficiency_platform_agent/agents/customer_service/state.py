@@ -90,16 +90,16 @@ class IntentDecision(StrictModel):
             "不包含回答或推理过程，后续轮为 null，旧版意图输出可省略。"
         ),
     )
-    retrieval_queries: tuple[Annotated[str, Field(min_length=1, pattern=r"\S")], ...] = (
-        Field(
-            default=(),
-            max_length=10,
-            description=(
-                "从当前问题与历史解析出的独立检索问句，用于检索公司知识；"
-                "须补全多轮指代且遵守 rewrite_query_limit，不是事实或答案。"
-                "无需检索时为空，旧版意图输出可省略。"
-            ),
-        )
+    retrieval_queries: tuple[
+        Annotated[str, Field(min_length=1, pattern=r"\S")], ...
+    ] = Field(
+        default=(),
+        max_length=10,
+        description=(
+            "从当前问题与历史解析出的独立检索问句，用于检索公司知识；"
+            "须补全多轮指代且遵守 rewrite_query_limit，不是事实或答案。"
+            "无需检索时为空，旧版意图输出可省略。"
+        ),
     )
 
     @field_validator("conversation_title", mode="before")
@@ -269,14 +269,29 @@ class SufficiencyDecision(StrictModel):
     unsupported_claims: tuple[str, ...]
     conflicts: tuple[str, ...]
     recommended_mode: AnswerMode
+    evidence_status: (
+        Literal["SUFFICIENT", "PARTIAL", "NO_RELEVANT_EVIDENCE", "CONFLICT"] | None
+    ) = None
+    general_advice_allowed: StrictBool = False
+    general_advice_scope: tuple[
+        Annotated[str, Field(min_length=1, pattern=r"\S")], ...
+    ] = ()
+    company_specific_unknowns: tuple[
+        Annotated[str, Field(min_length=1, pattern=r"\S")], ...
+    ] = ()
 
     @model_validator(mode="before")
     @classmethod
     def reject_false_sufficiency(cls, value: Any) -> Any:
-        if isinstance(value, dict) and value.get("conflicts"):
+        if isinstance(value, dict) and (
+            value.get("conflicts") or value.get("evidence_status") == "CONFLICT"
+        ):
             return value | {
                 "sufficient": False,
                 "recommended_mode": AnswerMode.INSUFFICIENT_EVIDENCE,
+                "evidence_status": "CONFLICT",
+                "general_advice_allowed": False,
+                "general_advice_scope": (),
             }
         return value
 
@@ -299,6 +314,7 @@ class GeneralAdvice(StrictModel):
 class CustomerServiceAnswer(StrictModel):
     contract_version: Literal["customer-service-answer/1"]
     answer_mode: AnswerMode
+    knowledge_gap: str | None = Field(default=None, min_length=1, pattern=r"\S")
     company_sections: tuple[CompanySection, ...] = ()
     general_advice: GeneralAdvice | None = None
     clarification_question: str | None = None

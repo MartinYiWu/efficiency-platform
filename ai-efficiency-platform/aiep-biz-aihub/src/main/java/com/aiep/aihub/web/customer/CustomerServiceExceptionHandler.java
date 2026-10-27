@@ -2,6 +2,7 @@ package com.aiep.aihub.web.customer;
 
 import com.aiep.platformcore.api.ApiResponse;
 import com.aiep.aihub.application.customer.CustomerServiceConversationTitles.TitleException;
+import com.aiep.platformai.agent.AgentTransportException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -10,6 +11,11 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice(assignableTypes = CustomerServiceController.class)
 public class CustomerServiceExceptionHandler {
+    @ExceptionHandler(AgentTransportException.class)
+    public ResponseEntity<ApiResponse<Void>> agentUnavailable(AgentTransportException error) {
+        return ResponseEntity.status(error.getStatusCode())
+                .body(new ApiResponse<>(error.getErrorCode(), error.getMessage(), null, null));
+    }
     @ExceptionHandler(TitleException.class)
     public ResponseEntity<ApiResponse<Void>> title(TitleException error) {
         HttpStatus status = "CUSTOMER_SERVICE_CONVERSATION_TITLE_DUPLICATE".equals(error.code())

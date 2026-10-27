@@ -2,6 +2,36 @@ import { describe, expect, it } from 'vitest';
 
 import { debugViewSchema, parseRetrievalFacts, runStepSchema } from './schemas';
 
+it('preserves helpful sufficiency decisions and still rejects unregistered fields', () => {
+  const input = {
+    contract_version: 'customer-service-rag-debug-view/1',
+    debug_run_id: 'helpful-run',
+    status: 'SUCCEEDED',
+    stages: [],
+    answer_mode: 'GENERAL_ADVICE',
+    answer_markdown: '通用参考',
+    error_code: null,
+    error_message: null,
+    sufficiency: {
+      sufficient: false,
+      supported_claims: [],
+      unsupported_claims: ['报销流程'],
+      conflicts: [],
+      recommended_mode: 'GENERAL_ADVICE',
+      evidence_status: 'NO_RELEVANT_EVIDENCE',
+      general_advice_allowed: true,
+      general_advice_scope: ['材料整理'],
+      company_specific_unknowns: ['公司审批人'],
+    },
+  };
+  const result = debugViewSchema.parse(input);
+  expect(result.sufficiency?.general_advice_scope).toEqual(['材料整理']);
+  expect(result.sufficiency?.company_specific_unknowns).toEqual(['公司审批人']);
+  expect(() =>
+    debugViewSchema.parse({ ...input, sufficiency: { ...input.sufficiency, unregistered: true } }),
+  ).toThrow();
+});
+
 describe('debugViewSchema', () => {
   it('accepts parent-child evidence and remains compatible with old debug records', () => {
     const baseline = {

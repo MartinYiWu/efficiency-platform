@@ -24,6 +24,38 @@ from .release_bundle import CustomerServiceReleaseBundle, ModelPolicy, PromptMes
 T = TypeVar("T", bound=BaseModel)
 
 
+def _log_validation_error(
+    stage_key: str, error: ValueError, output_type: type[BaseModel]
+) -> None:
+    schema = output_type.model_json_schema()
+    field_names = set(schema.get("properties", {}))
+    for definition in schema.get("$defs", {}).values():
+        field_names.update(definition.get("properties", {}))
+    fields = (
+        [
+            {
+                "loc": tuple(
+                    part
+                    if isinstance(part, int) or part in field_names
+                    else "[unknown_field]"
+                    for part in item["loc"]
+                ),
+                "type": item["type"],
+            }
+            for item in error.errors(
+                include_url=False, include_context=False, include_input=False
+            )[:10]
+        ]
+        if isinstance(error, ValidationError)
+        else []
+    )
+    logging.getLogger("efficiency_platform_agent.execution").warning(
+        "event=customer_service_model_contract_invalid stage=%s fields=%s",
+        stage_key,
+        fields,
+    )
+
+
 def _freeze(value: object) -> JsonValue:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
@@ -232,19 +264,7 @@ class ReleaseStructuredModelGateway:
                 )
                 return value
             except ValueError as error:
-                fields = (
-                    [(tuple(item["loc"]), item["type"]) for item in error.errors()[:5]]
-                    if isinstance(error, ValidationError)
-                    else []
-                )
-                logging.getLogger("efficiency_platform_agent.execution").warning(
-                    "event=customer_service_model_contract_invalid stage=%s attempt=%s error_type=%s fields=%s response_chars=%s",
-                    stage_key,
-                    attempt + 1,
-                    type(error).__name__,
-                    fields,
-                    len(result.message.content),
-                )
+                _log_validation_error(stage_key, error, output_type)
                 if attempt < policy.max_retries:
                     continue
                 raise StructuredModelError(
@@ -304,6 +324,7 @@ class ReleaseStructuredModelGateway:
         try:
             value = output_type.model_validate_json("".join(parts))
         except ValueError as error:
+            _log_validation_error(stage_key, error, output_type)
             raise StructuredModelError(
                 "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
             ) from error
