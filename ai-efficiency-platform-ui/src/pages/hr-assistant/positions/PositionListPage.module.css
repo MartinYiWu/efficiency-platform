@@ -1,11 +1,17 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
-  display: grid;
-  grid-template-rows: auto auto auto minmax(0, 1fr);
   width: 100%;
   min-width: 0;
-  height: calc(100dvh - 112px);
+  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-rows: auto;
+  height: auto;
   gap: 20px;
-  overflow: hidden;
+  overflow: visible;
 }
 .heading {
   display: flex;
@@ -14,8 +20,9 @@
   gap: 20px;
 }
 .heading h1 {
+  color: var(--ui-text, #0f172a) !important;
   margin: 0 0 8px !important;
-  font-size: 25px !important;
+  font-size: 28px !important;
 }
 .heading :global(.ant-typography) {
   color: #64748b;
@@ -31,7 +38,9 @@
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 0;
+  background: #fff;
+  border-block: 1px solid var(--ui-border);
 }
 .metric,
 .metricButton {
@@ -42,9 +51,9 @@
   gap: 16px;
   text-align: left;
   background: #fff;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius);
-  box-shadow: var(--ui-shadow);
+  border: 0;
+  border-right: 1px solid var(--ui-border);
+  border-radius: 0;
 }
 .metricButton {
   padding: 0;
@@ -53,7 +62,7 @@
 }
 .metricButton .metric {
   width: 100%;
-  border-color: #edf0f5;
+  border-color: var(--ui-border);
 }
 .metric > span {
   display: grid;
@@ -97,10 +106,11 @@
   background: #fff;
   border: 1px solid #edf0f5;
   border-radius: 9px;
-  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
 }
 .filterPanel > :first-child {
-  width: 285px;
+  flex: 1 1 240px;
+  min-width: 0;
+  width: auto;
 }
 .filterPanel label {
   display: flex;
@@ -116,11 +126,10 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   background: #fff;
   border: 1px solid #edf0f5;
   border-radius: 9px;
-  box-shadow: 0 3px 10px rgb(15 23 42 / 3%);
 }
 .tablePanel :global(.ant-table-wrapper) {
   min-width: 0;
@@ -213,8 +222,8 @@
     flex: 1;
   }
   .metrics {
-    grid-template-columns: 1fr;
-    gap: 10px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0;
   }
   .metric {
     padding: 15px;
@@ -236,4 +245,50 @@
   .filterPanel > :nth-last-child(2) {
     flex: 1;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.filterPanel {
+  flex-wrap: wrap;
+  border-radius: 0;
+  border-inline: 0;
+}
+.tablePanel {
+  overflow: hidden;
+  border-inline: 0;
+  border-radius: 0;
+}
+.heading {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.metric:last-child {
+  border-right: 0;
+}
+@media (max-width: 600px) {
+  .metric {
+    padding: 14px 10px;
+    gap: 8px;
+  }
+  .metric > span {
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
+  }
+  .headingActions {
+    flex-wrap: wrap;
+  }
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

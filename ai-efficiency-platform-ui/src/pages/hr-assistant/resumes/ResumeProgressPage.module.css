@@ -1,12 +1,22 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 14px;
   color: #334155;
 }
 
 .tableWrap {
-  min-width: 980px;
-  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+
   border: 1px solid #e2e8f0;
   border-radius: 6px;
 }
@@ -30,7 +40,7 @@
 }
 .tableRow > span {
   min-width: 0;
-  overflow: hidden;
+
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -43,7 +53,7 @@
 }
 .header h1 {
   margin: 0 !important;
-  font-size: 25px !important;
+  font-size: 28px !important;
 }
 .header > div:last-child {
   display: flex;
@@ -248,4 +258,32 @@
   .details :global(.ant-table) {
     min-width: 780px;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.tableRow,
+.tableDetail {
+  min-width: 980px;
+}
+.details {
+  min-width: 0;
+  overflow: hidden;
+}
+.progressCard {
+  background: #fff;
+  border-inline: 0;
+  border-radius: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

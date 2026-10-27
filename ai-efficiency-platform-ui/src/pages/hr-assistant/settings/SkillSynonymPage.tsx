@@ -17,6 +17,9 @@ export function SkillSynonymPage() {
   const data = rows.filter((r) => r.join().toLowerCase().includes(query.toLowerCase()));
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <header>
         <div>
           <h1>技能同义词库</h1>

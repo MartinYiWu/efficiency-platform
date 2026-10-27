@@ -236,6 +236,9 @@ export function PositionListPage() {
 
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       {noticeContext}
       <header className={styles.heading}>
         <div>
@@ -320,7 +323,7 @@ export function PositionListPage() {
             },
           }}
           dataSource={rows}
-          scroll={{ x: 1240, y: 'calc(100dvh - 510px)' }}
+          scroll={{ x: 1240 }}
           columns={[
             { title: '岗位名称', dataIndex: 'name', width: 168 },
             { title: '岗位族', dataIndex: 'family', width: 108 },

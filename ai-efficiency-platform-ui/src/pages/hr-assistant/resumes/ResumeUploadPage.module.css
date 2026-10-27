@@ -1,9 +1,15 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
   min-width: 0;
-  height: calc(100dvh - 112px);
+  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-rows: auto;
+  height: auto;
   gap: 16px;
   color: #0f172a;
   overflow: hidden;
@@ -18,7 +24,7 @@
 
 .heading h1 {
   margin: 0 0 6px !important;
-  font-size: 24px !important;
+  font-size: 28px !important;
   font-weight: 650 !important;
 }
 
@@ -54,7 +60,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: minmax(550px, 570px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   align-content: start;
   justify-content: start;
   gap: 24px;
@@ -67,7 +73,6 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
-  box-shadow: 0 1px 3px rgb(15 23 42 / 4%);
 }
 
 .settingsPanel {
@@ -530,7 +535,6 @@
   background: #f8fbff;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
-  box-shadow: 0 -4px 12px rgb(15 23 42 / 5%);
 }
 
 .footerBar > span {
@@ -598,6 +602,7 @@
   }
 
   .fileList {
+    max-height: none;
     overflow-y: visible;
   }
 
@@ -658,4 +663,32 @@
   .footerBar :global(.ant-btn) {
     width: 100%;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.settingsPanel,
+.uploadPanel {
+  border-inline: 0;
+  border-radius: 0;
+}
+.heading {
+  flex-wrap: wrap;
+}
+@media (max-width: 1100px) {
+  .contentGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

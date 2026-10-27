@@ -38,6 +38,9 @@ export function PositionPreviewPage() {
   const enable = () => notice.success('岗位已启用。本地展示交互不产生真实匹配记录。');
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       {contextHolder}
       <section className={styles.header}>
         <div>

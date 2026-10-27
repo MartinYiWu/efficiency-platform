@@ -1,10 +1,22 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
+.page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: grid;
+  gap: 16px;
+}
 .page > header {
   align-items: center;
   display: flex;
   justify-content: space-between;
 }
 .page h1 {
-  font-size: 22px;
+  font-size: 28px;
   margin: 0;
 }
 .page header p {
@@ -182,4 +194,40 @@
     flex-direction: column;
     gap: 10px;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.layout > aside,
+.layout > main {
+  border-inline: 0;
+  border-radius: 0;
+  border-top: 0;
+}
+
+.page > header {
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.page > header > div:last-child {
+  flex-wrap: wrap;
+}
+.stats {
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.layout > * {
+  min-width: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

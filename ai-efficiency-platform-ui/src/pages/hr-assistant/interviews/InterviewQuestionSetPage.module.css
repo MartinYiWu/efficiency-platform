@@ -1,4 +1,12 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: #0f172a;
 }
 .header,
@@ -17,7 +25,7 @@
 }
 .header h1 {
   display: inline;
-  font-size: 20px;
+  font-size: 28px;
   margin: 0 14px 0 0;
 }
 .header span {
@@ -44,7 +52,7 @@
 .layout {
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(200px, 0.7fr) minmax(620px, 2fr) minmax(230px, 0.8fr);
+  grid-template-columns: minmax(180px, 0.6fr) minmax(0, 2fr) minmax(200px, 0.7fr);
   align-items: start;
 }
 .tree,
@@ -416,4 +424,18 @@
   .footer span {
     display: none;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

@@ -124,6 +124,9 @@ export function ResumeProgressPage() {
           : rows.filter((r) => r.kind === 'failed');
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       {context}
       <header className={styles.header}>
         <div>

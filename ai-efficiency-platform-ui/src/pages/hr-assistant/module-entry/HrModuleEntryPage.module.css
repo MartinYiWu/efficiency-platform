@@ -1,12 +1,19 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 18px;
-  max-width: 1420px;
   margin: 0 auto;
 }
 .page h1 {
   margin: 0 !important;
-  font-size: 25px !important;
+  font-size: 28px !important;
 }
 .card {
   display: grid;
@@ -26,4 +33,24 @@
 .card :global(.ant-typography) {
   max-width: 420px;
   color: #64748b;
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.card {
+  min-height: 240px;
+  border-inline: 0;
+  border-radius: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

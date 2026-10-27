@@ -28,6 +28,9 @@ export function InterviewGuidePreviewPage() {
   const download = () => notice.success(`已生成 ${format} 面试指南，导出操作已记录。`);
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       {context}
       <header className={styles.header}>
         <div>

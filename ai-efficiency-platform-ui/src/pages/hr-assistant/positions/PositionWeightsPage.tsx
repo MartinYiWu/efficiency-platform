@@ -20,6 +20,9 @@ export function PositionWeightsPage() {
 
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <aside className={styles.stepPanel} aria-label="岗位配置步骤">
         {labels.map((label, index) => (
           <div

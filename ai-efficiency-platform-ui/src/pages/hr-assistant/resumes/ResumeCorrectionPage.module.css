@@ -1,7 +1,14 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 14px;
-  min-width: 0;
 }
 .header {
   display: flex;
@@ -12,7 +19,7 @@
 }
 .header h1 {
   margin: 0 0 4px !important;
-  font-size: 25px !important;
+  font-size: 28px !important;
 }
 .headerActions,
 .footer > div,
@@ -29,7 +36,7 @@
 }
 .workspace {
   display: grid;
-  grid-template-columns: minmax(480px, 1fr) minmax(520px, 1.3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr);
   gap: 14px;
   align-items: start;
 }
@@ -69,7 +76,6 @@
   padding: 22px 28px;
   color: #1e293b;
   background: #fff;
-  box-shadow: 0 1px 5px rgb(15 23 42 / 12%);
   font-size: 11px;
   line-height: 1.65;
 }
@@ -121,7 +127,6 @@
 }
 .markerActive {
   outline: 2px solid #2563eb;
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 15%);
 }
 .marker .marker {
   display: inline-block;
@@ -363,7 +368,7 @@
 }
 @media (max-width: 1280px) {
   .workspace {
-    grid-template-columns: minmax(400px, 0.9fr) minmax(480px, 1.1fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
   .resumePaper {
     width: 380px;
@@ -437,4 +442,27 @@
   .reviewProgress :global(.ant-progress) {
     grid-column: auto;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.workspace > * {
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

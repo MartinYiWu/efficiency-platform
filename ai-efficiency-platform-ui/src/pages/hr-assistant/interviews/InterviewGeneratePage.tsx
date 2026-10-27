@@ -62,13 +62,11 @@ export function InterviewGeneratePage() {
   return (
     <section className={styles.stage} aria-label="生成面试题配置">
       {context}
-      <div className={styles.backdrop} />
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="generate-title"
-      >
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
+
+      <div className={styles.dialog} aria-labelledby="generate-title">
         <header className={styles.dialogHeader}>
           <div>
             <Typography.Title id="generate-title" level={1}>

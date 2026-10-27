@@ -16,6 +16,7 @@ describe('PositionListPage', () => {
       </ConfigProvider>,
     );
 
+    expect(container).toHaveTextContent('演示数据');
     const pagination = container.querySelector('.ant-pagination');
     expect(pagination).toHaveTextContent('共 12 条');
     expect(pagination).toHaveTextContent('20 条/页');

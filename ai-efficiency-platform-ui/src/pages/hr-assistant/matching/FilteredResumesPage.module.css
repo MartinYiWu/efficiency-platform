@@ -1,9 +1,15 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
-  min-width: 0;
-  width: 100%;
   max-width: 100%;
 }
 .header {
@@ -19,7 +25,7 @@
 }
 .header h1 {
   margin: 0 0 4px !important;
-  font-size: 24px !important;
+  font-size: 28px !important;
 }
 .header > div:last-child {
   display: flex;
@@ -307,4 +313,34 @@
   .impact strong {
     text-align: left;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.top {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+.explain,
+.distribution,
+.filters,
+.card {
+  border-inline: 0;
+  border-radius: 0;
+}
+@media (max-width: 767px) {
+  .top {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

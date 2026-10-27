@@ -1,8 +1,14 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   min-width: 0;
+  overflow-wrap: anywhere;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
 }
 .hero,
@@ -25,7 +31,7 @@
 .hero h1 {
   display: inline-block;
   margin: 0 14px 12px 0 !important;
-  font-size: 27px !important;
+  font-size: 28px !important;
 }
 .hero :global(.ant-typography) {
   color: #64748b;
@@ -399,4 +405,24 @@
   .diffList > div > span:nth-of-type(2) {
     display: none;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.card {
+  border-inline: 0;
+  border-radius: 0;
+  border-top: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

@@ -79,6 +79,9 @@ export function TalentSearchPage() {
   const visibleCandidates = candidates.slice((page - 1) * pageSize, page * pageSize);
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <header className={styles.header}>
         <div>
           <h1>人才库</h1>
@@ -110,53 +113,58 @@ export function TalentSearchPage() {
           >
             搜索
           </Button>
-          <Filter title="基础条件">
-            <label>学历要求</label>
-            <div className={styles.chips}>
-              {['大专', '本科', '硕士', '博士'].map((x) => (
-                <button className={x === '本科' ? styles.chipActive : ''} key={x}>
-                  {x}
-                </button>
-              ))}
+          <details className={styles.advancedFilters}>
+            <summary>高级筛选 · 学历、技能、行业与入库时间</summary>
+            <div className={styles.filterGrid}>
+              <Filter title="基础条件">
+                <label>学历要求</label>
+                <div className={styles.chips}>
+                  {['大专', '本科', '硕士', '博士'].map((x) => (
+                    <button className={x === '本科' ? styles.chipActive : ''} key={x}>
+                      {x}
+                    </button>
+                  ))}
+                </div>
+                <label>工作年限</label>
+                <div className={styles.range}>
+                  <InputNumber placeholder="最小年限" />
+                  <span>-</span>
+                  <InputNumber placeholder="最大年限" />
+                </div>
+                <label>期望工作城市</label>
+                <div className={styles.chips}>
+                  {['不限', '北京', '上海', '深圳', '杭州'].map((x) => (
+                    <button className={x === '不限' ? styles.chipActive : ''} key={x}>
+                      {x}
+                    </button>
+                  ))}
+                </div>
+              </Filter>
+              <Filter title="技能">
+                <Select mode="tags" defaultValue={['Python', 'MySQL']} options={[]} />
+                <small>按归一后的标准名匹配</small>
+              </Filter>
+              <Filter title="行业">
+                <div className={styles.chips}>
+                  {['互联网', '金融科技', '企业服务', '制造业'].map((x) => (
+                    <button className={x === '互联网' ? styles.chipActive : ''} key={x}>
+                      {x}
+                    </button>
+                  ))}
+                </div>
+              </Filter>
+              <Filter title="入库时间">
+                <div className={styles.range}>
+                  <Input placeholder="开始日期" />
+                  <Input placeholder="结束日期" />
+                </div>
+              </Filter>
+              <Filter title="排除条件">
+                <Checkbox>排除已匹配过某岗位的候选人</Checkbox>
+              </Filter>
+              <Button>重置</Button>
             </div>
-            <label>工作年限</label>
-            <div className={styles.range}>
-              <InputNumber placeholder="最小年限" />
-              <span>-</span>
-              <InputNumber placeholder="最大年限" />
-            </div>
-            <label>期望工作城市</label>
-            <div className={styles.chips}>
-              {['不限', '北京', '上海', '深圳', '杭州'].map((x) => (
-                <button className={x === '不限' ? styles.chipActive : ''} key={x}>
-                  {x}
-                </button>
-              ))}
-            </div>
-          </Filter>
-          <Filter title="技能">
-            <Select mode="tags" defaultValue={['Python', 'MySQL']} options={[]} />
-            <small>按归一后的标准名匹配</small>
-          </Filter>
-          <Filter title="行业">
-            <div className={styles.chips}>
-              {['互联网', '金融科技', '企业服务', '制造业'].map((x) => (
-                <button className={x === '互联网' ? styles.chipActive : ''} key={x}>
-                  {x}
-                </button>
-              ))}
-            </div>
-          </Filter>
-          <Filter title="入库时间">
-            <div className={styles.range}>
-              <Input placeholder="开始日期" />
-              <Input placeholder="结束日期" />
-            </div>
-          </Filter>
-          <Filter title="排除条件">
-            <Checkbox>排除已匹配过某岗位的候选人</Checkbox>
-          </Filter>
-          <Button block>重置</Button>
+          </details>
         </aside>
         <main className={styles.results} data-height="content" data-testid="talent-results">
           <div className={styles.tools}>

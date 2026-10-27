@@ -1,15 +1,20 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
-  display: grid;
-  gap: 16px;
   width: 100%;
   min-width: 0;
-  max-width: 1420px;
+  overflow-wrap: anywhere;
+  display: grid;
+  gap: 16px;
   margin: 0 auto;
   color: #262626;
 }
 .intro h1 {
   margin: 0 0 8px !important;
-  font-size: 22px !important;
+  font-size: 28px !important;
 }
 .intro :global(.ant-typography) {
   margin: 0;
@@ -403,4 +408,24 @@
     grid-column: 2 / -1;
     justify-self: start;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.panel {
+  border-inline: 0;
+  border-radius: 0;
+  border-top: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

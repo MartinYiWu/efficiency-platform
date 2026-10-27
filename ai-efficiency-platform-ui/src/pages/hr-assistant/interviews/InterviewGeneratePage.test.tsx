@@ -12,6 +12,8 @@ it('renders the interview question configuration and lets the user adjust its sc
   );
 
   expect(screen.getByRole('heading', { name: '生成面试题' })).toBeInTheDocument();
+  expect(screen.getByText(/演示数据/)).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   expect(screen.getByText('张伟')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /技术面试官/ })).toHaveAttribute(
     'aria-pressed',

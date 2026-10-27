@@ -1,4 +1,12 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   color: #0f172a;
 }
 .header {
@@ -12,7 +20,7 @@
 }
 .header h1 {
   display: inline;
-  font-size: 20px;
+  font-size: 28px;
   margin: 0 12px 0 0;
 }
 .header span {
@@ -150,7 +158,6 @@
 }
 .paper {
   background: #fff;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.13);
   font-size: 12px;
   line-height: 20px;
   max-width: 620px;
@@ -171,7 +178,7 @@
   margin-top: 20px;
 }
 .paper h1 {
-  font-size: 25px;
+  font-size: 28px;
   margin: 24px 0 4px;
   text-align: center;
 }
@@ -271,4 +278,24 @@
   .footer span {
     display: none;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.settings {
+  border-inline: 0;
+  border-radius: 0;
+  border-top: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

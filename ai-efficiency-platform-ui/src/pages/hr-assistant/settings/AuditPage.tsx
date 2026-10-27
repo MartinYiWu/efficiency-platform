@@ -67,6 +67,9 @@ export function AuditPage() {
   const visibleLogs = logs.slice((page - 1) * pageSize, page * pageSize);
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <header>
         <div>
           <h1>操作审计</h1>

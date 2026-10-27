@@ -1,24 +1,21 @@
+.stage > * {
+  min-width: 0;
+}
 .stage {
-  min-height: calc(100vh - 120px);
+  min-width: 0;
   overflow: hidden;
   position: relative;
   padding: 18px 0;
 }
-.backdrop {
-  background: rgba(15, 23, 42, 0.2);
-  inset: -18px 0;
-  position: absolute;
-}
 .dialog {
   background: #fff;
   border-radius: 12px;
-  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
   margin: 0 auto;
-  max-height: calc(100vh - 120px);
-  max-width: 680px;
+  max-height: none;
+  max-width: 960px;
   overflow: auto;
   position: relative;
-  width: calc(100% - 32px);
+  width: 100%;
 }
 .dialogHeader {
   align-items: flex-start;
@@ -29,7 +26,7 @@
 }
 .dialogHeader h1 {
   color: #0f172a;
-  font-size: 20px;
+  font-size: 28px;
   line-height: 28px;
   margin: 0 !important;
 }
@@ -346,12 +343,9 @@
   .stage {
     padding: 0;
   }
-  .backdrop {
-    inset: 0;
-  }
   .dialog {
     border-radius: 0;
-    max-height: calc(100vh - 86px);
+    max-height: none;
     width: 100%;
   }
   .dialogHeader,
@@ -402,4 +396,28 @@
   .dialogFooter > div .ant-btn {
     flex: 1;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.dialog {
+  margin: 16px 0 0;
+  border-radius: 0;
+}
+.dialogHeader {
+  padding-inline: 0;
+}
+.dialogHeader h1 {
+  font-size: 28px;
+}
+.stage {
+  padding: 0;
 }

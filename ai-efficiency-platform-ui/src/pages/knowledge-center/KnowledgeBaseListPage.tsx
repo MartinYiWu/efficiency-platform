@@ -1,21 +1,15 @@
-import {
-  Button,
-  Drawer,
-  Form,
-  Input,
-  Select,
-  Spin,
-  Table,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+import { DatabaseOutlined } from '@ant-design/icons';
+import { Button, Drawer, Form, Input, Select, Spin, Table, Tag, Typography, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { KnowledgeBase } from '../../entities/knowledge/model';
 import { createKnowledgeBase, listKnowledgeBases } from '../../features/knowledge/api';
-import { knowledgeStatusLabel, knowledgeTypeLabel, visibilityScopeLabel } from '../../features/knowledge/presentation';
+import {
+  knowledgeStatusLabel,
+  knowledgeTypeLabel,
+  visibilityScopeLabel,
+} from '../../features/knowledge/presentation';
 import styles from './KnowledgeCenter.module.css';
 
 export function KnowledgeBaseListPage() {
@@ -36,7 +30,10 @@ export function KnowledgeBaseListPage() {
     if (typeFilter !== 'ALL') query.set('knowledgeType', typeFilter);
     void listKnowledgeBases(query.toString())
       .then((result) => {
-        if (active) { setItems(result.items); setTotal(result.total); }
+        if (active) {
+          setItems(result.items);
+          setTotal(result.total);
+        }
       })
       .catch((error: Error) => message.error(error.message))
       .finally(() => {
@@ -80,23 +77,140 @@ export function KnowledgeBaseListPage() {
             ['BUSINESS_PROCESS', '业务流程'],
             ['PRODUCT_DOCUMENTATION', '产品文档'],
             ['TECHNICAL_DOCUMENTATION', '技术文档'],
-          ].map(([value, label]) => <button key={value} type="button" className={`${styles.filterItem} ${typeFilter === value ? styles.filterActive : ''}`} onClick={() => { if (value !== typeFilter || page !== 1) { setLoading(true); setPage(1); setTypeFilter(value); } }}>{label}</button>)}
+          ].map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={typeFilter === value}
+              className={`${styles.filterItem} ${typeFilter === value ? styles.filterActive : ''}`}
+              onClick={() => {
+                if (value !== typeFilter || page !== 1) {
+                  setLoading(true);
+                  setPage(1);
+                  setTypeFilter(value);
+                }
+              }}
+            >
+              {label}
+            </button>
+          ))}
         </aside>
         <div className={styles.catalogResults}>
           <div className={styles.filters}>
-            <Input.Search placeholder="搜索知识库名称或描述" allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={(value) => { const next = value.trim(); if (next !== submittedKeyword || page !== 1) { setLoading(true); setPage(1); setSubmittedKeyword(next); } }} style={{ maxWidth: 400 }} />
+            <Input.Search
+              className={styles.search}
+              placeholder="搜索知识库名称或描述"
+              allowClear
+              value={keyword}
+              onChange={(event) => setKeyword(event.target.value)}
+              onSearch={(value) => {
+                const next = value.trim();
+                if (next !== submittedKeyword || page !== 1) {
+                  setLoading(true);
+                  setPage(1);
+                  setSubmittedKeyword(next);
+                }
+              }}
+            />
             <span className={styles.resultCount}>共 {total} 个知识库</span>
           </div>
           <Spin spinning={loading}>
-            <Table<KnowledgeBase> rowKey="id" dataSource={items} pagination={{ current: page, pageSize: 10, total, showSizeChanger: false, onChange: (value) => { if (value !== page) { setLoading(true); setPage(value); } } }} scroll={{ x: 850 }} onRow={(item) => ({ onClick: () => navigate(`/knowledge-center/knowledge-bases/${item.id}`), className: styles.clickableRow })} columns={[
-              { title: '知识库名称', dataIndex: 'name', key: 'name', width: 235, render: (name: string, item) => <span className={styles.baseName}><span className={styles.baseIcon}>▤</span><span title={name}><strong>{name}</strong><small>{item.code}</small></span></span> },
-              { title: '描述', dataIndex: 'description', key: 'description', width: 225, ellipsis: true, render: (value: string | null) => value || '—' },
-              { title: '类型', dataIndex: 'knowledgeType', key: 'knowledgeType', width: 105, render: knowledgeTypeLabel },
-              { title: '可见范围', dataIndex: 'visibilityScope', key: 'visibilityScope', width: 105, render: visibilityScopeLabel },
-              { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 160, render: (value: string) => value ? value.replace('T', ' ').slice(0, 16) : '—' },
-              { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (value: string) => <Tag color={value === 'ACTIVE' ? 'success' : 'default'}>{knowledgeStatusLabel(value)}</Tag> },
-              { title: '操作', key: 'action', width: 75, render: (_, item) => <Button type="link" onClick={(event) => { event.stopPropagation(); navigate(`/knowledge-center/knowledge-bases/${item.id}`); }}>查看</Button> },
-            ]} />
+            <Table<KnowledgeBase>
+              rowKey="id"
+              dataSource={items}
+              pagination={{
+                current: page,
+                pageSize: 10,
+                total,
+                showSizeChanger: false,
+                onChange: (value) => {
+                  if (value !== page) {
+                    setLoading(true);
+                    setPage(value);
+                  }
+                },
+              }}
+              scroll={{ x: 850 }}
+              onRow={(item) => ({
+                onClick: () => navigate(`/knowledge-center/knowledge-bases/${item.id}`),
+                className: styles.clickableRow,
+              })}
+              columns={[
+                {
+                  title: '知识库名称',
+                  dataIndex: 'name',
+                  key: 'name',
+                  width: 235,
+                  render: (name: string, item) => (
+                    <span className={styles.baseName}>
+                      <span className={styles.baseIcon}>
+                        <DatabaseOutlined />
+                      </span>
+                      <span title={name}>
+                        <strong>{name}</strong>
+                        <small>{item.code}</small>
+                      </span>
+                    </span>
+                  ),
+                },
+                {
+                  title: '描述',
+                  dataIndex: 'description',
+                  key: 'description',
+                  width: 225,
+                  ellipsis: true,
+                  render: (value: string | null) => value || '—',
+                },
+                {
+                  title: '类型',
+                  dataIndex: 'knowledgeType',
+                  key: 'knowledgeType',
+                  width: 105,
+                  render: knowledgeTypeLabel,
+                },
+                {
+                  title: '可见范围',
+                  dataIndex: 'visibilityScope',
+                  key: 'visibilityScope',
+                  width: 105,
+                  render: visibilityScopeLabel,
+                },
+                {
+                  title: '更新时间',
+                  dataIndex: 'updatedAt',
+                  key: 'updatedAt',
+                  width: 160,
+                  render: (value: string) => (value ? value.replace('T', ' ').slice(0, 16) : '—'),
+                },
+                {
+                  title: '状态',
+                  dataIndex: 'status',
+                  key: 'status',
+                  width: 90,
+                  render: (value: string) => (
+                    <Tag color={value === 'ACTIVE' ? 'success' : 'default'}>
+                      {knowledgeStatusLabel(value)}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: '操作',
+                  key: 'action',
+                  width: 75,
+                  render: (_, item) => (
+                    <Button
+                      type="link"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        navigate(`/knowledge-center/knowledge-bases/${item.id}`);
+                      }}
+                    >
+                      查看
+                    </Button>
+                  ),
+                },
+              ]}
+            />
           </Spin>
         </div>
       </div>

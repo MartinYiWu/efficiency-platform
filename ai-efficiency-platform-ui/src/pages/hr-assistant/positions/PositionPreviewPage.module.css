@@ -1,9 +1,15 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
-  min-width: 0;
-  padding-bottom: 78px;
 }
 .page > * {
   min-width: 0;
@@ -22,7 +28,7 @@
 }
 .header h1 {
   margin: 0 !important;
-  font-size: 24px !important;
+  font-size: 28px !important;
 }
 .header > div:last-child,
 .footer > div {
@@ -124,20 +130,16 @@
   padding-top: 16px;
 }
 .footer {
-  position: fixed;
+  position: sticky;
   z-index: 11;
   right: 0;
   bottom: 0;
-  left: 208px;
+
   padding: 12px 24px;
   background: #fff;
   border-top: 1px solid #e4ebf4;
 }
-@media (max-width: 900px) {
-  .footer {
-    left: 176px;
-  }
-}
+
 @media (max-width: 767px) {
   .header {
     align-items: flex-start;
@@ -154,7 +156,6 @@
     font-size: 10px;
   }
   .footer {
-    left: 0;
     padding: 10px 16px;
   }
   .footer > span {
@@ -163,4 +164,29 @@
   .judgement {
     flex-wrap: wrap;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+@media (max-width: 767px) {
+  .footer {
+    position: static;
+    flex-wrap: wrap;
+    padding-inline: 0;
+  }
+  .header {
+    flex-wrap: wrap;
+  }
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

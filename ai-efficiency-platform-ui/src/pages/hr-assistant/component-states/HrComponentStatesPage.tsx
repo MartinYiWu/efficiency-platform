@@ -38,6 +38,9 @@ export function HrComponentStatesPage() {
   const [dialog, setDialog] = useState<'delete' | 'release' | null>(null);
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <div className={styles.intro}>
         <Typography.Title level={1}>页面：组件与状态规范（PAGE-00）</Typography.Title>
         <Typography.Paragraph>

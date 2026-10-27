@@ -14,6 +14,9 @@ export function HrModuleEntryPage({
 }) {
   return (
     <div className={styles.page}>
+      <p className={styles.demoNotice} role="note">
+        演示数据 · 当前页面展示前端示例，非真实招聘结果。
+      </p>
       <Typography.Title level={1}>{title}</Typography.Title>
       <Typography.Text type="secondary">{description}</Typography.Text>
       <Card className={styles.card}>

@@ -1,7 +1,14 @@
+.page > *,
+.page :global(.ant-tabs-content-holder),
+.page :global(.ant-tabs-tabpane) {
+  min-width: 0;
+}
 .page {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   display: grid;
   gap: 14px;
-  min-width: 0;
 }
 .header {
   display: flex;
@@ -12,7 +19,7 @@
 }
 .header h1 {
   margin: 0 0 5px !important;
-  font-size: 24px !important;
+  font-size: 28px !important;
 }
 .header > div:last-child {
   display: flex;
@@ -281,7 +288,6 @@
   background: #fff;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
-  box-shadow: 0 4px 18px rgb(15 23 42 / 12%);
 }
 .batch > div {
   display: flex;
@@ -421,4 +427,37 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+.demoNotice {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 8px 0;
+  color: var(--ui-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.6;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+}
+
+.stats {
+  gap: 0;
+  background: #fff;
+  border-block: 1px solid var(--ui-border);
+}
+.stats button {
+  border: 0;
+  border-right: 1px solid var(--ui-border);
+  border-radius: 0;
+}
+.aiBanner {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filters {
+  border-inline: 0;
+  border-radius: 0;
+}
+
+.page h1 {
+  color: #0f172a !important;
 }

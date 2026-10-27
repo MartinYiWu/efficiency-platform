@@ -322,8 +322,8 @@
   .historyList { display: none; }
   .chat { flex: 1; min-height: 0; }
   .chatHeader { min-height: 64px; padding: 10px 16px; }
-  .messages { padding: 20px 16px 92px; }
-  .composer { position: fixed; right: 0; bottom: 0; left: 0; z-index: 10; flex: none; padding: 8px 12px; background: #fff; }
+  .messages { padding: 20px 16px; }
+  .composer { flex: none; padding: 8px 12px; background: #fff; }
   .composerBox { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; padding: 5px 6px 5px 10px; }
   .composerBox :global(.ant-input) { min-height: 35px; padding: 6px 2px; }
   .composerActions > span { display: none; }
