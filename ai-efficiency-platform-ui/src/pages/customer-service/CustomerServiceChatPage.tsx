@@ -1,15 +1,16 @@
 import {
   DeleteOutlined,
+  EditOutlined,
   HistoryOutlined,
   PlusOutlined,
   ReadOutlined,
   SendOutlined,
   StopOutlined,
 } from '@ant-design/icons';
-import { Button, Drawer, Input, Popconfirm, Typography } from 'antd';
+import { Button, Drawer, Form, Input, Modal, Popconfirm, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 
-import type { Citation } from '../../entities/customer-service/model';
+import type { Citation, Conversation } from '../../entities/customer-service/model';
 import { CitationDrawer } from '../../features/customer-service-chat/CitationDrawer';
 import { CustomerServiceAnswer } from '../../features/customer-service-chat/CustomerServiceAnswer';
 import { CustomerServiceProgress } from '../../features/customer-service-chat/CustomerServiceProgress';
@@ -18,11 +19,15 @@ import { useCustomerServiceChat } from '../../features/customer-service-chat/use
 import styles from './CustomerServiceChatPage.module.css';
 
 export function CustomerServiceChatPage() {
-  const { state, busy, send, cancel, selectConversation, newConversation, removeConversation } =
+  const { state, busy, send, cancel, selectConversation, newConversation, removeConversation, renameConversation } =
     useCustomerServiceChat();
   const [draft, setDraft] = useState('');
   const [citation, setCitation] = useState<Citation>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<Conversation>();
+  const [renameError, setRenameError] = useState<string>();
+  const [renaming, setRenaming] = useState(false);
+  const [renameForm] = Form.useForm<{ title: string }>();
   const viewport = useRef<HTMLDivElement>(null);
   useEffect(() => {
     viewport.current?.scrollTo({ top: viewport.current.scrollHeight, behavior: 'smooth' });
@@ -33,16 +38,38 @@ export function CustomerServiceChatPage() {
     setDraft('');
     void send(value);
   };
+  const openRename = (conversation: Conversation) => {
+    setRenameTarget(conversation);
+    setRenameError(undefined);
+    renameForm.resetFields();
+    renameForm.setFieldsValue({ title: conversation.title });
+  };
+  const saveRename = async () => {
+    const values = await renameForm.validateFields().catch(() => undefined);
+    if (!values || !renameTarget || renaming) return;
+    setRenaming(true);
+    setRenameError(undefined);
+    try {
+      await renameConversation(renameTarget.id, values.title.trim());
+      setRenameTarget(undefined);
+    } catch (error) {
+      setRenameError(error instanceof Error ? error.message : '重命名会话失败');
+    } finally {
+      setRenaming(false);
+    }
+  };
   const historyItems = state.conversations.map((item) => (
     <div key={item.id} className={`${styles.conversationRow} ${item.id === state.conversationId ? styles.conversationActive : ''}`}>
       <button type="button" className={styles.conversation} disabled={busy}
         onClick={() => { void selectConversation(item.id); setHistoryOpen(false); }} title={item.title || '新对话'}>
         {item.title || '新对话'}
       </button>
+      <Button type="text" size="small" className={styles.renameButton} icon={<EditOutlined />}
+        aria-label={`重命名会话：${item.title || '新对话'}`} onClick={() => openRename(item)} />
       <Popconfirm title="删除这条会话？" description="删除后将从历史列表移除。"
         okText="删除" cancelText="取消" okButtonProps={{ danger: true }}
         onConfirm={() => void removeConversation(item.id)}>
-        <Button type="text" size="small" disabled={busy} icon={<DeleteOutlined />}
+        <Button type="text" size="small" className={styles.deleteButton} disabled={busy} icon={<DeleteOutlined />}
           aria-label={`删除会话：${item.title || '新对话'}`} />
       </Popconfirm>
     </div>
@@ -148,6 +175,19 @@ export function CustomerServiceChatPage() {
         </div>
       </main>
       <Drawer title="历史会话" placement="left" width={300} open={historyOpen} onClose={() => setHistoryOpen(false)}><nav className={styles.mobileHistoryList} aria-label="移动端历史会话">{historyItems}</nav></Drawer>
+      <Modal title="重命名会话" open={Boolean(renameTarget)} okText="保存" cancelText="取消"
+        confirmLoading={renaming} cancelButtonProps={{ disabled: renaming }} closable={!renaming}
+        onOk={() => void saveRename()} onCancel={() => { if (!renaming) setRenameTarget(undefined); }}>
+        <Form form={renameForm} layout="vertical" onValuesChange={() => setRenameError(undefined)}>
+          <Form.Item name="title" label="会话名称" rules={[
+            { required: true, whitespace: true, message: '请输入会话名称' },
+            { max: 80, message: '会话名称不能超过80个字符' },
+          ]}>
+            <Input maxLength={80} showCount disabled={renaming} onPressEnter={() => void saveRename()} />
+          </Form.Item>
+          {renameError && <div className={styles.renameError} role="alert">{renameError}</div>}
+        </Form>
+      </Modal>
       <CitationDrawer citation={citation} onClose={() => setCitation(undefined)} />
     </section>
   );

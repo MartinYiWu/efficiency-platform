@@ -45,8 +45,26 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
         jdbc.update("UPDATE ai_customer_service_conversation SET title=COALESCE(?,title),status=COALESCE(?,status),updated_at=NOW(6) "
                 + "WHERE id=? AND tenant_id=? AND user_id=?", title, status, id, tenantId, userId);
     }
-    @Override public void touchConversation(String id, String title) {
-        jdbc.update("UPDATE ai_customer_service_conversation SET title=COALESCE(NULLIF(title,''),?),last_message_at=NOW(6),updated_at=NOW(6) WHERE id=?", title, id);
+    @Override public void touchConversation(String id) {
+        jdbc.update("UPDATE ai_customer_service_conversation SET last_message_at=NOW(6),updated_at=NOW(6) WHERE id=?", id);
+    }
+    @Override public ConversationPO findConversationForTitleUpdate(String id, String tenantId) {
+        return one("SELECT id,tenant_id,user_id,title,status,last_message_at,created_at,updated_at "
+                + "FROM ai_customer_service_conversation WHERE id=? AND tenant_id=? AND status<>'DELETED'",
+                JdbcCustomerServiceMappers::conversation, id, tenantId);
+    }
+    @Override public boolean conversationTitleExists(String tenantId, String userId, String title, String excludedId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM ai_customer_service_conversation "
+                + "WHERE tenant_id=? AND user_id=? AND title_unique_key=LOWER(TRIM(?)) AND (? IS NULL OR id<>?))",
+                Boolean.class, tenantId, userId, title, excludedId, excludedId));
+    }
+    @Override public boolean assignConversationTitle(String id, String tenantId, String userId, String userMessageId, String title) {
+        // 空标题与首条 USER 同时参与 CAS，避免覆盖并发手工标题或让后续轮补写标题。
+        return jdbc.update("UPDATE ai_customer_service_conversation SET title=?,updated_at=NOW(6) "
+                + "WHERE id=? AND tenant_id=? AND user_id=? AND status<>'DELETED' AND (title IS NULL OR TRIM(title)='') "
+                + "AND ?=(SELECT id FROM ai_customer_service_message WHERE conversation_id=? AND tenant_id=? "
+                + "AND role='USER' ORDER BY created_at,id LIMIT 1)",
+                title, id, tenantId, userId, userMessageId, id, tenantId) == 1;
     }
 
     @Override public void insertMessage(MessagePO v) {

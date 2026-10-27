@@ -49,11 +49,18 @@ class CustomerServiceGraph:
         gateway: StructuredStageGateway,
         on_answer_block: Callable[[str, AnswerMode], None] | None = None,
         on_stage: Callable[[str, Literal["STARTED", "COMPLETED"]], None] | None = None,
+        on_conversation_title: Callable[[str], None] | None = None,
     ) -> GraphResult:
         started = perf_counter()
         intent = await classify_intent(
             gateway, request, rewrite_query_limit=bundle.rag_policy.rewrite_query_limit
         )
+        if (
+            not request.history
+            and intent.conversation_title
+            and on_conversation_title is not None
+        ):
+            on_conversation_title(intent.conversation_title)
         logger.info(
             "event=customer_service_stage_timing conversation_id=%s stage=intent elapsed_ms=%.0f",
             request.conversation_id,

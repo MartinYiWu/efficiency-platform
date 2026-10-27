@@ -60,6 +60,8 @@ export const listConversations = (keyword = '') =>
   );
 export const createConversation = (title: string) =>
   call('/api/customer-service/conversations', conversationSchema, json('POST', { title }));
+export const renameConversation = (id: string, title: string) =>
+  call(`/api/customer-service/conversations/${id}`, conversationSchema, json('PATCH', { title }));
 export const deleteConversation = (id: string) =>
   call(`/api/customer-service/conversations/${id}`, z.boolean(), { method: 'DELETE' });
 export const listMessages = (id: string) =>

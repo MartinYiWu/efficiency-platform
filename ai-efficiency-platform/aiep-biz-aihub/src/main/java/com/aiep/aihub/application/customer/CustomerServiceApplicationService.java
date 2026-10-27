@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 
@@ -48,10 +49,13 @@ public class CustomerServiceApplicationService {
     }
 
     public ConversationPO createConversation(String tenantId, String userId, String title) {
+        String normalizedTitle = CustomerServiceConversationTitles.normalize(title, true);
+        CustomerServiceConversationTitles.requireAvailable(repository, tenantId, userId, normalizedTitle, null);
         Instant now = Instant.now();
         ConversationPO value = new ConversationPO(UUID.randomUUID().toString(), tenantId, userId,
-                title == null ? "" : title.trim(), "ACTIVE", null, now, now);
-        repository.insertConversation(value);
+                normalizedTitle, "ACTIVE", null, now, now);
+        try { repository.insertConversation(value); }
+        catch (DuplicateKeyException error) { throw CustomerServiceConversationTitles.translate(error); }
         return value;
     }
 
@@ -71,7 +75,11 @@ public class CustomerServiceApplicationService {
         getConversation(tenantId, userId, id);
         if (status != null && !List.of("ACTIVE", "ARCHIVED").contains(status))
             throw new IllegalArgumentException("CUSTOMER_SERVICE_CONVERSATION_STATUS_INVALID");
-        repository.updateConversation(id, tenantId, userId, title, status);
+        String normalizedTitle = title == null ? null : CustomerServiceConversationTitles.normalize(title, false);
+        if (normalizedTitle != null)
+            CustomerServiceConversationTitles.requireAvailable(repository, tenantId, userId, normalizedTitle, id);
+        try { repository.updateConversation(id, tenantId, userId, normalizedTitle, status); }
+        catch (DuplicateKeyException error) { throw CustomerServiceConversationTitles.translate(error); }
         return getConversation(tenantId, userId, id);
     }
 

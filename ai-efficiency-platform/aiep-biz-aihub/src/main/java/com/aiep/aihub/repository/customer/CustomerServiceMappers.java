@@ -14,7 +14,10 @@ public interface CustomerServiceMappers {
     List<ConversationPO> listConversations(String tenantId, String userId, String keyword, int offset, int limit);
     long countConversations(String tenantId, String userId, String keyword);
     void updateConversation(String id, String tenantId, String userId, String title, String status);
-    void touchConversation(String id, String title);
+    void touchConversation(String id);
+    ConversationPO findConversationForTitleUpdate(String id, String tenantId);
+    boolean conversationTitleExists(String tenantId, String userId, String title, String excludedId);
+    boolean assignConversationTitle(String id, String tenantId, String userId, String userMessageId, String title);
 
     void insertMessage(MessagePO value);
     MessagePO findMessage(String id, String tenantId);

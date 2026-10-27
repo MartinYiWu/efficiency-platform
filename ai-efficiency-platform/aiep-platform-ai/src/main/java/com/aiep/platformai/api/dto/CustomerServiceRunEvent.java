@@ -32,6 +32,10 @@ public record CustomerServiceRunEvent(
         if ("stage.completed".equals(eventType) && payload.phase() != null && !"COMPLETED".equals(payload.phase())) {
             throw new IllegalArgumentException("stage.completed 阶段状态无效");
         }
+        if ("conversation.title".equals(eventType)
+                && (!"conversation_title".equals(payload.stage()) || payload.phase() != null)) {
+            throw new IllegalArgumentException("conversation.title 必须使用 conversation_title 且不带 phase");
+        }
     }
 
     /**
@@ -48,7 +52,8 @@ public record CustomerServiceRunEvent(
             @JsonProperty("error_code") String errorCode,
             @JsonProperty("error_message") String errorMessage,
             @JsonProperty("retrieval_facts") RetrievalFacts retrievalFacts,
-            @JsonProperty("phase") String phase) {
+            @JsonProperty("phase") String phase,
+            @JsonProperty("conversation_title") String conversationTitle) {
         public Payload {
             if (phase != null && !List.of("STARTED", "COMPLETED").contains(phase)) {
                 throw new IllegalArgumentException("phase 无效");
@@ -58,7 +63,14 @@ public record CustomerServiceRunEvent(
         public Payload(String stage, Integer progressPercent, String publicSummary, String delta,
                 String answerMode, Citation citation, String errorCode, String errorMessage, RetrievalFacts retrievalFacts) {
             this(stage, progressPercent, publicSummary, delta, answerMode, citation,
-                    errorCode, errorMessage, retrievalFacts, null);
+                    errorCode, errorMessage, retrievalFacts, null, null);
+        }
+
+        public Payload(String stage, Integer progressPercent, String publicSummary, String delta,
+                String answerMode, Citation citation, String errorCode, String errorMessage,
+                RetrievalFacts retrievalFacts, String phase) {
+            this(stage, progressPercent, publicSummary, delta, answerMode, citation,
+                    errorCode, errorMessage, retrievalFacts, phase, null);
         }
     }
 

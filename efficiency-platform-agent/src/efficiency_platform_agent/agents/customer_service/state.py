@@ -5,14 +5,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any, Literal
+from unicodedata import category
 from uuid import UUID
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     StrictBool,
     StrictInt,
+    WithJsonSchema,
+    field_validator,
     model_serializer,
     model_validator,
 )
@@ -75,6 +79,17 @@ class IntentDecision(StrictModel):
     requires_general_advice: bool
     missing_field: str | None = None
     normalized_question: str = Field(min_length=1)
+    conversation_title: Annotated[str | None, WithJsonSchema({})] = Field(
+        default=None,
+        min_length=1,
+        max_length=24,
+        pattern=r"\S",
+        description=(
+            "仅首轮历史为空时，从第一条用户消息提炼不超过 24 个字符的简短主题标题；"
+            "空白折叠为单行并移除控制字符，超长截断，空值或非字符串忽略；"
+            "不包含回答或推理过程，后续轮为 null，旧版意图输出可省略。"
+        ),
+    )
     retrieval_queries: tuple[Annotated[str, Field(min_length=1, pattern=r"\S")], ...] = (
         Field(
             default=(),
@@ -86,6 +101,25 @@ class IntentDecision(StrictModel):
             ),
         )
     )
+
+    @field_validator("conversation_title", mode="before")
+    @classmethod
+    def normalize_conversation_title(cls, value: Any) -> str | None:
+        if not isinstance(value, str):
+            return None
+        title = "".join(
+            character
+            for character in value
+            if character.isspace() or category(character) not in {"Cc", "Cf"}
+        )
+        return " ".join(title.split())[:24].rstrip() or None
+
+    @model_serializer(mode="wrap")
+    def serialize_title(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
+        if self.conversation_title is None:
+            value.pop("conversation_title", None)
+        return value
 
     @model_validator(mode="after")
     def validate_ambiguity(self) -> IntentDecision:
@@ -358,6 +392,14 @@ class RunEventPayload(StrictModel):
     error_code: str | None = None
     error_message: str | None = None
     retrieval_facts: dict[str, Any] | None = None
+    conversation_title: str | None = Field(default=None, max_length=80)
+
+    @model_serializer(mode="wrap")
+    def serialize_title(self, handler: SerializerFunctionWrapHandler) -> dict[str, Any]:
+        value: dict[str, Any] = handler(self)
+        if self.conversation_title is None:
+            value.pop("conversation_title", None)
+        return value
 
 
 class RunEvent(StrictModel):

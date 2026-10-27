@@ -9,6 +9,7 @@ import {
   getTimeline,
   listConversations,
   listMessages,
+  renameConversation as saveConversationTitle,
   submitMessage,
 } from './api';
 import { connectCustomerServiceRun } from './sseClient';
@@ -46,10 +47,13 @@ export function useCustomerServiceChat() {
   const [state, setState] = useState(empty);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const selectedConversationRef = useRef<string | undefined>(undefined);
+  const conversationListRequestRef = useRef(0);
   const busy = state.status === 'SUBMITTING' || state.status === 'STREAMING';
   const refreshConversations = useCallback(async () => {
+    const request = ++conversationListRequestRef.current;
     const page = await listConversations();
-    setState((value) => ({ ...value, conversations: page.items }));
+    if (request === conversationListRequestRef.current)
+      setState((value) => ({ ...value, conversations: page.items }));
     return page.items;
   }, []);
   const consume = useCallback(async (runId: string, afterSequence = 0, conversationId?: string) => {
@@ -62,6 +66,8 @@ export function useCustomerServiceChat() {
         afterSequence,
         signal: controller.signal,
       })) {
+        if (event.event === 'run.progress' && event.payload.stage === 'conversation_title')
+          void refreshConversations().catch(() => undefined);
         setState((current) => {
           if (current.runId !== runId || event.id <= current.sequence) return current;
           if (event.event === 'message.delta') {
@@ -163,7 +169,7 @@ export function useCustomerServiceChat() {
         }
       }
     }
-  }, []);
+  }, [refreshConversations]);
   const selectConversation = useCallback(
     async (conversationId: string) => {
       selectedConversationRef.current = conversationId;
@@ -249,6 +255,14 @@ export function useCustomerServiceChat() {
       setState((value) => ({ ...value, error: error instanceof Error ? error.message : '删除会话失败' }));
     }
   };
+  const renameConversation = async (id: string, title: string) => {
+    const conversation = await saveConversationTitle(id, title);
+    conversationListRequestRef.current += 1;
+    setState((value) => ({
+      ...value,
+      conversations: value.conversations.map((item) => item.id === id ? conversation : item),
+    }));
+  };
   const send = async (text: string) => {
     if (busy || !text.trim()) return;
     const requestId = crypto.randomUUID();
@@ -308,7 +322,7 @@ export function useCustomerServiceChat() {
         runId: submitted.runId,
       }));
       await consume(submitted.runId, 0, activeConversationId);
-      await refreshConversations();
+      await refreshConversations().catch(() => undefined);
     } catch (error) {
       const value = error as Error & { traceId?: string };
       setState((current) => ({
@@ -326,5 +340,5 @@ export function useCustomerServiceChat() {
     abortRef.current?.abort();
     setState((value) => ({ ...value, status: 'CANCELLED' }));
   };
-  return { state, busy, send, cancel, selectConversation, newConversation, removeConversation };
+  return { state, busy, send, cancel, selectConversation, newConversation, removeConversation, renameConversation };
 }

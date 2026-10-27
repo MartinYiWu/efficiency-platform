@@ -294,6 +294,16 @@ class CustomerServiceRunService:
                         run, block, mode
                     ),
                     on_stage=lambda stage, phase: self._stream_stage(run, stage, phase),
+                    on_conversation_title=lambda title: self._append(
+                        run,
+                        "conversation.title",
+                        RunStatus.RUNNING,
+                        RunEventPayload(
+                            stage="conversation_title",
+                            public_summary="会话标题已更新",
+                            conversation_title=title,
+                        ),
+                    ),
                 )
             else:
                 result = await self.graph.run(

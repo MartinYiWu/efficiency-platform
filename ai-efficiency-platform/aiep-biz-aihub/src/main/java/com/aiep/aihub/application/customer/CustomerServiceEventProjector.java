@@ -41,6 +41,10 @@ public class CustomerServiceEventProjector {
         repository.insertRunStep(new RunStepPO(UUID.randomUUID().toString(), javaRunId, event.sequence(),
                 event.payload().stage() == null ? event.eventType() : event.payload().stage(), status,
                 event.payload().publicSummary(), safeJson(event.payload()), event.occurredAt(), Instant.now()));
+        if ("conversation.title".equals(event.eventType())) {
+            CustomerServiceConversationTitles.assignAutomatic(repository, run, event.payload().conversationTitle());
+            return publicEvent(javaRunId, event, true);
+        }
         MessagePO assistant = repository.findAssistantMessageByRun(javaRunId, tenantId);
         if (assistant == null) throw new IllegalStateException("CUSTOMER_SERVICE_ASSISTANT_MESSAGE_MISSING");
         if ("answer.delta".equals(event.eventType())) {
@@ -75,6 +79,8 @@ public class CustomerServiceEventProjector {
     }
 
     private PublicEvent publicEvent(String javaRunId, CustomerServiceRunEvent event, boolean newlyProjected) {
+        if ("conversation.title".equals(event.eventType()))
+            return new PublicEvent(event.sequence(), "run.progress", Map.of("stage", "conversation_title", "summary", "会话标题已更新"));
         if ("answer.delta".equals(event.eventType()))
             return new PublicEvent(event.sequence(), "message.delta", Map.of("delta", value(event.payload().delta())));
         if ("citation.ready".equals(event.eventType()) && event.payload().citation() != null) {

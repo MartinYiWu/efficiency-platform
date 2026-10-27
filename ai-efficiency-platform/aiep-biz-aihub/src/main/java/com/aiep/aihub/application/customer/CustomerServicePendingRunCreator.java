@@ -31,7 +31,7 @@ public class CustomerServicePendingRunCreator {
         repository.insertMessage(user);
         repository.insertMessage(assistant);
         repository.insertRun(run);
-        repository.touchConversation(conversationId, message.substring(0, Math.min(30, message.length())));
+        repository.touchConversation(conversationId);
         return new Pending(run, user, assistant, true);
     }
 

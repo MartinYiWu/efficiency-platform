@@ -47,7 +47,8 @@
   padding-right: 3px;
 }
 .conversationRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px 28px;
   align-items: center;
   gap: 2px;
   height: 40px;
@@ -82,12 +83,18 @@
   font-weight: 600;
 }
 .conversationRow :global(.ant-btn) {
-  flex: none;
-  color: #98a2b3;
+  width: 28px;
+  height: 28px;
 }
-.conversationRow:hover :global(.ant-btn),
-.conversationRow :global(.ant-btn):focus-visible {
-  color: #b42318;
+.conversationRow .renameButton {
+  color: var(--ui-primary);
+}
+.conversationRow .deleteButton:not(:disabled),
+.renameError {
+  color: var(--ant-color-error);
+}
+.renameError {
+  margin-top: 8px;
 }
 .chat {
   display: flex;
@@ -314,6 +321,8 @@
   .composer { padding: 14px 24px; }
 }
 @media (max-width: 640px) {
+  .conversationRow { grid-template-columns: minmax(0, 1fr) 36px 36px; height: 44px; }
+  .conversationRow :global(.ant-btn) { width: 36px; height: 36px; }
   .page { display: flex; flex-direction: column; height: calc(100dvh - 100px); min-height: 0; }
   .sidebar { display: flex; flex-direction: row; align-items: center; gap: 8px; min-height: 56px; max-height: 56px; padding: 9px 12px; overflow: hidden; border-right: 0; border-bottom: 1px solid #e8edf3; }
   .sidebar > :global(.ant-btn) { flex: 1; }
