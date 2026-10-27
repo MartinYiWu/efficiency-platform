@@ -122,6 +122,7 @@ public class CustomerServiceApplicationService {
         } catch (RuntimeException error) {
             repository.advanceRun(pending.run().id(), 0, 0, "FAILED", null,
                     "CUSTOMER_SERVICE_AGENT_UNAVAILABLE", "智能客服暂时不可用");
+            repository.completeAssistantMessage(pending.assistantMessage().id(), "", null, "FAILED");
             throw error;
         }
     }

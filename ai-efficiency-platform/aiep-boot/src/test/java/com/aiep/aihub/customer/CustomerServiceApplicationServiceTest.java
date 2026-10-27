@@ -94,6 +94,24 @@ class CustomerServiceApplicationServiceTest {
     }
 
     @Test
+    void failedSubmissionDoesNotLeaveAssistantPending() {
+        when(management.findAgentByKey("customer-service")).thenReturn(
+                new AgentDefinitionPO("agent-1", "customer-service", "客服", "", "CUSTOMER_SERVICE", "ACTIVE", "1", null, "1", null));
+        when(management.findActiveRelease("agent-1", "dev")).thenReturn(
+                new AiReleasePO("release-1", "agent-1", "version-1", "dev", "ACTIVE", "snapshot-1", "1", LocalDateTime.now(), null, LocalDateTime.now()));
+        when(repository.listCompletedHistory("conversation-1", "dev", 12)).thenReturn(List.of());
+        when(pendingCreator.create("conversation-1", "dev", "问题", "request-1", "release-1"))
+                .thenReturn(new Pending(run("run-1", null, "PENDING", 0),
+                        message("user-1", "USER", "问题"), message("answer-1", "ASSISTANT", ""), true));
+        when(ai.submitCustomerServiceMessage(eq("conversation-1"), any())).thenThrow(
+                new com.aiep.platformai.agent.AgentTransportException(503, "CS_AGENT_UNAVAILABLE", "智能客服 Agent 当前不可用"));
+
+        assertThatThrownBy(() -> service.submit("dev", "1", "conversation-1", "customer-service-message/1", "问题", "request-1"))
+                .isInstanceOf(com.aiep.platformai.agent.AgentTransportException.class);
+        verify(repository).completeAssistantMessage("answer-1", "", null, "FAILED");
+    }
+
+    @Test
     void storesInternalFactsButKeepsThemOutOfPublicProgress() throws Exception {
         var mapper = new ObjectMapper().findAndRegisterModules();
         var projector = new CustomerServiceEventProjector(repository, mapper);
