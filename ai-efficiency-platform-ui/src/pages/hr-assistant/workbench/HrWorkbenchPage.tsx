@@ -1,30 +1,15 @@
-import {
-  AppstoreOutlined,
-  ArrowRightOutlined,
-  FileTextOutlined,
-  FolderOpenOutlined,
-  FormOutlined,
-  RightOutlined,
-} from '@ant-design/icons';
-import { Button, Card, Empty, Statistic, Typography } from 'antd';
+import { ArrowRightOutlined } from '@ant-design/icons';
+import { Button, Card, Empty, Statistic, Tag, Typography } from 'antd';
 import { useNavigate } from 'react-router';
 
 import {
   hrWorkbenchFixture,
-  type HrWorkbenchQuickAction,
   type HrWorkbenchViewModel,
 } from '../../../entities/hrWorkbench';
 import styles from './HrWorkbenchPage.module.css';
 
 interface HrWorkbenchPageProps {
   viewModel?: HrWorkbenchViewModel;
-}
-
-function QuickActionIcon({ action }: { action: HrWorkbenchQuickAction }) {
-  if (action.key === 'upload') return <FileTextOutlined />;
-  if (action.key === 'matching') return <AppstoreOutlined />;
-  if (action.key === 'interview') return <FormOutlined />;
-  return <FolderOpenOutlined />;
 }
 
 export function HrWorkbenchPage({ viewModel = hrWorkbenchFixture }: HrWorkbenchPageProps) {
@@ -36,12 +21,9 @@ export function HrWorkbenchPage({ viewModel = hrWorkbenchFixture }: HrWorkbenchP
       <section className={styles.welcome} aria-labelledby="hr-workbench-title">
         <div>
           <Typography.Title id="hr-workbench-title" level={1} className={styles.pageTitle}>
-            工作台
+            招聘工作台
           </Typography.Title>
-          <Typography.Title level={2} className={styles.greeting}>
-            {viewModel.greeting}
-          </Typography.Title>
-          <Typography.Text className={styles.dateText}>{viewModel.dateText}</Typography.Text>
+          <Typography.Text className={styles.dateText}>优先处理待办，跟踪岗位进展 <Tag>演示数据</Tag></Typography.Text>
         </div>
         <div className={styles.welcomeActions}>
           <Button type="primary" onClick={() => navigate('/ai-assistants/hr/resumes/upload')}>
@@ -49,26 +31,6 @@ export function HrWorkbenchPage({ viewModel = hrWorkbenchFixture }: HrWorkbenchP
           </Button>
           <Button onClick={() => navigate('/ai-assistants/hr/positions/new')}>新建岗位</Button>
         </div>
-      </section>
-
-      <section className={styles.quickGrid} aria-label="快捷入口">
-        {viewModel.quickActions.map((action) => (
-          <Button
-            key={action.key}
-            className={styles.quickAction}
-            type="text"
-            onClick={() => navigate(action.route)}
-          >
-            <span className={styles.quickIcon}>
-              <QuickActionIcon action={action} />
-            </span>
-            <span className={styles.quickCopy}>
-              <span>{action.title}</span>
-              <span>{action.description}</span>
-            </span>
-            <RightOutlined className={styles.quickArrow} />
-          </Button>
-        ))}
       </section>
 
       <section className={styles.metricGrid} aria-label="本周概览">

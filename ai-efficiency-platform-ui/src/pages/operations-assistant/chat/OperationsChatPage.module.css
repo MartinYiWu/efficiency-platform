@@ -3,11 +3,11 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
   height: calc(100dvh - 112px);
-  min-height: 620px;
+  min-height: 480px;
   overflow: hidden;
   background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius);
+  border: 0;
+  border-radius: 0;
 }
 
 .header {
@@ -26,7 +26,9 @@
 .assistantAvatar,
 .messageAvatar {
   color: var(--ant-color-text-light-solid);
-  background: linear-gradient(135deg, #2463eb, #159eaf);
+  background: #eaf2ff;
+  color: #175cd3;
+  border-radius: 10px;
   font-weight: 700;
 }
 
@@ -225,7 +227,7 @@
 
 @media (max-width: 767px) {
   .page {
-    height: calc(100dvh - 96px);
+    height: calc(100dvh - 100px);
     min-height: 520px;
     border-radius: var(--ant-border-radius);
   }

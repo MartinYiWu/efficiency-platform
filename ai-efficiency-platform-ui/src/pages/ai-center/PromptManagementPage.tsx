@@ -142,10 +142,11 @@ export function PromptManagementPage() {
               <Select
                 value={role}
                 onChange={(value) => showRole(value)}
-                options={['SYSTEM', 'USER', 'ASSISTANT'].map((value) => ({
-                  value,
-                  label: `${value} 消息`,
-                }))}
+                options={[
+                  { value: 'SYSTEM', label: '系统提示词（SYSTEM）' },
+                  { value: 'USER', label: '用户提示词（USER）' },
+                  { value: 'ASSISTANT', label: '助手消息（ASSISTANT）' },
+                ]}
               />
               <Input.TextArea
                 rows={18}

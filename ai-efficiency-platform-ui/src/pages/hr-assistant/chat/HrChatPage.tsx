@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, SendOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, SendOutlined, TeamOutlined, UserOutlined } from '@ant-design/icons';
 import { Avatar, Button, Input, Typography } from 'antd';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -55,12 +55,12 @@ export function AssistantChatPage({ config }: { config: AssistantChatConfig }) {
           aria-label="返回上一页"
           onClick={() => navigate(-1)}
         />
-        <Avatar className={styles.assistantAvatar} size={44}>人</Avatar>
+        <Avatar className={styles.assistantAvatar} size={44} icon={<TeamOutlined />} />
         <div>
           <Typography.Title id="assistant-chat-title" level={1} className={styles.title}>
             {config.title}
           </Typography.Title>
-          <Typography.Text className={styles.subtitle}>{config.subtitle}</Typography.Text>
+          <Typography.Text className={styles.subtitle}>{config.subtitle} · 演示界面</Typography.Text>
         </div>
       </header>
 
@@ -75,7 +75,7 @@ export function AssistantChatPage({ config }: { config: AssistantChatConfig }) {
                 }
               >
                 {message.role === 'assistant' && (
-                  <Avatar className={styles.messageAvatar} size={32}>人</Avatar>
+                  <Avatar className={styles.messageAvatar} size={32} icon={<TeamOutlined />} />
                 )}
                 <div
                   className={message.role === 'user' ? styles.userBubble : styles.assistantBubble}
@@ -84,7 +84,7 @@ export function AssistantChatPage({ config }: { config: AssistantChatConfig }) {
                 </div>
                 {message.role === 'user' && (
                   <Avatar className={styles.userAvatar} size={34}>
-                    沐
+                    <UserOutlined />
                   </Avatar>
                 )}
               </div>

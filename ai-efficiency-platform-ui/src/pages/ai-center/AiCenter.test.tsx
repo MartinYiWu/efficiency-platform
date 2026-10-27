@@ -36,6 +36,8 @@ describe('AI center', () => {
     );
     await waitFor(() => expect(screen.getByText('AI 智能客服')).toBeInTheDocument());
     expect(screen.getByText('customer-service')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Agent 详情加载失败')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /重\s*试/ })).toBeInTheDocument();
   });
   it('rejects an incomplete agent response', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(

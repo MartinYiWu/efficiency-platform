@@ -19,13 +19,13 @@ import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
 const numberFields = [
-  'rewriteQueryLimit',
-  'vectorTopK',
-  'ftsTopK',
-  'fusionTopK',
-  'rerankTopK',
-  'contextTokenLimit',
-  'citationLimit',
+  { name: 'rewriteQueryLimit', label: '查询改写数量' },
+  { name: 'vectorTopK', label: '向量召回 TopK' },
+  { name: 'ftsTopK', label: '全文召回 TopK' },
+  { name: 'fusionTopK', label: '融合结果 TopK' },
+  { name: 'rerankTopK', label: '重排结果 TopK' },
+  { name: 'contextTokenLimit', label: '上下文 Token 上限' },
+  { name: 'citationLimit', label: '引用数量上限' },
 ];
 const evidenceFields = [
   {
@@ -68,7 +68,7 @@ export function RagPolicyPage() {
   const [items, setItems] = useState<RagPolicy[]>([]);
   const [form] = Form.useForm();
   useEffect(() => {
-    void listAgents().then(setAgents);
+    void listAgents().then((value) => { setAgents(value); setAgentId((current) => current || value[0]?.id || ''); }).catch((error: Error) => message.error(error.message));
   }, []);
   useEffect(() => {
     if (!agentId) return;
@@ -161,17 +161,21 @@ export function RagPolicyPage() {
                 adjacentGroupMaxParents: 3,
               }}
             >
-              <Form.Item name="policyKey" label="策略 Key" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="semanticVersion" label="版本" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              {numberFields.map((name) => (
-                <Form.Item key={name} name={name} label={name} rules={[{ required: true }]}>
+              <h4 className={styles.formSectionTitle}>基本信息</h4>
+              <div className={styles.formGrid}>
+                <Form.Item name="policyKey" label="策略 Key" rules={[{ required: true }]}><Input /></Form.Item>
+                <Form.Item name="semanticVersion" label="语义版本" rules={[{ required: true }]}><Input /></Form.Item>
+              </div>
+              <h4 className={styles.formSectionTitle}>召回、重排与上下文</h4>
+              <div className={styles.formGrid}>
+              {numberFields.map(({ name, label }) => (
+                <Form.Item key={name} name={name} label={label} rules={[{ required: true }]}>
                   <InputNumber min={1} style={{ width: '100%' }} />
                 </Form.Item>
               ))}
+              </div>
+              <h4 className={styles.formSectionTitle}>证据处理</h4>
+              <div className={styles.formGrid}>
               {evidenceFields.map(({ name, label, min, max, step, help }) => (
                 <Form.Item
                   key={name}
@@ -183,6 +187,7 @@ export function RagPolicyPage() {
                   <InputNumber min={min} max={max} step={step} precision={step === 1 ? 0 : 2} />
                 </Form.Item>
               ))}
+              </div>
               <Button type="primary" onClick={() => void save()}>
                 保存草稿
               </Button>

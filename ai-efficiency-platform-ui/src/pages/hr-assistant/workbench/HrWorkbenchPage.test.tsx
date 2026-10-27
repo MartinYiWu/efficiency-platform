@@ -8,7 +8,7 @@ it('renders the five HR workbench todo categories and direct action', () => {
       <HrWorkbenchPage />
     </MemoryRouter>,
   );
-  expect(screen.getByRole('heading', { name: '工作台' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: '招聘工作台' })).toBeInTheDocument();
   expect(screen.getByTestId('workbench-main-grid')).toHaveAttribute('data-layout', 'balanced');
   expect(screen.getByRole('button', { name: '上传简历' })).toBeInTheDocument();
   expect(screen.getByText('需要你处理')).toBeInTheDocument();

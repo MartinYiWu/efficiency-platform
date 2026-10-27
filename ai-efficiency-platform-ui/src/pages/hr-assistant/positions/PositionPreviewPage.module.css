@@ -128,14 +128,14 @@
   z-index: 11;
   right: 0;
   bottom: 0;
-  left: 228px;
+  left: 208px;
   padding: 12px 24px;
   background: #fff;
   border-top: 1px solid #e4ebf4;
 }
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .footer {
-    left: 72px;
+    left: 176px;
   }
 }
 @media (max-width: 767px) {

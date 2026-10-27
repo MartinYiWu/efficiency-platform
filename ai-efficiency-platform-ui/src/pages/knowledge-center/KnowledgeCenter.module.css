@@ -4,6 +4,12 @@
   gap: 24px;
   min-width: 0;
 }
+.importEntry { width: min(100%, 760px); margin: 10vh auto 0; padding: 20px; background: #fff; border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: var(--ui-shadow); }
+.versionUploadBar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 18px 22px; background: #fff; border: 1px solid var(--ui-border); border-radius: 12px; }
+.versionUploadBar > div:first-child { min-width: 220px; flex: 1; }
+.versionUploadBar strong { color: #1d2939; font-size: 15px; }
+.versionUploadBar p { margin: 4px 0 0; color: #98a2b3; font-size: 12px; }
+.page :global(.ant-timeline-item-content) p { margin: 5px 0; }
 .header {
   display: flex;
   align-items: flex-end;
@@ -26,44 +32,38 @@
   gap: 12px;
   align-items: center;
 }
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr));
-  gap: 18px;
-}
-.cards :global(.ant-card) {
-  min-width: 0;
-  min-height: 188px;
-  border-color: var(--ui-border);
-  box-shadow: var(--ui-shadow);
-}
-.cards :global(.ant-card-head) {
-  min-height: 58px;
-}
-.cards :global(.ant-card-head-title) {
-  overflow: visible;
-  white-space: normal;
-  line-height: 1.45;
-}
-.cards :global(.ant-card-body) {
-  padding-top: 18px;
-}
-.cardMeta {
-  color: var(--ui-muted);
-  min-height: 42px;
-  margin: 0 0 18px;
-  line-height: 1.6;
-}
-.cards :global(.ant-space) {
-  color: var(--ui-muted);
-  font-size: 12px;
-}
+.catalogLayout { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 16px; align-items: start; }
+.catalogFilters, .catalogResults { min-width: 0; background: #fff; border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: var(--ui-shadow); }
+.catalogFilters { padding: 18px 10px; }
+.catalogFilters > strong { display: block; padding: 0 12px 14px; color: #344054; font-size: 14px; }
+.filterItem { display: flex; width: 100%; align-items: center; justify-content: space-between; padding: 11px 12px; color: #475467; background: transparent; border: 0; border-radius: 8px; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.filterItem span { color: #98a2b3; }
+.filterItem:hover, .filterActive { color: #175cd3; background: #eaf2ff; }
+.filterActive { font-weight: 650; }
+.catalogResults { overflow: hidden; padding: 18px 18px 4px; }
+.catalogResults .filters { justify-content: space-between; padding-bottom: 18px; }
+.resultCount { color: #98a2b3; font-size: 13px; }
+.baseName { display: flex; align-items: center; gap: 10px; }
+.baseName > span:last-child { min-width: 0; overflow: hidden; }
+.baseName strong, .baseName small { display: block; }
+.baseName strong { overflow: hidden; color: #1d2939; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.baseName small { overflow: hidden; margin-top: 2px; color: #98a2b3; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.baseIcon { display: grid; width: 30px; height: 30px; flex: none; place-items: center; color: #175cd3; background: #eff6ff; border-radius: 7px; font-size: 19px; }
+.clickableRow { cursor: pointer; }
+.clickableRow:hover .baseName strong { color: #175cd3; }
+.catalogResults :global(.ant-table-thead > tr > th) { color: #667085; background: #f8fafc; font-size: 12px; font-weight: 650; }
+.catalogResults :global(.ant-table-tbody > tr > td) { padding-block: 13px; }
 .split {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
   gap: 20px;
   min-width: 0;
 }
+.split > :global(.ant-tabs) { min-width: 0; min-height: 420px; padding: 0 18px 18px; background: #fff; border: 1px solid var(--ui-border); border-radius: 12px; box-shadow: var(--ui-shadow); }
+.split > :global(.ant-tabs) :global(.ant-tabs-nav) { margin-bottom: 16px; }
+.page > :global(.ant-descriptions) { overflow: hidden; background: #fff; border: 1px solid var(--ui-border); border-radius: 10px; }
+.page > :global(.ant-descriptions) :global(.ant-descriptions-item-label) { color: #667085; background: #fafbfc; }
+.page > :global(.ant-descriptions) :global(.ant-descriptions-item-content) { overflow-wrap: anywhere; }
 .directory {
   min-height: 420px;
 }
@@ -85,4 +85,8 @@
   .split {
     grid-template-columns: 1fr;
   }
+  .catalogLayout { grid-template-columns: 1fr; }
+  .catalogFilters { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 9px; }
+  .catalogFilters > strong { display: none; }
+  .filterItem { width: auto; flex: none; gap: 10px; }
 }

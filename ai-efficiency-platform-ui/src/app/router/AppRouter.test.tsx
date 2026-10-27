@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,7 @@ describe('AppRouter', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '招聘工作台' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'AI 人事助手导航' })).toBeInTheDocument();
     expect(screen.queryByText('早上好，林晓。')).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '主导航' })).not.toBeInTheDocument();
@@ -36,12 +36,12 @@ describe('AppRouter', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('heading', { name: '工作台' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '招聘工作台' })).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'AI 人事助手导航' })).toHaveTextContent(
       '岗位管理',
     );
-    expect(screen.getByPlaceholderText('搜索候选人、岗位')).toBeInTheDocument();
-    expect(screen.getByText('上午好，沐白')).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '平台主导航' })).toHaveTextContent('AI 助手');
+    expect(screen.queryByPlaceholderText('搜索候选人、岗位')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上传简历' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '新建岗位' })).toBeInTheDocument();
     expect(screen.getByText('新增简历')).toBeInTheDocument();
@@ -50,24 +50,15 @@ describe('AppRouter', () => {
     expect(screen.getByText('岗位匹配进展')).toBeInTheDocument();
   }, 45_000);
 
-  it('uses an expandable HR navigation tree and allows the desktop sidebar to collapse', () => {
+  it('uses contextual HR navigation beneath the platform top navigation', () => {
     render(
       <MemoryRouter initialEntries={['/ai-assistants/hr/workbench']}>
         <AppRouter />
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('menuitem', { name: /AI 人事助手/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /岗位管理/ })).toBeVisible();
-
-    fireEvent.click(screen.getByRole('menuitem', { name: /AI 人事助手/ }));
-    expect(screen.queryByRole('menuitem', { name: /岗位管理/ })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('menuitem', { name: /AI 人事助手/ }));
-    expect(screen.getByRole('menuitem', { name: /岗位管理/ })).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: '收合左侧导航' }));
-    expect(screen.getByRole('button', { name: '展开左侧导航' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: '平台主导航' })).toHaveTextContent('工作台');
+    expect(screen.getByRole('navigation', { name: 'AI 人事助手导航' })).toHaveTextContent('岗位管理');
   }, 45_000);
 
   it('starts the position configuration wizard from its designed basic-information step', () => {
@@ -131,7 +122,6 @@ describe('AppRouter', () => {
     );
 
     expect(screen.getByRole('heading', { name: /组件与状态规范/ })).toBeInTheDocument();
-    expect(screen.getByText('AI人事助手 / 组件与状态规范')).toBeInTheDocument();
     expect(screen.getAllByText(/强烈推荐面试/)).not.toHaveLength(0);
     expect(
       screen.getByText(
@@ -186,7 +176,7 @@ it('navigates from the HR menu to the resume upload page', async () => {
     </MemoryRouter>,
   );
 
-  await user.click(screen.getByRole('menuitem', { name: /简历中心/ }));
+  await user.click(within(screen.getByRole('navigation', { name: 'AI 人事助手导航' })).getByRole('button', { name: '简历中心' }));
 
   expect(screen.getByRole('heading', { name: '上传简历' })).toBeInTheDocument();
 });
@@ -199,7 +189,6 @@ it('renders PAGE-07 resume upload with consent-gated parsing and all three uploa
   );
 
   expect(screen.getByRole('heading', { name: '上传简历' })).toBeInTheDocument();
-  expect(screen.getByText('AI人事助手 / 简历中心 / 上传简历')).toBeInTheDocument();
   expect(screen.getByText('当前配置概览')).toBeInTheDocument();
   expect(screen.getByText('张伟_后端开发工程师.pdf')).toBeInTheDocument();
 
@@ -288,7 +277,7 @@ it('renders the operations intelligent conversation page with content-operations
 
   expect(screen.getByRole('heading', { name: 'AI 内容运营助手' })).toBeInTheDocument();
   expect(screen.getByText('协助处理选题、内容创作、活动策划和复盘')).toBeInTheDocument();
-  expect(screen.getByRole('navigation', { name: 'AI 内容运营助手导航' })).toBeInTheDocument();
+  expect(screen.getByRole('navigation', { name: 'AI 助手导航' })).toHaveTextContent('AI 内容运营助手');
 
   const input = screen.getByRole('textbox', { name: '输入消息' });
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());

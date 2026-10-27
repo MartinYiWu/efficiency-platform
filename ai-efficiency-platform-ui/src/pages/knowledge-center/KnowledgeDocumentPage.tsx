@@ -105,19 +105,6 @@ export function KnowledgeDocumentPage() {
           <Typography.Title level={2}>{document.title}</Typography.Title>
           <Typography.Text type="secondary">{document.documentCode}</Typography.Text>
         </div>
-        <Space>
-          <Upload
-            beforeUpload={() => false}
-            maxCount={1}
-            fileList={files}
-            onChange={({ fileList }) => setFiles(fileList)}
-          >
-            <Button>选择新版本</Button>
-          </Upload>
-          <Button type="primary" onClick={() => void upload()}>
-            上传版本
-          </Button>
-        </Space>
       </header>
       <Descriptions
         bordered
@@ -132,12 +119,15 @@ export function KnowledgeDocumentPage() {
           },
         ]}
       />
+      <div className={styles.versionUploadBar}>
+        <div><strong>更新文档版本</strong><p>选择处理方式和文件，提交后在下方查看版本与处理任务。</p></div>
+        <EvidenceModeSelect knowledgeType={knowledgeType} value={evidenceMode} onChange={setEvidenceMode} />
+        <Space>
+          <Upload beforeUpload={() => false} maxCount={1} fileList={files} onChange={({ fileList }) => setFiles(fileList)}><Button>选择新版本</Button></Upload>
+          <Button type="primary" onClick={() => void upload()}>上传版本</Button>
+        </Space>
+      </div>
       <Card title="版本记录">
-        <EvidenceModeSelect
-          knowledgeType={knowledgeType}
-          value={evidenceMode}
-          onChange={setEvidenceMode}
-        />
         <Timeline
           items={document.versions.map((version) => ({
             color:

@@ -1,13 +1,11 @@
 import {
   Button,
-  Card,
   Drawer,
-  Empty,
   Form,
   Input,
   Select,
-  Space,
   Spin,
+  Table,
   Tag,
   Typography,
   message,
@@ -26,25 +24,19 @@ export function KnowledgeBaseListPage() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [keyword, setKeyword] = useState('');
+  const [submittedKeyword, setSubmittedKeyword] = useState('');
+  const [typeFilter, setTypeFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [form] = Form.useForm();
-  const load = async () => {
-    setLoading(true);
-    try {
-      const result = await listKnowledgeBases(
-        new URLSearchParams(keyword ? { keyword } : {}).toString(),
-      );
-      setItems(result.items);
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载失败');
-    } finally {
-      setLoading(false);
-    }
-  };
   useEffect(() => {
     let active = true;
-    void listKnowledgeBases('')
+    const query = new URLSearchParams({ page: String(page), pageSize: '10' });
+    if (submittedKeyword) query.set('keyword', submittedKeyword);
+    if (typeFilter !== 'ALL') query.set('knowledgeType', typeFilter);
+    void listKnowledgeBases(query.toString())
       .then((result) => {
-        if (active) setItems(result.items);
+        if (active) { setItems(result.items); setTotal(result.total); }
       })
       .catch((error: Error) => message.error(error.message))
       .finally(() => {
@@ -53,7 +45,7 @@ export function KnowledgeBaseListPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [page, submittedKeyword, typeFilter]);
   const create = async () => {
     const value = await form.validateFields();
     try {
@@ -79,39 +71,35 @@ export function KnowledgeBaseListPage() {
           新建知识库
         </Button>
       </header>
-      <div className={styles.filters}>
-        <Input.Search
-          placeholder="搜索知识库"
-          allowClear
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          onSearch={() => void load()}
-          style={{ maxWidth: 360 }}
-        />
-      </div>
-      <Spin spinning={loading}>
-        {items.length ? (
-          <div className={styles.cards}>
-            {items.map((item) => (
-              <Card
-                key={item.id}
-                hoverable
-                onClick={() => navigate(`/knowledge-center/knowledge-bases/${item.id}`)}
-                title={item.name}
-                extra={<Tag color={item.status === 'ACTIVE' ? 'success' : 'default'}>{knowledgeStatusLabel(item.status)}</Tag>}
-              >
-                <p className={styles.cardMeta}>{item.description ?? '暂无描述'}</p>
-                <Space>
-                  <Tag variant="filled">{knowledgeTypeLabel(item.knowledgeType)}</Tag>
-                  <span>{visibilityScopeLabel(item.visibilityScope)}</span>
-                </Space>
-              </Card>
-            ))}
+      <div className={styles.catalogLayout}>
+        <aside className={styles.catalogFilters} aria-label="资料分类">
+          <strong>资料分类</strong>
+          {[
+            ['ALL', '全部资料'],
+            ['COMPANY_POLICY', '公司制度'],
+            ['BUSINESS_PROCESS', '业务流程'],
+            ['PRODUCT_DOCUMENTATION', '产品文档'],
+            ['TECHNICAL_DOCUMENTATION', '技术文档'],
+          ].map(([value, label]) => <button key={value} type="button" className={`${styles.filterItem} ${typeFilter === value ? styles.filterActive : ''}`} onClick={() => { if (value !== typeFilter || page !== 1) { setLoading(true); setPage(1); setTypeFilter(value); } }}>{label}</button>)}
+        </aside>
+        <div className={styles.catalogResults}>
+          <div className={styles.filters}>
+            <Input.Search placeholder="搜索知识库名称或描述" allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} onSearch={(value) => { const next = value.trim(); if (next !== submittedKeyword || page !== 1) { setLoading(true); setPage(1); setSubmittedKeyword(next); } }} style={{ maxWidth: 400 }} />
+            <span className={styles.resultCount}>共 {total} 个知识库</span>
           </div>
-        ) : (
-          <Empty description="暂无知识库" />
-        )}
-      </Spin>
+          <Spin spinning={loading}>
+            <Table<KnowledgeBase> rowKey="id" dataSource={items} pagination={{ current: page, pageSize: 10, total, showSizeChanger: false, onChange: (value) => { if (value !== page) { setLoading(true); setPage(value); } } }} scroll={{ x: 850 }} onRow={(item) => ({ onClick: () => navigate(`/knowledge-center/knowledge-bases/${item.id}`), className: styles.clickableRow })} columns={[
+              { title: '知识库名称', dataIndex: 'name', key: 'name', width: 235, render: (name: string, item) => <span className={styles.baseName}><span className={styles.baseIcon}>▤</span><span title={name}><strong>{name}</strong><small>{item.code}</small></span></span> },
+              { title: '描述', dataIndex: 'description', key: 'description', width: 225, ellipsis: true, render: (value: string | null) => value || '—' },
+              { title: '类型', dataIndex: 'knowledgeType', key: 'knowledgeType', width: 105, render: knowledgeTypeLabel },
+              { title: '可见范围', dataIndex: 'visibilityScope', key: 'visibilityScope', width: 105, render: visibilityScopeLabel },
+              { title: '更新时间', dataIndex: 'updatedAt', key: 'updatedAt', width: 160, render: (value: string) => value ? value.replace('T', ' ').slice(0, 16) : '—' },
+              { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: (value: string) => <Tag color={value === 'ACTIVE' ? 'success' : 'default'}>{knowledgeStatusLabel(value)}</Tag> },
+              { title: '操作', key: 'action', width: 75, render: (_, item) => <Button type="link" onClick={(event) => { event.stopPropagation(); navigate(`/knowledge-center/knowledge-bases/${item.id}`); }}>查看</Button> },
+            ]} />
+          </Spin>
+        </div>
+      </div>
       <Drawer
         title="新建知识库"
         open={open}

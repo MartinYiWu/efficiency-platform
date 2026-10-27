@@ -18,6 +18,16 @@ import { listAgents, listPolicies, saveModelPolicy } from '../../features/ai-cen
 import { aiStatusLabel } from '../../features/ai-center/presentation';
 import styles from './AiCenter.module.css';
 
+const modelNumericFields = [
+  { name: 'temperature', label: '采样温度' },
+  { name: 'topP', label: 'Top P' },
+  { name: 'maxInputTokens', label: '最大输入 Token' },
+  { name: 'maxOutputTokens', label: '最大输出 Token' },
+  { name: 'connectTimeoutMs', label: '连接超时（毫秒）' },
+  { name: 'readTimeoutMs', label: '响应超时（毫秒）' },
+  { name: 'maxRetries', label: '最大重试次数' },
+];
+
 export function ModelPolicyPage() {
   const [params] = useSearchParams();
   const [agents, setAgents] = useState<AgentDefinition[]>([]);
@@ -25,7 +35,7 @@ export function ModelPolicyPage() {
   const [items, setItems] = useState<ModelPolicy[]>([]);
   const [form] = Form.useForm();
   useEffect(() => {
-    void listAgents().then(setAgents);
+    void listAgents().then((value) => { setAgents(value); setAgentId((current) => current || value[0]?.id || ''); }).catch((error: Error) => message.error(error.message));
   }, []);
   useEffect(() => {
     if (!agentId) return;
@@ -95,31 +105,17 @@ export function ModelPolicyPage() {
                 maxRetries: 1,
               }}
             >
-              <Form.Item name="policyKey" label="策略 Key" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="semanticVersion" label="版本" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="provider" label="Provider" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              <Form.Item name="modelName" label="模型" rules={[{ required: true }]}>
-                <Input />
-              </Form.Item>
-              {[
-                'temperature',
-                'topP',
-                'maxInputTokens',
-                'maxOutputTokens',
-                'connectTimeoutMs',
-                'readTimeoutMs',
-                'maxRetries',
-              ].map((name) => (
-                <Form.Item key={name} name={name} label={name} rules={[{ required: true }]}>
-                  <InputNumber style={{ width: '100%' }} />
-                </Form.Item>
-              ))}
+              <h4 className={styles.formSectionTitle}>基本信息</h4>
+              <div className={styles.formGrid}>
+                <Form.Item name="policyKey" label="策略 Key" rules={[{ required: true }]}><Input /></Form.Item>
+                <Form.Item name="semanticVersion" label="语义版本" rules={[{ required: true }]}><Input /></Form.Item>
+                <Form.Item name="provider" label="模型服务商" rules={[{ required: true }]}><Input /></Form.Item>
+                <Form.Item name="modelName" label="模型名称" rules={[{ required: true }]}><Input /></Form.Item>
+              </div>
+              <h4 className={styles.formSectionTitle}>生成参数与超时</h4>
+              <div className={styles.formGrid}>
+                {modelNumericFields.map(({ name, label }) => <Form.Item key={name} name={name} label={label} rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} /></Form.Item>)}
+              </div>
               <Button type="primary" onClick={() => void save()}>
                 保存草稿
               </Button>

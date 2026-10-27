@@ -1,29 +1,43 @@
-import { AppstoreOutlined, BellOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons';
-import { Avatar, Drawer, Input, Layout, Menu, Typography } from 'antd';
+import { ApiOutlined, AppstoreOutlined, AuditOutlined, BarChartOutlined, BookOutlined, CommentOutlined, DatabaseOutlined, ExperimentOutlined, FileSearchOutlined, FileTextOutlined, FolderOpenOutlined, HomeOutlined, MenuOutlined, MessageOutlined, SettingOutlined, TeamOutlined } from '@ant-design/icons';
+import { Drawer } from 'antd';
 import { type ReactNode, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
-import styles from '../hrAssistantShell/HrAssistantShell.module.css';
-import { assistantItems, managementItems, navigationPaths, resolveShellContext, workspaceItems } from './navigation';
+import styles from './PlatformShell.module.css';
+import { assistantItems, type NavigationItem, primaryItems, resolveShellContext } from './navigation';
 
-function Navigation({ collapsed = false, close }: { collapsed?: boolean; close?: () => void }) {
-  const navigate = useNavigate(); const context = resolveShellContext(useLocation().pathname);
-  const [openKeys, setOpenKeys] = useState(context.openKeys);
-  const go = (key: string) => { const path = navigationPaths[key]; if (path) { navigate(path); close?.(); } };
-  const menu = (items: typeof workspaceItems, selectable = true) => <Menu mode="inline" inlineCollapsed={collapsed} inlineIndent={16} items={items} selectedKeys={selectable ? [context.selectedKey] : []} openKeys={collapsed ? [] : openKeys} onOpenChange={setOpenKeys} onClick={({ key }) => go(key)} />;
-  return <nav className={styles.navigation} aria-label={context.navigationLabel}>
-    <div className={styles.menuGroup}><Typography.Text className={styles.menuGroupTitle}>工作空间</Typography.Text>{menu(workspaceItems)}</div>
-    <div className={styles.assistantMenu}>{menu(assistantItems)}</div>
-    <div className={styles.menuGroup}><Typography.Text className={styles.menuGroupTitle}>管理</Typography.Text>{menu(managementItems, false)}</div>
-  </nav>;
+const navIcons: Record<string, ReactNode> = {
+  workbench: <HomeOutlined />, assistants: <MessageOutlined />, knowledge: <FolderOpenOutlined />, management: <SettingOutlined />,
+  agents: <ApiOutlined />, prompts: <FileTextOutlined />, models: <AppstoreOutlined />, rag: <DatabaseOutlined />,
+  debug: <ExperimentOutlined />, evaluations: <BarChartOutlined />, runs: <AuditOutlined />, feedback: <CommentOutlined />,
+  'customer-service': <MessageOutlined />, operations: <BookOutlined />, 'hr-chat': <TeamOutlined />,
+  'hr-workbench': <HomeOutlined />, 'hr-positions': <AppstoreOutlined />, 'hr-resumes': <FileSearchOutlined />,
+  'hr-matching': <BarChartOutlined />, 'hr-interviews': <FileTextOutlined />, 'hr-talent': <TeamOutlined />, 'hr-settings': <SettingOutlined />,
+};
+
+function NavigationLinks({ items, selectedKey, onNavigate }: { items: NavigationItem[]; selectedKey: string; onNavigate?: () => void }) {
+  const navigate = useNavigate();
+  return <>{items.map((item) => <button key={item.key} type="button" className={`${styles.navLink} ${selectedKey === item.key ? styles.active : ''}`} aria-current={selectedKey === item.key ? 'page' : undefined} onClick={() => { navigate(item.path); onNavigate?.(); }}><span className={styles.navIcon} aria-hidden="true">{navIcons[item.key]}</span>{item.label}</button>)}</>;
 }
 
 export function PlatformShell({ children }: { children: ReactNode }) {
-  const [drawerOpen, setDrawerOpen] = useState(false); const [collapsed, setCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const navigate = useNavigate();
   const context = resolveShellContext(useLocation().pathname);
-  return <Layout className={`${styles.shell} ${collapsed ? styles.shellCollapsed : ''}`}>
-    <aside className={styles.desktopSider} aria-label="左侧主导航"><div className={styles.brand}><span className={styles.brandMark}>AI</span><Typography.Text strong className={styles.brandName}>AI效能平台</Typography.Text><button className={styles.sidebarToggle} type="button" aria-label={collapsed ? '展开左侧导航' : '收合左侧导航'} onClick={() => setCollapsed((value) => !value)}>{collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}</button></div><Navigation collapsed={collapsed} /></aside>
-    <Drawer className={styles.mobileDrawer} title="AI效能平台" placement="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}><Navigation close={() => setDrawerOpen(false)} /></Drawer>
-    <Layout className={styles.workspace}><header className={styles.topBar}><button className={styles.menuButton} type="button" aria-label="打开平台导航" onClick={() => setDrawerOpen(true)}><AppstoreOutlined /></button><Typography.Text className={styles.breadcrumb}>{context.breadcrumb}</Typography.Text><Input className={styles.search} prefix={<SearchOutlined />} placeholder={context.searchPlaceholder} aria-label={context.searchPlaceholder} /><div className={styles.userActions}><button className={styles.iconButton} type="button" aria-label="消息通知"><BellOutlined /></button><Avatar className={styles.avatar}>沐</Avatar><Typography.Text strong className={styles.userName}>沐白</Typography.Text><Typography.Text className={styles.roleTag}>{context.userRole}</Typography.Text></div></header><main className={styles.content}>{children}</main></Layout>
-  </Layout>;
+  const mobileItems = [...primaryItems, ...assistantItems, ...(context.localItems ?? [])];
+
+  return <div className={`${styles.shell} ${context.isChat ? styles.chatShell : ''}`}>
+    <header className={styles.header}>
+      <button className={styles.mobileMenuButton} type="button" aria-label="打开平台导航" onClick={() => setDrawerOpen(true)}><MenuOutlined /></button>
+      <button className={styles.brand} type="button" onClick={() => navigate('/ai-assistants/hr/workbench')} aria-label="AI效能平台，返回工作台"><span className={styles.brandMark}><AppstoreOutlined /></span><span>AI效能平台</span></button>
+      <nav className={styles.primaryNav} aria-label="平台主导航">{primaryItems.map((item) => <button key={item.key} type="button" className={`${styles.primaryLink} ${context.section === item.section ? styles.primaryActive : ''}`} aria-current={context.section === item.section ? 'page' : undefined} onClick={() => navigate(item.path)}><span aria-hidden="true">{navIcons[item.key]}</span>{item.label}</button>)}</nav>
+      <span className={styles.headerCaption}>内部用户</span>
+    </header>
+    {context.isChat && <nav className={styles.assistantTabs} aria-label="AI 助手导航"><NavigationLinks items={assistantItems} selectedKey={context.selectedKey} /></nav>}
+    <div className={styles.body}>
+      {context.localItems && <aside className={styles.localSidebar}><div className={styles.localHeading}>{context.localLabel === 'AI 人事助手导航' ? 'AI 人事助手 · 演示数据' : 'AI 管理'}</div><nav className={styles.localNav} aria-label={context.localLabel}><NavigationLinks items={context.localItems} selectedKey={context.selectedKey} /></nav></aside>}
+      <main className={styles.content}>{children}</main>
+    </div>
+    <Drawer className={styles.mobileDrawer} title="AI效能平台" placement="left" open={drawerOpen} onClose={() => setDrawerOpen(false)}><nav className={styles.mobileNav} aria-label="移动端平台导航"><NavigationLinks items={mobileItems} selectedKey={context.selectedKey} onNavigate={() => setDrawerOpen(false)} /></nav></Drawer>
+  </div>;
 }

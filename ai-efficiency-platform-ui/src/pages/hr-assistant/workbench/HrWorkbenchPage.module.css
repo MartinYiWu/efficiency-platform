@@ -11,74 +11,28 @@
   gap: 20px;
 }
 .pageTitle {
-  margin: 0 0 12px !important;
-  font-size: 20px !important;
-  font-weight: 600 !important;
-}
-.greeting {
   margin: 0 0 6px !important;
-  font-size: 18px !important;
+  font-size: 28px !important;
+  font-weight: 700 !important;
 }
 .dateText,
 .todoCopy :global(.ant-typography-secondary) {
   color: #64748b;
   font-size: 13px;
 }
+.dateText :global(.ant-tag) { margin-left: 8px; }
 .welcomeActions {
   display: flex;
   gap: 12px;
 }
-.quickGrid,
 .metricGrid {
   display: grid;
-  gap: 16px;
+  gap: 0;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.quickAction {
-  display: flex !important;
-  height: 92px;
-  align-items: center;
-  gap: 12px;
-  padding: 16px !important;
-  text-align: left;
+  padding: 8px 0;
   background: #fff;
-  border: 1px solid #e2e8f0 !important;
-  border-radius: 12px !important;
-}
-.quickAction:hover {
-  border-color: #bfdbfe !important;
-  background: #f8fbff !important;
-}
-.quickIcon {
-  display: inline-grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  color: #2563eb;
-  font-size: 20px;
-  background: #eff6ff;
-  border-radius: 10px;
-}
-.quickCopy {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-}
-.quickCopy span:first-child {
-  color: #0f172a;
-  font-weight: 600;
-}
-.quickCopy span:last-child {
-  overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.quickArrow {
-  margin-left: auto;
-  color: #94a3b8;
-  font-size: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 12px;
 }
 .metricCard,
 .todosCard,
@@ -90,8 +44,10 @@
   box-shadow: 0 1px 3px rgb(15 23 42 / 6%);
 }
 .metricCard :global(.ant-card-body) {
-  padding: 20px;
+  padding: 13px 22px;
 }
+.metricCard { border: 0; border-radius: 0; box-shadow: none; border-right: 1px solid var(--ui-border); }
+.metricCard:last-child { border-right: 0; }
 .metricLabel {
   color: #475569;
 }
@@ -264,7 +220,6 @@
   font-size: 13px;
 }
 @media (max-width: 1199px) {
-  .quickGrid,
   .metricGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -286,13 +241,9 @@
   .welcomeActions :global(.ant-btn) {
     flex: 1;
   }
-  .quickGrid,
   .metricGrid,
   .onboardingSteps {
     grid-template-columns: 1fr;
-  }
-  .quickAction {
-    height: 76px;
   }
   .todoItem {
     grid-template-columns: 8px minmax(0, 1fr);
