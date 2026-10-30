@@ -115,7 +115,10 @@ class CustomerServiceRetrieval:
         else:
             rewrite = await gateway.complete(
                 "rewrite",
-                {"question": question, "rewrite_query_limit": policy.rewrite_query_limit},
+                {
+                    "question": question,
+                    "rewrite_query_limit": policy.rewrite_query_limit,
+                },
                 QueryRewrite,
             )
             queries = rewrite.queries[: policy.rewrite_query_limit]
@@ -247,11 +250,34 @@ class CustomerServiceRetrieval:
                 (),
                 version_exclusions=tuple(exclusions),
             )
-        reranked = await self.reranker.rerank(
-            question,
-            tuple(item.content for item in fused),
-            top_n=min(policy.rerank_top_k, len(fused)),
-        )
+        top_n = min(policy.rerank_top_k, len(fused))
+        documents = tuple(item.content for item in fused)
+        rerank_queries = tuple(dict.fromkeys(queries)) if planned_queries else ()
+        if len(rerank_queries) > 1:
+            rankings_by_query = await asyncio.gather(
+                *(
+                    self.reranker.rerank(query, documents, top_n=top_n)
+                    for query in rerank_queries
+                )
+            )
+            # 冻结子问题逐轮共享名额，避免综合问句的显著主题挤掉互补证据；下游总预算不变。
+            merged: list[tuple[int, float]] = []
+            seen_indexes: set[int] = set()
+            for rank in range(max(map(len, rankings_by_query), default=0)):
+                for query_ranking in rankings_by_query:
+                    if rank >= len(query_ranking):
+                        continue
+                    index, score = query_ranking[rank]
+                    if index not in seen_indexes:
+                        merged.append((index, score))
+                        seen_indexes.add(index)
+                    if len(merged) >= top_n:
+                        break
+                if len(merged) >= top_n:
+                    break
+            reranked = tuple(merged)
+        else:
+            reranked = await self.reranker.rerank(question, documents, top_n=top_n)
         evidence = tuple(
             fused[index].model_copy(
                 update={

@@ -159,6 +159,68 @@ class RagEvaluationMetricsTest {
         assertThat(metrics.passed()).isTrue();
     }
 
+    @Test
+    void acceptsOnlyExplicitCompleteEquivalentFactsWhileKeepingOtherFactsRequired() throws Exception {
+        EvaluationCase testCase = mapper.copy()
+                .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+                .readValue("""
+                {"id":"case-equivalent","datasetId":"dataset-1","caseNo":"FORMAT-001",
+                 "question":"路由配置？","expectedAnswerMode":"COMPANY_KNOWLEDGE",
+                 "expectedFacts":["route.type+route.key","禁止使用别名"],"prohibitedFacts":[],
+                 "expectedDocumentTitles":[],"expectedDocumentVersionIds":[],"minCitationCount":0,
+                 "tags":[],"enabled":true,
+                 "expectedFactAlternatives":{"route.type+route.key":["route 采用 type + key 的结构"]}}
+                """, EvaluationCase.class);
+        var accepted = RagEvaluationMetrics.evaluate(testCase, response("COMPANY_KNOWLEDGE",
+                "route 采用 type + key 的结构；禁止使用别名。", "规范", "v1"));
+        assertThat(accepted.passed()).isTrue();
+        assertThat(accepted.expectedFactRecall()).isEqualTo(1.0);
+        for (String answer : List.of("type key；禁止使用别名", "route 采用 type + name 的结构；禁止使用别名",
+                "route 采用 type + key 的结构")) {
+            var rejected = RagEvaluationMetrics.evaluate(testCase,
+                    response("COMPANY_KNOWLEDGE", answer, "规范", "v1"));
+            assertThat(rejected.passed()).as(answer).isFalse();
+            assertThat(rejected.failures()).contains("EXPECTED_FACT_MISSING");
+        }
+    }
+
+    @Test
+    void equivalentProhibitedFactStillRejectsTheAnswer() throws Exception {
+        EvaluationCase testCase = new EvaluationCase("id", "dataset", "RULE-001", "要求？", "COMPANY_KNOWLEDGE",
+                List.of("禁止绕过审核"), List.of("禁止绕过审核"), List.of(), List.of(), 0, List.of(), true,
+                java.util.Map.of("禁止绕过审核", List.of("必须经过人工审批")));
+        var metrics = RagEvaluationMetrics.evaluate(testCase,
+                response("COMPANY_KNOWLEDGE", "必须经过人工审批", "规范", "v1"));
+        assertThat(metrics.expectedFactRecall()).isEqualTo(1.0);
+        assertThat(metrics.prohibitedFactMatched()).isTrue();
+        assertThat(metrics.failures()).containsExactly("PROHIBITED_FACT_MATCHED");
+    }
+
+    @Test
+    void rejectsUnboundOrBlankEquivalentFacts() {
+        for (var alternatives : List.of(java.util.Map.of("其他事实", List.of("表述")),
+                java.util.Map.of("原事实", List.of(" ")), java.util.Map.of("原事实", List.<String>of()))) {
+            org.assertj.core.api.Assertions.assertThatThrownBy(() -> new EvaluationCase("id", "dataset", "RULE-002",
+                    "要求？", "COMPANY_KNOWLEDGE", List.of("原事实"), List.of(), List.of(), List.of(), 0,
+                    List.of(), true, alternatives)).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void replaysHistoricalAnswerWithoutChangingLegacyLiteralScoring() throws Exception {
+        var facts = List.of("peer.kind+peer.id", "oc_开头", "chatId", "替代");
+        var legacy = new EvaluationCase("historical", "dataset", "AGENT-004", "peer？", "COMPANY_KNOWLEDGE",
+                facts, List.of(), List.of(), List.of(), 0, List.of(), true);
+        var node = mapper.valueToTree(response("COMPANY_KNOWLEDGE", "placeholder", "规范", "v1"));
+        ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("answer_markdown", "## peer 的填写方式\n\npeer 采用 kind + id 的结构填写：kind 表示会话类型，\"group\" 为群聊，\"user\" 为单聊；id 填写对应的飞书群ID或用户ID，不可用 chatId 替代。[1]\n\n路由绑定配置示例中，peer 写作 {\"kind\": \"group\", \"id\": \"oc_你的飞书群ID\"}，并与 channel: \"feishu\" 配合使用。[2][3][4]\n\n## 飞书群ID的格式要求\n\n飞书群ID（peer.id）的格式为以 oc_ 开头的字符串，需准确复制，后续路由配置核心依赖此ID。[5][6][7]");
+        var historicalResponse = mapper.treeToValue(node, CustomerServiceDebugView.class);
+        assertThat(RagEvaluationMetrics.evaluate(legacy, historicalResponse).expectedFactRecall()).isEqualTo(0.75);
+        var explicit = new EvaluationCase(legacy.id(), legacy.datasetId(), legacy.caseNo(), legacy.question(),
+                legacy.expectedAnswerMode(), facts, List.of(), List.of(), List.of(), 0, List.of(), true,
+                java.util.Map.of("peer.kind+peer.id", List.of("peer 采用 kind + id 的结构填写")));
+        assertThat(RagEvaluationMetrics.evaluate(explicit, historicalResponse).expectedFactRecall()).isEqualTo(1.0);
+    }
+
     private CustomerServiceDebugView response(String mode, String answer, String title, String version) throws Exception {
         String json = """
                 {"contract_version":"customer-service-rag-debug-view/1","debug_run_id":"run-1",

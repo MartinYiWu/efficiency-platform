@@ -68,9 +68,9 @@ def _freeze(value: object) -> JsonValue:
     raise TypeError(f"不支持的 JSON 类型: {type(value).__name__}")
 
 
-def _answer_thinking_option(stage_key: str) -> tuple[tuple[str, JsonValue], ...]:
-    # 冲突和充分性判断保留模型默认思考；已冻结证据的表述阶段优先缩短首段等待。
-    if stage_key in {"answer_company", "answer_mixed", "answer_general"}:
+def _stage_thinking_option(stage_key: str) -> tuple[tuple[str, JsonValue], ...]:
+    # 充分性使用已核验的冻结证据直接判断；跨文档冲突仍保留默认思考。
+    if stage_key in {"sufficiency", "answer_company", "answer_mixed", "answer_general"}:
         return (("thinking", JsonObject((("type", "disabled"),))),)
     return ()
 
@@ -221,7 +221,7 @@ class ReleaseStructuredModelGateway:
                 ("response_format", JsonObject((("type", "json_object"),))),
                 ("json_schema", _freeze(schema)),
             )
-            + _answer_thinking_option(stage_key)
+            + _stage_thinking_option(stage_key)
         )
         for attempt in range(policy.max_retries + 1):
             attempt_messages = messages
@@ -304,7 +304,7 @@ class ReleaseStructuredModelGateway:
                     ("response_format", JsonObject((("type", "json_object"),))),
                     ("json_schema", _freeze(output_type.model_json_schema())),
                 )
-                + _answer_thinking_option(stage_key)
+                + _stage_thinking_option(stage_key)
             ),
             timeout_ms=self.model_policy.read_timeout_ms,
         )

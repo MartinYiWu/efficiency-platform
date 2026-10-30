@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 const now = '2026-10-23T00:00:00Z';
 const agent = {
@@ -399,15 +399,24 @@ for (const width of [1440, 1024, 390]) {
         .toBe(true);
     }
     await page.goto('/ai-assistants/customer-service/chat');
-    await page.getByRole('button', { name: '历史会话', exact: true }).click();
+    if (width < 768) {
+      await page.getByRole('button', { name: /^history 历史会话$/ }).click();
+      await page
+        .getByRole('dialog', { name: '历史会话' })
+        .getByRole('button', { name: '历史会话', exact: true })
+        .click();
+      await expect(page.getByRole('dialog', { name: '历史会话' })).toBeHidden();
+    } else {
+      await page.getByRole('button', { name: '历史会话', exact: true }).click();
+    }
     const button = page.getByRole('button', { name: /技术指南.*原文节选/ });
     await expect(button).toBeVisible();
     await button.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByRole('dialog')).toContainText('准确原文');
     await expect(page.getByRole('dialog')).toContainText('原文节选');
-    await expect(page.getByRole('dialog')).toContainText('[0, 4)');
-    await expect(page.getByRole('dialog')).toContainText('[20, 24)');
+    await expect(page.getByRole('dialog')).not.toContainText('[0, 4)');
+    await expect(page.getByRole('dialog')).not.toContainText('[20, 24)');
     await expect(page.getByRole('dialog')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect(page.getByRole('log')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect

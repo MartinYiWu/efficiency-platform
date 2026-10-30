@@ -47,6 +47,19 @@ class JdbcRagEvaluationRepositoryTest {
                 assertThat(testCase.expectedFacts()).containsExactly("事实一");
                 assertThat(testCase.tags()).containsExactly("制度");
             });
+            EvaluationCase original = repository.listCases("d1").getFirst();
+            assertThat(original.expectedFactAlternatives()).isEmpty();
+            var alternatives = java.util.Map.of("事实一", List.of("事实一的完整等价表述"));
+            repository.upsertCases("d1", List.of(new EvaluationCase(original.id(), "d1", "C-001", "等价问题",
+                    original.expectedAnswerMode(), original.expectedFacts(), original.prohibitedFacts(),
+                    original.expectedDocumentTitles(), original.expectedDocumentVersionIds(),
+                    original.minCitationCount(), original.tags(), true, alternatives)));
+            assertThat(repository.listCases("d1")).singleElement().satisfies(testCase -> {
+                assertThat(testCase.expectedFacts()).containsExactly("事实一");
+                assertThat(testCase.expectedFactAlternatives()).isEqualTo(alternatives);
+            });
+            repository.upsertCases("d1", List.of(original));
+            assertThat(repository.listCases("d1").getFirst().expectedFactAlternatives()).isEmpty();
         } finally {
             database.shutdown();
         }

@@ -1,4 +1,9 @@
-import { expect, type Locator, type Page, test } from '@playwright/test';
+import { envelope, installOperationConversation, queuedRun } from './operations-fixture';
+import { expect, type Locator, type Page, test } from './fixtures';
+
+test.beforeEach(async ({ page }) => {
+  await installOperationConversation(page);
+});
 
 type RankedDigestOptions = {
   degraded?: boolean;
@@ -20,6 +25,11 @@ const citation = {
   verification_status: 'verified',
   supports_item_ids: Array.from({ length: 9 }, (_, index) => `hotspot-${index + 1}`),
   independent_source_group: 'official-example',
+  document_id: null,
+  excerpt: null,
+  content_scope: null,
+  content_hash: null,
+  acquisition_method: null,
 } as const;
 
 function deliverableSetV2(options: RankedDigestOptions = {}) {
@@ -152,23 +162,17 @@ async function installV2Conversation(
 ) {
   let submitCount = 0;
   const conversationIds: string[] = [];
-  await page.route('**/v1/conversations/*/messages', async (route) => {
+  await page.route('**/api/operations/conversations/*/messages', async (route) => {
     submitCount += 1;
     const conversationId = decodeURIComponent(
       new URL(route.request().url()).pathname.split('/').at(-2) ?? '',
     );
     conversationIds.push(conversationId);
     await route.fulfill({
-      json: {
-        contract_version: 'conversation/1',
-        conversation_id: conversationId,
-        turn_id: `turn-${submitCount}`,
-        run_id: `run-${submitCount}`,
-        status: 'queued',
-      },
+      json: envelope(queuedRun(conversationId, `run-${submitCount}`)),
     });
   });
-  await page.route('**/v1/runs/*/events', async (route) => {
+  await page.route('**/api/operations/runs/*/events?*', async (route) => {
     const runId = new URL(route.request().url()).pathname.split('/').at(-2) ?? '';
     const runNumber = Number(runId.split('-').at(-1));
     await route.fulfill({
@@ -188,7 +192,8 @@ async function keepEventStreamOpen(page: Page, runId: string, body: string) {
         const requestUrl =
           typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
         if (
-          new URL(requestUrl, window.location.origin).pathname === `/v1/runs/${targetRunId}/events`
+          new URL(requestUrl, window.location.origin).pathname ===
+          `/api/operations/runs/${targetRunId}/events`
         ) {
           return new Response(
             new ReadableStream({

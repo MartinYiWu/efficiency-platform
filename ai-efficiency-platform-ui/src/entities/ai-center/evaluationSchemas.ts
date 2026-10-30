@@ -18,6 +18,7 @@ export const evaluationCaseSchema = z.object({
   question: z.string(),
   expectedAnswerMode: z.enum(['COMPANY_KNOWLEDGE', 'MIXED', 'GENERAL_ADVICE', 'INSUFFICIENT_EVIDENCE']),
   expectedFacts: z.array(z.string()),
+  expectedFactAlternatives: z.record(z.string(), z.array(z.string())).optional(),
   prohibitedFacts: z.array(z.string()),
   expectedDocumentTitles: z.array(z.string()),
   expectedDocumentVersionIds: z.array(z.string()),

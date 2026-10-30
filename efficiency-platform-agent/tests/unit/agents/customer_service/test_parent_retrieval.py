@@ -211,3 +211,145 @@ async def test_duplicate_child_text_in_one_version_does_not_consume_rerank_topk(
     assert len(trace.vector_candidates) == 3
     assert len(trace.fused_candidates) == 2
     assert len(trace.assembly.selected) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "planned",
+    [
+        ("部署要求", "费用要求"),
+        ("部署要求", "部署要求", "费用要求"),
+        ("部署要求", "部署要求"),
+        ("部署要求",),
+        None,
+    ],
+)
+@pytest.mark.parametrize("shared_head", [False, True])
+async def test_planned_subqueries_share_bounded_rerank_slots(
+    planned, shared_head
+) -> None:
+    release_id = uuid4()
+    items = tuple(
+        Evidence(
+            chunk_id=uuid4(),
+            knowledge_base_id=uuid4(),
+            document_id=uuid4(),
+            document_version_id=uuid4(),
+            index_release_id=release_id,
+            document_title="制度",
+            version_no=1,
+            content=text,
+            content_hash=sha256(text.encode()).hexdigest(),
+            score=0.8,
+        )
+        for text in ("部署规则甲", "部署规则乙", "费用预警", "额度暂停规则")
+    )
+    calls = []
+
+    class Ports:
+        async def vector_search(self, **kwargs):
+            return items
+
+        async def fts_search(self, **kwargs):
+            return ()
+
+        async def embed(self, queries):
+            return tuple((0.0,) * 1024 for _ in queries)
+
+        async def complete(self, *_args):
+            assert planned is None
+            return QueryRewrite(queries=("部署要求", "费用要求"))
+
+        async def rerank(self, query, documents, *, top_n):
+            calls.append(query)
+            assert top_n == 3
+            assert len(documents) == 4
+            indexes = (
+                ((0, 2, 3) if shared_head else (2, 0, 3))
+                if query == "费用要求"
+                else (0, 1, 2)
+            )
+            return tuple((i, 0.9 - rank * 0.1) for rank, i in enumerate(indexes))
+
+    ports = Ports()
+    bundle = SimpleNamespace(
+        rag_policy=SimpleNamespace(
+            rewrite_query_limit=3,
+            vector_top_k=4,
+            fts_top_k=4,
+            fusion_top_k=4,
+            rerank_top_k=3,
+        ),
+        knowledge_bindings=(SimpleNamespace(index_release_id=release_id),),
+    )
+    trace = await CustomerServiceRetrieval(ports, ports, ports).search(
+        tenant_id="dev",
+        question="部署及费用要求",
+        gateway=ports,
+        bundle=bundle,
+        planned_queries=planned,
+    )
+    if planned and len(set(planned)) > 1:
+        assert calls == ["部署要求", "费用要求"]
+        expected = (
+            ("部署规则甲", "部署规则乙", "费用预警")
+            if shared_head
+            else ("部署规则甲", "费用预警", "部署规则乙")
+        )
+    else:
+        assert calls == ["部署及费用要求"]
+        expected = ("部署规则甲", "部署规则乙", "费用预警")
+    assert tuple(x.content for x in trace.reranked_evidence) == expected
+    assert len({x.chunk_id for x in trace.reranked_evidence}) == 3
+
+
+@pytest.mark.asyncio
+async def test_planned_query_rerank_provider_failure_is_not_empty_evidence() -> None:
+    release_id = uuid4()
+    item = Evidence(
+        chunk_id=uuid4(),
+        knowledge_base_id=uuid4(),
+        document_id=uuid4(),
+        document_version_id=uuid4(),
+        index_release_id=release_id,
+        document_title="制度",
+        version_no=1,
+        content="依据",
+        content_hash=sha256("依据".encode()).hexdigest(),
+        score=0.8,
+    )
+
+    class Ports:
+        async def vector_search(self, **kwargs):
+            return (item,)
+
+        async def fts_search(self, **kwargs):
+            return ()
+
+        async def embed(self, queries):
+            return tuple((0.0,) * 1024 for _ in queries)
+
+        async def rerank(self, query, documents, *, top_n):
+            if query == "第二子问题":
+                raise RuntimeError("PROVIDER_TIMEOUT")
+            return ((0, 0.9),)
+
+    ports = Ports()
+    bundle = SimpleNamespace(
+        rag_policy=SimpleNamespace(
+            rewrite_query_limit=2,
+            vector_top_k=4,
+            fts_top_k=4,
+            fusion_top_k=4,
+            rerank_top_k=3,
+        ),
+        knowledge_bindings=(SimpleNamespace(index_release_id=release_id),),
+    )
+    with pytest.raises(RuntimeError, match="PROVIDER_TIMEOUT"):
+        await CustomerServiceRetrieval(ports, ports, ports).search(
+            tenant_id="dev",
+            question="综合问题",
+            gateway=ports,
+            bundle=bundle,
+            planned_queries=("第一子问题", "第二子问题"),
+        )

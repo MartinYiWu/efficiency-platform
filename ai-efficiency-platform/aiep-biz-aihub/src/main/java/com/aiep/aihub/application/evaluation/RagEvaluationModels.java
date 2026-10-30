@@ -1,6 +1,8 @@
 package com.aiep.aihub.application.evaluation;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.time.Instant;
 import com.aiep.platformai.api.dto.CustomerServiceRunEvent;
 
@@ -19,13 +21,31 @@ public final class RagEvaluationModels {
             List<String> expectedDocumentVersionIds,
             int minCitationCount,
             List<String> tags,
-            boolean enabled) {
+            boolean enabled,
+            Map<String, List<String>> expectedFactAlternatives) {
+        public EvaluationCase(String id, String datasetId, String caseNo, String question,
+                              String expectedAnswerMode, List<String> expectedFacts, List<String> prohibitedFacts,
+                              List<String> expectedDocumentTitles, List<String> expectedDocumentVersionIds,
+                              int minCitationCount, List<String> tags, boolean enabled) {
+            this(id, datasetId, caseNo, question, expectedAnswerMode, expectedFacts, prohibitedFacts,
+                    expectedDocumentTitles, expectedDocumentVersionIds, minCitationCount, tags, enabled, Map.of());
+        }
+
         public EvaluationCase {
             expectedFacts = List.copyOf(expectedFacts);
             prohibitedFacts = List.copyOf(prohibitedFacts);
             expectedDocumentTitles = List.copyOf(expectedDocumentTitles);
             expectedDocumentVersionIds = List.copyOf(expectedDocumentVersionIds);
             tags = List.copyOf(tags);
+            expectedFactAlternatives = expectedFactAlternatives == null ? Map.of()
+                    : expectedFactAlternatives.entrySet().stream().collect(Collectors.toUnmodifiableMap(
+                            Map.Entry::getKey, entry -> List.copyOf(entry.getValue())));
+            for (var entry : expectedFactAlternatives.entrySet()) {
+                if (!expectedFacts.contains(entry.getKey()) || entry.getKey().isBlank()
+                        || entry.getValue().isEmpty() || entry.getValue().stream().anyMatch(String::isBlank)) {
+                    throw new IllegalArgumentException("AI_RAG_EVAL_FACT_ALTERNATIVES_INVALID");
+                }
+            }
         }
     }
 

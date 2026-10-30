@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises';
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 const now = '2026-10-27T00:00:00Z';
 const longContent = Array.from(

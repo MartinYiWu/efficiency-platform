@@ -43,3 +43,9 @@ pnpm dev
 ## 依赖规则
 
 Ant Design 是唯一基础 UI 库，React Router 是唯一路由库，TanStack Query 是唯一服务端状态方案。新增依赖前必须说明现有依赖无法满足的原因、包体积、许可证、维护状态与移除成本；禁止额外引入 UI 库、状态库、Moment、Lodash、jQuery、Tailwind 或未评审的富文本/拖拽/聊天组件库。
+
+## 浏览器验收隔离
+
+`pnpm test:e2e` 仅运行 fixture 套件，阻断未拦截的 API/fetch/XHR 并使测试失败；独立启动 5190，代理指向不可用端口，不复用现有服务。fixture 不代表真实业务验收。
+
+真实 Java → Agent 用例显式运行 `pnpm exec playwright test --config playwright.real.config.ts`，连接已启动的 5173；可用 `PLAYWRIGHT_REAL_BASE_URL` 指定地址。该用例会创建真实会话，不能作为默认门禁运行。Fake Agent 套件仍使用 `playwright.agent.config.ts`。

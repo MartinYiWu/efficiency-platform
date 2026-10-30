@@ -81,6 +81,11 @@ public class CustomerServiceController {
             @RequestParam(defaultValue = "0") long afterSequence) {
         long after = Math.max(afterSequence, lastEventId == null ? 0 : lastEventId);
         SseEmitter emitter = new SseEmitter(130_000L);
+        if (com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(service.getRun(TENANT, id).status())) {
+            projector.replay(id, TENANT, after).forEach(event -> send(emitter, event));
+            emitter.complete();
+            return emitter;
+        }
         service.stream(TENANT, id, after).subscribe(event -> {
             PublicEvent projected = projector.project(id, TENANT, event);
             if (projected != null) send(emitter, projected);

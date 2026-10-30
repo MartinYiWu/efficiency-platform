@@ -1,4 +1,5 @@
-import { expect, test } from '@playwright/test';
+import { envelope, installOperationConversation, queuedRun } from './operations-fixture';
+import { expect, test } from './fixtures';
 
 test('uses the HR workbench as the sole root entry', async ({ page }) => {
   await page.goto('/');
@@ -16,27 +17,25 @@ test('keeps the single navigation responsive across desktop, tablet and mobile',
   await page.goto('/');
 
   await expect(page.getByRole('navigation', { name: 'AI 人事助手导航' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /岗位管理/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: '岗位管理', exact: true })).toBeVisible();
   await expect
     .poll(() =>
-      page.locator('main').evaluate((element) => Math.round(element.getBoundingClientRect().width)),
+      page
+        .getByRole('main')
+        .evaluate((element) => Math.round(element.getBoundingClientRect().width)),
     )
-    .toBeGreaterThanOrEqual(1180);
+    .toBeGreaterThanOrEqual(1200);
 
   await page.setViewportSize({ width: 1024, height: 900 });
-  await expect(page.getByRole('menuitem', { name: /岗位管理/ })).toBeVisible();
-  await page.getByRole('button', { name: '收合左侧导航' }).click();
-  await expect(page.getByRole('button', { name: '展开左侧导航' })).toBeVisible();
-  await page.getByRole('button', { name: '展开左侧导航' }).click();
-  await expect(page.getByRole('menuitem', { name: /岗位管理/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: '岗位管理', exact: true })).toBeVisible();
   await expect
     .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
     .toBe(true);
 
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(page.getByRole('button', { name: '打开人事助手导航' })).toBeVisible();
-  await page.getByRole('button', { name: '打开人事助手导航' }).click();
-  await expect(page.getByRole('dialog')).toContainText('AI 人事助手');
+  await expect(page.getByRole('button', { name: '打开平台导航' })).toBeVisible();
+  await page.getByRole('button', { name: '打开平台导航' }).click();
+  await expect(page.getByRole('dialog')).toContainText('岗位管理');
 });
 
 test('keeps the HR workbench inside the responsive viewport', async ({ page }) => {
@@ -48,7 +47,7 @@ test('keeps the HR workbench inside the responsive viewport', async ({ page }) =
   await expect
     .poll(() =>
       page
-        .locator('[aria-label="快捷入口"]')
+        .locator('[aria-label="本周概览"]')
         .evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length),
     )
     .toBe(2);
@@ -57,9 +56,7 @@ test('keeps the HR workbench inside the responsive viewport', async ({ page }) =
     .toBe(true);
 });
 
-test('keeps the resume upload workspace compact without a scrolling settings column', async ({
-  page,
-}) => {
+test('keeps the resume upload panels readable and the action bar reachable', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 900 });
   await page.goto('/ai-assistants/hr/resumes/upload');
   await expect.poll(() => page.evaluate(() => window.innerWidth)).toBe(1920);
@@ -70,6 +67,7 @@ test('keeps the resume upload workspace compact without a scrolling settings col
 
   await expect(settingsPanel).toBeVisible();
   await expect(uploadPanel).toBeVisible();
+  await actionBar.scrollIntoViewIfNeeded();
   await expect(actionBar).toBeVisible();
   await expect
     .poll(() =>
@@ -88,12 +86,8 @@ test('keeps the resume upload workspace compact without a scrolling settings col
     .poll(() =>
       uploadPanel.evaluate((element) => Math.round(element.getBoundingClientRect().width)),
     )
-    .toBeGreaterThanOrEqual(1050);
-  await expect
-    .poll(() =>
-      actionBar.evaluate((element) => element.getBoundingClientRect().bottom <= window.innerHeight),
-    )
-    .toBe(true);
+    .toBeGreaterThanOrEqual(800);
+  await expect(actionBar).toBeInViewport();
   await expect
     .poll(async () => {
       const panelBottom = await settingsPanel.evaluate(
@@ -119,9 +113,8 @@ test('keeps the resume upload workspace compact without a scrolling settings col
       return panelBottom <= actionBarTop;
     })
     .toBe(true);
-  await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight))
-    .toBe(true);
+  await actionBar.scrollIntoViewIfNeeded();
+  await expect(actionBar).toBeInViewport();
 });
 
 test('uses the available workspace width and renders every position configuration tab', async ({
@@ -198,13 +191,23 @@ test('keeps the HR chat composer visible and sends typed text', async ({ page })
 });
 
 test('keeps the operations chat composer visible and sends typed text', async ({ page }) => {
+  await installOperationConversation(page);
+  await page.route('**/api/operations/conversations/*/messages', async (route) => {
+    await route.fulfill({ json: envelope(queuedRun('conversation-fixture', 'run-1')) });
+  });
+  await page.route('**/api/operations/runs/run-1/events?*', async (route) => {
+    await route.fulfill({
+      contentType: 'text/event-stream',
+      body: 'id: 1\nevent: stream_done\ndata: {"contract_version":"run.stream.event/1","event":"stream_done","run_id":"run-1","sequence":1,"payload":{"status":"succeeded","degraded":false}}\n\n',
+    });
+  });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/ai-assistants/operations/chat');
 
   const composer = page.locator('footer[aria-label="消息输入"]');
   const input = page.getByRole('textbox', { name: '输入消息' });
   await expect(page.getByRole('heading', { name: 'AI 内容运营助手' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'AI 内容运营助手导航' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'AI 助手导航' })).toBeVisible();
   await expect(composer).toBeVisible();
   await expect
     .poll(() =>

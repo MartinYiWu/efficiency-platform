@@ -1,0 +1,21 @@
+{
+  "changeSummary": "真实多约束问题中第9条必要证据被旧上限8裁掉；新版本上限10，其他字段从原策略继承",
+  "previousPolicyId": "016120d2-00e5-4fbb-9810-0db508a81977",
+  "request": {
+    "policyKey": "customer-service-default",
+    "rewriteQueryLimit": 3,
+    "vectorTopK": 30,
+    "ftsTopK": 30,
+    "fusionTopK": 40,
+    "rerankTopK": 12,
+    "contextTokenLimit": 24000,
+    "citationLimit": 12,
+    "finalEvidenceTopK": 10,
+    "similarityCandidateThreshold": 0.96,
+    "similarityPairLimit": 20,
+    "adjacentGroupMaxParents": 3,
+    "ownerAgentId": "10000000-0000-0000-0000-000000000001",
+    "semanticVersion": "1.3.20261030.coverage",
+    "checksum": "50845dea6135670646139add8e87598a7c1d4f311dcd8c123f19087345a25159"
+  }
+}

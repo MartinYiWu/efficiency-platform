@@ -98,9 +98,19 @@ export function RagEvaluationDatasetPage() {
 
   const saveCase = async () => {
     const value = await caseForm.validateFields();
+    const expectedFacts = lines(value.expectedFacts);
     const request = {
       ...value,
-      expectedFacts: lines(value.expectedFacts),
+      ...(editing?.expectedFactAlternatives
+        ? {
+            expectedFactAlternatives: Object.fromEntries(
+              Object.entries(editing.expectedFactAlternatives).filter(([fact]) =>
+                expectedFacts.includes(fact),
+              ),
+            ),
+          }
+        : {}),
+      expectedFacts,
       prohibitedFacts: lines(value.prohibitedFacts),
       expectedDocumentTitles: lines(value.expectedDocumentTitles),
       expectedDocumentVersionIds: lines(value.expectedDocumentVersionIds),
@@ -287,7 +297,16 @@ export function RagEvaluationDatasetPage() {
             />
           </Form.Item>
           <h4 className={styles.formSectionTitle}>事实与来源判定</h4>
-          <Form.Item name="expectedFacts" label="必须事实（每行一条）">
+          <Form.Item
+            name="expectedFacts"
+            label="必须事实（每行一条）"
+            extra={
+              editing?.expectedFactAlternatives &&
+              Object.keys(editing.expectedFactAlternatives).length > 0
+                ? '已有事实绑定等价表述。删除或改名事实后，原绑定会在保存时移除，不会转移到新事实。'
+                : undefined
+            }
+          >
             <Input.TextArea rows={4} />
           </Form.Item>
           <Form.Item name="prohibitedFacts" label="禁止事实（每行一条）">

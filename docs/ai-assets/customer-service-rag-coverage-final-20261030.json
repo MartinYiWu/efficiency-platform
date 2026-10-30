@@ -1,0 +1,21 @@
+{
+  "changeSummary": "对齐12条已冻结重排子命中的父证据上限，避免第11条互补要求被再次TopK裁掉；token预算与校验保持，冲突pair成本可能增加",
+  "previousPolicyId": "208f906c-157e-49ed-a381-7d7972619b00",
+  "request": {
+    "policyKey": "customer-service-default",
+    "rewriteQueryLimit": 3,
+    "vectorTopK": 30,
+    "ftsTopK": 30,
+    "fusionTopK": 40,
+    "rerankTopK": 12,
+    "contextTokenLimit": 24000,
+    "citationLimit": 12,
+    "finalEvidenceTopK": 12,
+    "similarityCandidateThreshold": 0.96,
+    "similarityPairLimit": 20,
+    "adjacentGroupMaxParents": 3,
+    "ownerAgentId": "10000000-0000-0000-0000-000000000001",
+    "semanticVersion": "1.4.20261030.coverage",
+    "checksum": "f1cc10b5562e306345d0dce2512cc8fbeef5cf5cdd65c1f77583589033c9d44b"
+  }
+}

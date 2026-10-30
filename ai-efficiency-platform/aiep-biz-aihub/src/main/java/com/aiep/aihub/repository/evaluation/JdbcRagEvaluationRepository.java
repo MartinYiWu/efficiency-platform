@@ -15,6 +15,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -61,7 +62,8 @@ public class JdbcRagEvaluationRepository implements RagEvaluationRepository {
                     expected_document_titles=VALUES(expected_document_titles),expected_document_version_ids=VALUES(expected_document_version_ids),
                     min_citation_count=VALUES(min_citation_count),tags=VALUES(tags),enabled=VALUES(enabled),updated_at=VALUES(updated_at)
                     """, value.id(), datasetId, value.caseNo(), value.question(), value.expectedAnswerMode(),
-                    json(value.expectedFacts()), json(value.prohibitedFacts()), json(value.expectedDocumentTitles()),
+                    json(value.expectedFactAlternatives().isEmpty() ? value.expectedFacts()
+                            : new FactExpectations(value.expectedFacts(), value.expectedFactAlternatives())), json(value.prohibitedFacts()), json(value.expectedDocumentTitles()),
                     json(value.expectedDocumentVersionIds()), value.minCitationCount(), json(value.tags()), value.enabled(),
                     Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
         }
@@ -142,12 +144,24 @@ public class JdbcRagEvaluationRepository implements RagEvaluationRepository {
     }
 
     private EvaluationCase evaluationCase(ResultSet rs) throws SQLException {
+        String factsJson = rs.getString("expected_facts");
+        FactExpectations facts;
+        try {
+            String normalized = normalizeJson(factsJson);
+            facts = mapper.readTree(normalized).isArray()
+                    ? new FactExpectations(strings(factsJson), Map.of())
+                    : readNullable(normalized, FactExpectations.class);
+        } catch (JsonProcessingException error) {
+            throw new IllegalStateException("AI_RAG_EVAL_JSON_INVALID", error);
+        }
         return new EvaluationCase(rs.getString("id"), rs.getString("dataset_id"), rs.getString("case_no"),
-                rs.getString("question"), rs.getString("expected_answer_mode"), strings(rs.getString("expected_facts")),
+                rs.getString("question"), rs.getString("expected_answer_mode"), facts.facts(),
                 strings(rs.getString("prohibited_facts")), strings(rs.getString("expected_document_titles")),
                 strings(rs.getString("expected_document_version_ids")), rs.getInt("min_citation_count"),
-                strings(rs.getString("tags")), rs.getBoolean("enabled"));
+                strings(rs.getString("tags")), rs.getBoolean("enabled"), facts.alternatives());
     }
+
+    private record FactExpectations(List<String> facts, Map<String, List<String>> alternatives) { }
 
     private EvaluationRun evaluationRun(ResultSet rs) throws SQLException {
         return new EvaluationRun(rs.getString("id"), rs.getString("dataset_id"), rs.getString("agent_key"),

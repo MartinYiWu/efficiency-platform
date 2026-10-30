@@ -1,4 +1,9 @@
-import { expect, type Page, test } from '@playwright/test';
+import { envelope, installOperationConversation, queuedRun } from './operations-fixture';
+import { expect, type Page, test } from './fixtures';
+
+test.beforeEach(async ({ page }) => {
+  await installOperationConversation(page);
+});
 
 type Deliverable = {
   platform: string;
@@ -90,19 +95,13 @@ async function installConversation(
   page: Page,
   stream: (runId: string) => string | Promise<string>,
 ) {
-  await page.route('**/v1/conversations/*/messages', async (route) => {
+  await page.route('**/api/operations/conversations/*/messages', async (route) => {
     const conversationId = new URL(route.request().url()).pathname.split('/').at(-2);
     await route.fulfill({
-      json: {
-        contract_version: 'conversation/1',
-        conversation_id: decodeURIComponent(conversationId ?? ''),
-        turn_id: 'turn-1',
-        run_id: 'run-1',
-        status: 'queued',
-      },
+      json: envelope(queuedRun(decodeURIComponent(conversationId ?? ''), 'run-1')),
     });
   });
-  await page.route('**/v1/runs/run-1/events', async (route) => {
+  await page.route('**/api/operations/runs/run-1/events?*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
@@ -193,20 +192,14 @@ test('行业热点场景展示来源和未核验警告', async ({ page }) => {
 
 test('信息不足场景补充信息后继续生成成品', async ({ page }) => {
   let submitCount = 0;
-  await page.route('**/v1/conversations/*/messages', async (route) => {
+  await page.route('**/api/operations/conversations/*/messages', async (route) => {
     submitCount += 1;
     const conversationId = new URL(route.request().url()).pathname.split('/').at(-2);
     await route.fulfill({
-      json: {
-        contract_version: 'conversation/1',
-        conversation_id: decodeURIComponent(conversationId ?? ''),
-        turn_id: `turn-${submitCount}`,
-        run_id: `run-${submitCount}`,
-        status: 'queued',
-      },
+      json: envelope(queuedRun(decodeURIComponent(conversationId ?? ''), `run-${submitCount}`)),
     });
   });
-  await page.route('**/v1/runs/*/events', async (route) => {
+  await page.route('**/api/operations/runs/*/events?*', async (route) => {
     const runId = new URL(route.request().url()).pathname.split('/').at(-2) ?? '';
     const body =
       runId === 'run-1'
@@ -266,9 +259,11 @@ test('用户停止生成时调用取消接口并恢复可发送状态', async ({
     await cancelled;
     return frame(runId, 1, 'stream_done', { status: 'cancelled', degraded: false });
   });
-  await page.route('**/v1/runs/run-1/cancel', async (route) => {
+  await page.route('**/api/operations/runs/run-1/cancel', async (route) => {
     cancelCount += 1;
-    await route.fulfill({ json: { status: 'cancelled' } });
+    await route.fulfill({
+      json: envelope({ ...queuedRun('conversation-fixture', 'run-1'), status: 'cancelled' }),
+    });
     releaseStream?.();
   });
   await submit(page, '生成一份长篇活动复盘');
@@ -282,19 +277,13 @@ test('用户停止生成时调用取消接口并恢复可发送状态', async ({
 test('SSE 中断后携带 Last-Event-ID 重连且不重复展示增量', async ({ page }) => {
   let eventRequestCount = 0;
   const replayHeaders: string[] = [];
-  await page.route('**/v1/conversations/*/messages', async (route) => {
+  await page.route('**/api/operations/conversations/*/messages', async (route) => {
     const conversationId = new URL(route.request().url()).pathname.split('/').at(-2);
     await route.fulfill({
-      json: {
-        contract_version: 'conversation/1',
-        conversation_id: decodeURIComponent(conversationId ?? ''),
-        turn_id: 'turn-1',
-        run_id: 'run-1',
-        status: 'queued',
-      },
+      json: envelope(queuedRun(decodeURIComponent(conversationId ?? ''), 'run-1')),
     });
   });
-  await page.route('**/v1/runs/run-1/events', async (route) => {
+  await page.route('**/api/operations/runs/run-1/events?*', async (route) => {
     eventRequestCount += 1;
     replayHeaders.push(route.request().headers()['last-event-id'] ?? '');
     const runId = 'run-1';

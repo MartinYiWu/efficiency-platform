@@ -127,7 +127,7 @@ class CustomerServiceApplicationServiceTest {
         var result = projector.project("run-1", "dev", event);
         var saved = ArgumentCaptor.forClass(com.aiep.aihub.repository.customer.CustomerServicePOs.RunStepPO.class);
         verify(repository).insertRunStep(saved.capture());
-        assertThat(saved.getValue().internalPayload()).contains("INTERNAL_ONLY", "frozen-parent");
+        assertThat(saved.getValue().internalPayload()).contains("INTERNAL_ONLY", "frozen-parent", "_event_type", "stage.completed");
         assertThat(mapper.writeValueAsString(result.payload())).doesNotContain("INTERNAL_ONLY", "retrieval_facts", "frozen-parent");
     }
 
@@ -202,6 +202,104 @@ class CustomerServiceApplicationServiceTest {
         when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 1));
         assertThat(projector.project("run-1", "dev", first).eventType()).isEqualTo("run.started");
         verify(repository).insertRunStep(any());
+    }
+
+    @Test
+    void terminalSseUsesPersistedEventsWithoutCallingUnavailableAgent() {
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "SUCCEEDED", 1));
+        when(repository.listRunSteps("run-1")).thenReturn(List.of(new RunStepPO("step", "run-1", 1,
+                "answer.completed", "SUCCEEDED", "回答已完成", "{\"answer_mode\":\"COMPANY_KNOWLEDGE\"}", now, now)));
+        when(ai.streamCustomerServiceRunEvents("agent-run-1", 0))
+                .thenThrow(new IllegalStateException("AGENT_RESTARTED_RUN_NOT_FOUND"));
+        var controller = new com.aiep.aihub.web.customer.CustomerServiceController(service,
+                new CustomerServiceEventProjector(repository, new ObjectMapper().findAndRegisterModules()));
+        org.assertj.core.api.Assertions.assertThatCode(() -> controller.events("run-1", null, 0)).doesNotThrowAnyException();
+        verify(ai, never()).streamCustomerServiceRunEvents(any(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    void replaysEveryStoredTerminalStatusWithoutInventingMissingTerminalEvents() {
+        var projector = new CustomerServiceEventProjector(repository, new ObjectMapper().findAndRegisterModules());
+        for (String status : List.of("SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED")) {
+            String stage = status.equals("SUCCEEDED") ? "answer.completed" : status.equals("CANCELLED") ? "cancelled" : "failed";
+            String expectedType = status.equals("SUCCEEDED") ? "run.completed" : status.equals("CANCELLED") ? "run.cancelled" : "run.failed";
+            when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", status, 2));
+            when(repository.listRunSteps("run-1")).thenReturn(List.of(
+                    new RunStepPO("terminal", "run-1", 2, stage, status, null,
+                            "{\"answer_mode\":\"GENERAL_ADVICE\",\"error_code\":\"SAFE_CODE\",\"error_message\":\"失败\"}", now, now),
+                    new RunStepPO("delta", "run-1", 1, "answer.delta", "RUNNING", null, "{\"delta\":\"正文\"}", now, now)));
+            assertThat(projector.replay("run-1", "dev", 0)).extracting(CustomerServiceEventProjector.PublicEvent::eventType)
+                    .containsExactly("message.delta", expectedType);
+            assertThat(projector.replay("run-1", "dev", 1)).extracting(CustomerServiceEventProjector.PublicEvent::sequence)
+                    .containsExactly(2L);
+            assertThat(projector.replay("run-1", "dev", 2)).isEmpty();
+        }
+        when(repository.listRunSteps("run-1")).thenReturn(List.of());
+        assertThat(projector.replay("run-1", "dev", 0)).isEmpty();
+        assertThatThrownBy(() -> projector.replay("run-1", "other-tenant", 0)).isInstanceOf(IllegalArgumentException.class);
+        verify(repository, never()).insertRunStep(any());
+        verify(repository, never()).completeAssistantMessage(any(), any(), any(), any());
+    }
+
+    @Test
+    void replayRejectsMalformedAndPrivatePayloadsAndKeepsPublicProgressWhitelisted() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var projector = new CustomerServiceEventProjector(repository, mapper);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "SUCCEEDED", 8));
+        when(repository.listRunSteps("run-1")).thenReturn(List.of(
+                new RunStepPO("1", "run-1", 1, "intent", "RUNNING", "SECRET", "{\"stage\":\"intent\",\"phase\":\"STARTED\",\"public_summary\":\"SECRET\"}", now, now),
+                new RunStepPO("2", "run-1", 2, "answer.delta", "RUNNING", null, "invalid-json", now, now),
+                new RunStepPO("3", "run-1", 3, "answer.delta", "RUNNING", null, "{\"delta\":\"bad\",\"private\":\"SECRET\"}", now, now),
+                new RunStepPO("4", "run-1", 4, "unknown", "RUNNING", null, "{}", now, now),
+                new RunStepPO("5", "different-run", 5, "answer.delta", "RUNNING", null, "{\"delta\":\"SECRET\"}", now, now),
+                new RunStepPO("6", "run-1", 6, "unknown", "RUNNING", null, "{\"_event_type\":\"answer.delta\",\"delta\":\"正文\"}", now, now),
+                new RunStepPO("7", "run-1", 7, "answer.completed", "RUNNING", null, "{}", now, now),
+                new RunStepPO("8", "run-1", 8, null, "RUNNING", null, "{}", now, now)));
+        var events = projector.replay("run-1", "dev", 0);
+        assertThat(events).extracting(CustomerServiceEventProjector.PublicEvent::sequence).containsExactly(1L, 6L);
+        assertThat(mapper.writeValueAsString(events)).doesNotContain("SECRET", "private", "_event_type");
+        assertThat(events.getFirst().payload()).isEqualTo(java.util.Map.of(
+                "stage", "intent", "phase", "STARTED", "summary", "正在理解问题"));
+    }
+
+    @Test
+    void controllerUsesTheGreaterResumeCursorAndRunningRunsKeepAgentStreaming() {
+        var projector = mock(CustomerServiceEventProjector.class);
+        var controller = new com.aiep.aihub.web.customer.CustomerServiceController(service, projector);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "SUCCEEDED", 8));
+        when(projector.replay("run-1", "dev", 6)).thenReturn(List.of());
+        controller.events("run-1", 6L, 2);
+        verify(projector).replay("run-1", "dev", 6);
+        when(projector.replay("run-1", "dev", 7)).thenReturn(List.of());
+        controller.events("run-1", 3L, 7);
+        verify(projector).replay("run-1", "dev", 7);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "RUNNING", 3));
+        when(ai.streamCustomerServiceRunEvents("agent-run-1", 4)).thenReturn(reactor.core.publisher.Flux.empty());
+        controller.events("run-1", 4L, 0);
+        verify(ai).streamCustomerServiceRunEvents("agent-run-1", 4);
+    }
+
+    @Test
+    void replayCitationsKeepPersistedDatabaseIdentityAndNeverUseAgentPayloadAsFallback() throws Exception {
+        var mapper = new ObjectMapper().findAndRegisterModules();
+        var projector = new CustomerServiceEventProjector(repository, mapper);
+        when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "SUCCEEDED", 3));
+        var frozen = new com.aiep.aihub.repository.customer.CustomerServicePOs.CitationPO("database-citation-id",
+                "run-1", "answer-1", 1, "kb", "doc", "v1", "index", "chunk", "title", 1, "section", 1,
+                "frozen quote", "hash", now);
+        when(repository.findCitationByRunAndNumber("run-1", 1)).thenReturn(frozen);
+        when(repository.listRunSteps("run-1")).thenReturn(List.of(
+                new RunStepPO("1", "run-1", 1, "citation.ready", "RUNNING", null,
+                        "{\"citation\":{\"citation_no\":1}}", now, now),
+                new RunStepPO("2", "run-1", 2, "citation.ready", "RUNNING", null,
+                        "{\"citation\":{\"citation_no\":2}}", now, now),
+                new RunStepPO("3", "run-1", 3, "retrieval", "RUNNING", "PRIVATE",
+                        "{\"stage\":\"retrieval\",\"retrieval_facts\":{\"equivalence_errors\":[\"SECRET\"]}}", now, now)));
+        assertThat(projector.replay("run-1", "dev", 0)).singleElement().satisfies(event -> {
+            assertThat(event.eventType()).isEqualTo("citation.ready");
+            assertThat(event.payload()).isSameAs(frozen);
+        });
+        verify(repository, never()).insertCitation(any());
     }
 
     private MessagePO message(String id, String role, String content) {

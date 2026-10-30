@@ -64,3 +64,5 @@ pnpm test:e2e
 - 架构、依赖、目录边界、质量门禁或环境变量变化时，同步更新完整规范和 README 的入口说明。
 - 新页面或跨模块功能需保留设计、实施计划、测试边界和明确的非目标。
 - `.superpowers/` 为本地辅助产物，不能进入业务交付内容。
+
+默认 Playwright 门禁必须使用 `e2e/fixtures.ts` 的请求隔离，禁止未拦截 API 泄漏；真实 Java/Agent 用例仅通过 `playwright.real.config.ts` 显式运行，不能混入默认门禁。

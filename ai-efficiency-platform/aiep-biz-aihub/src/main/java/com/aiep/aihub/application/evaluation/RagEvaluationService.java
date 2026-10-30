@@ -230,6 +230,16 @@ public class RagEvaluationService {
                 .contains(input.expectedAnswerMode())) {
             throw new AiManagementException("AI_RAG_EVAL_ANSWER_MODE_INVALID", "预期回答模式无效");
         }
+        if (input.expectedFactAlternatives() != null) {
+            for (var entry : input.expectedFactAlternatives().entrySet()) {
+                if (entry.getKey() == null || entry.getKey().isBlank()
+                        || !safeList(input.expectedFacts()).contains(entry.getKey())
+                        || entry.getValue() == null || entry.getValue().isEmpty()
+                        || entry.getValue().stream().anyMatch(value -> value == null || value.isBlank())) {
+                    throw new AiManagementException("AI_RAG_EVAL_FACT_ALTERNATIVES_INVALID", "事实等价表述必须绑定原事实且不能为空");
+                }
+            }
+        }
         if (input.minCitationCount() < 0) {
             throw new AiManagementException("AI_RAG_EVAL_CITATION_COUNT_INVALID", "最少引用数不能小于零");
         }
@@ -239,7 +249,7 @@ public class RagEvaluationService {
         return new EvaluationCase(id, datasetId, input.caseNo().trim(), input.question().trim(),
                 input.expectedAnswerMode(), safeList(input.expectedFacts()), safeList(input.prohibitedFacts()),
                 safeList(input.expectedDocumentTitles()), safeList(input.expectedDocumentVersionIds()),
-                input.minCitationCount(), safeList(input.tags()), input.enabled());
+                input.minCitationCount(), safeList(input.tags()), input.enabled(), input.expectedFactAlternatives());
     }
 
     private static List<String> safeList(List<String> values) {
@@ -292,7 +302,15 @@ public class RagEvaluationService {
     public record CaseInput(String caseNo, String question, String expectedAnswerMode, List<String> expectedFacts,
                             List<String> prohibitedFacts, List<String> expectedDocumentTitles,
                             List<String> expectedDocumentVersionIds, int minCitationCount, List<String> tags,
-                            boolean enabled) { }
+                            boolean enabled, Map<String, List<String>> expectedFactAlternatives) {
+        public CaseInput(String caseNo, String question, String expectedAnswerMode, List<String> expectedFacts,
+                         List<String> prohibitedFacts, List<String> expectedDocumentTitles,
+                         List<String> expectedDocumentVersionIds, int minCitationCount, List<String> tags,
+                         boolean enabled) {
+            this(caseNo, question, expectedAnswerMode, expectedFacts, prohibitedFacts, expectedDocumentTitles,
+                    expectedDocumentVersionIds, minCitationCount, tags, enabled, Map.of());
+        }
+    }
     public record ImportResult(int createdCount, int updatedCount, int totalCount) { }
     public record DatasetDetail(Dataset dataset, List<EvaluationCase> cases, List<EvaluationRun> runs) { }
     public record RunDetail(EvaluationRun run, List<EvaluationCase> cases, List<CaseResult> results) { }

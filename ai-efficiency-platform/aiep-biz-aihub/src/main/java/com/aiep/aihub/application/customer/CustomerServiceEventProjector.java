@@ -40,7 +40,7 @@ public class CustomerServiceEventProjector {
         }
         repository.insertRunStep(new RunStepPO(UUID.randomUUID().toString(), javaRunId, event.sequence(),
                 event.payload().stage() == null ? event.eventType() : event.payload().stage(), status,
-                event.payload().publicSummary(), safeJson(event.payload()), event.occurredAt(), Instant.now()));
+                event.payload().publicSummary(), eventJson(event), event.occurredAt(), Instant.now()));
         if ("conversation.title".equals(event.eventType())) {
             CustomerServiceConversationTitles.assignAutomatic(repository, run, event.payload().conversationTitle());
             return publicEvent(javaRunId, event, true);
@@ -76,6 +76,71 @@ public class CustomerServiceEventProjector {
             return publicEvent(javaRunId, event, true);
         }
         return publicEvent(javaRunId, event, true);
+    }
+
+    public java.util.List<PublicEvent> replay(String javaRunId, String tenantId, long afterSequence) {
+        RunPO run = repository.findRun(javaRunId, tenantId);
+        if (run == null) throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_FOUND");
+        if (!com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))
+            throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_TERMINAL");
+        java.util.List<PublicEvent> result = new java.util.ArrayList<>();
+        for (RunStepPO step : repository.listRunSteps(javaRunId).stream()
+                .sorted(java.util.Comparator.comparingLong(RunStepPO::sequenceNo)).toList()) {
+            if (!javaRunId.equals(step.runId()) || step.sequenceNo() <= afterSequence
+                    || step.sequenceNo() > run.lastEventSequence() || step.internalPayload() == null) continue;
+            try {
+                var node = objectMapper.readTree(step.internalPayload());
+                if (!node.isObject()) continue;
+                var payloadNode = ((com.fasterxml.jackson.databind.node.ObjectNode) node).deepCopy();
+                String type = payloadNode.path("_event_type").asText("");
+                payloadNode.remove("_event_type");
+                var payload = objectMapper.treeToValue(payloadNode, CustomerServiceRunEvent.Payload.class);
+                if (type.isEmpty()) type = legacyEventType(step, payload);
+                if (type == null) continue;
+                var status = com.aiep.platformai.api.dto.CustomerServiceRunView.Status.valueOf(step.status());
+                if (("answer.completed".equals(type) && !"SUCCEEDED".equals(step.status()))
+                        || ("run.failed".equals(type) && !java.util.Set.of("FAILED", "TIMED_OUT").contains(step.status()))
+                        || ("run.cancelled".equals(type) && !"CANCELLED".equals(step.status()))) continue;
+                if ("citation.ready".equals(type)) {
+                    if (payload.citation() == null) continue;
+                    CitationPO citation = repository.findCitationByRunAndNumber(javaRunId, payload.citation().citationNo());
+                    if (citation != null && javaRunId.equals(citation.runId()))
+                        result.add(new PublicEvent(step.sequenceNo(), type, citation));
+                    continue;
+                }
+                if (!java.util.Set.of("run.started", "stage.started", "stage.completed", "conversation.title",
+                        "answer.delta", "answer.completed", "run.failed", "run.cancelled", "retrieval.snapshot").contains(type)) continue;
+                if (java.util.Set.of("stage.started", "stage.completed", "run.started").contains(type)
+                        && payload.phase() == null) continue;
+                if ("retrieval.snapshot".equals(type)) continue;
+                var event = new CustomerServiceRunEvent("customer-service-run-event/1", value(run.agentRunId()),
+                        step.sequenceNo(), type, status, step.startedAt(), payload);
+                result.add(publicEvent(javaRunId, event, false));
+            } catch (JsonProcessingException | IllegalArgumentException ignored) {
+                // 损坏或无法识别的历史内部载荷不进入员工公开流，也不据运行状态补造终态。
+            }
+        }
+        return java.util.List.copyOf(result);
+    }
+
+    private static String legacyEventType(RunStepPO step, CustomerServiceRunEvent.Payload payload) {
+        if (step.stage() == null) return null;
+        return switch (step.stage()) {
+            case "answer.delta", "citation.ready", "answer.completed", "run.failed", "run.cancelled" -> step.stage();
+            case "failed" -> "run.failed";
+            case "cancelled" -> "run.cancelled";
+            case "conversation_title" -> "conversation.title";
+            case "retrieval_snapshot" -> "retrieval.snapshot";
+            case "intent", "retrieval", "verification", "answer" -> payload.phase() == null ? null
+                    : "STARTED".equals(payload.phase()) ? "stage.started" : "stage.completed";
+            default -> null;
+        };
+    }
+
+    private String eventJson(CustomerServiceRunEvent event) {
+        var node = objectMapper.valueToTree(event.payload());
+        ((com.fasterxml.jackson.databind.node.ObjectNode) node).put("_event_type", event.eventType());
+        return safeJson(node);
     }
 
     private PublicEvent publicEvent(String javaRunId, CustomerServiceRunEvent event, boolean newlyProjected) {

@@ -22,11 +22,11 @@ public final class RagEvaluationMetrics {
         String answer = normalize(response.answerMarkdown());
         boolean answerModeMatched = testCase.expectedAnswerMode().equals(response.answerMode());
         long expectedFactHits = testCase.expectedFacts().stream()
-                .map(RagEvaluationMetrics::normalize).filter(answer::contains).count();
+                .filter(fact -> matchesFact(answer, fact, testCase)).count();
         Double expectedFactRecall = testCase.expectedFacts().isEmpty()
                 ? null : ratio(expectedFactHits, testCase.expectedFacts().size());
         Boolean prohibitedFactMatched = testCase.prohibitedFacts().isEmpty() ? null : testCase.prohibitedFacts().stream()
-                .map(RagEvaluationMetrics::normalize).anyMatch(answer::contains);
+                .anyMatch(fact -> matchesFact(answer, fact, testCase));
         List<CustomerServiceRunEvent.Citation> citations = response.citations() == null ? List.of() : response.citations();
         Set<String> titles = citations.stream().map(item -> item.documentTitle()).collect(Collectors.toSet());
         long sourceHits = testCase.expectedDocumentTitles().stream().filter(titles::contains).count();
@@ -49,6 +49,11 @@ public final class RagEvaluationMetrics {
         if (Boolean.FALSE.equals(versionMatched)) failures.add("VERSION_MISMATCH");
         return new CaseMetrics(failures.isEmpty(), answerModeMatched, expectedFactRecall,
                 prohibitedFactMatched, sourceRecall, citationCompliant, versionMatched, List.copyOf(failures));
+    }
+
+    private static boolean matchesFact(String answer, String fact, EvaluationCase testCase) {
+        return answer.contains(normalize(fact)) || testCase.expectedFactAlternatives()
+                .getOrDefault(fact, List.of()).stream().map(RagEvaluationMetrics::normalize).anyMatch(answer::contains);
     }
 
     public static Summary summarize(int totalCount, List<CaseMetrics> results, List<Long> latencyMs) {
