@@ -45,6 +45,7 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
     private final WebClient webClient;
     private final ObjectMapper objectMapper;
     private final Duration streamIdleTimeout;
+    private final String internalSecret;
 
     public HttpCustomerServiceAgentClient(
             AgentClientProperties properties,
@@ -61,6 +62,7 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
         this.objectMapper = objectMapper.copy()
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         this.streamIdleTimeout = properties.getCustomerServiceStreamIdleTimeout();
+        this.internalSecret = properties.getInternalSecret();
     }
 
     @Override
@@ -102,8 +104,19 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
     @Override
     public CustomerServiceRunView submitMessage(
             String conversationId, CustomerServiceRunRequest request) {
+        boolean scoped = request.memoryContext().scope() != null;
+        if (scoped && (internalSecret == null || internalSecret.length() < 32 || internalSecret.isBlank()
+                || request.tenantId() == null || request.tenantId().isBlank())) {
+            throw new AgentTransportException(503, "MEMORY_INTERNAL_AUTH_CONFIG_REQUIRED", "上下文内部调用尚未配置");
+        }
         return exchange(webClient.post()
                 .uri(AgentEndpoints.CUSTOMER_SERVICE_MESSAGES, conversationId)
+                .headers(headers -> {
+                    if (scoped) {
+                        headers.setBearerAuth(internalSecret);
+                        headers.set("X-Tenant-ID", request.tenantId());
+                    }
+                })
                 .header(TRACE_HEADER, traceId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request), CustomerServiceRunView.class, "message_submit", request.requestId());
@@ -149,8 +162,18 @@ public final class HttpCustomerServiceAgentClient implements CustomerServiceAgen
 
     @Override
     public CustomerServiceDebugView runDebug(CustomerServiceDebugRequest request) {
+        boolean scoped = request.memoryContext().scope() != null;
+        if (scoped && (internalSecret == null || internalSecret.length() < 32 || internalSecret.isBlank())) {
+            throw new AgentTransportException(503, "MEMORY_INTERNAL_AUTH_CONFIG_REQUIRED", "上下文内部调用尚未配置");
+        }
         return exchange(webClient.post()
                 .uri(AgentEndpoints.CUSTOMER_SERVICE_RAG_DEBUG)
+                .headers(headers -> {
+                    if (scoped) {
+                        headers.setBearerAuth(internalSecret);
+                        headers.set("X-Tenant-ID", request.tenantId());
+                    }
+                })
                 .header(TRACE_HEADER, traceId())
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue(request), CustomerServiceDebugView.class, "rag_debug", request.agentVersionId());

@@ -148,7 +148,24 @@ class GateAuthorization(BaseModel):
 class S7IntegrationSettings(BaseModel):
     """仅从显式 env 文件读取的敏感配置，默认不启用任何 Gate。"""
 
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    model_config = ConfigDict(extra="ignore", frozen=True, hide_input_in_errors=True)
+    context_enabled: bool = False
+    context_internal_secret: SecretStr | None = None
+    context_hmac_key: SecretStr | None = None
+    memory_enabled: bool = False
+    memory_encryption_key: SecretStr | None = None
+    memory_encryption_key_version: str = ""
+    context_publication_file: Path | None = None
+    memory_postgres_dsn: SecretStr | None = None
+    memory_registry_schema: str = ""
+    memory_official_checkpoint_schema: str = ""
+    memory_owned_checkpoint_schema: str = ""
+    memory_checkpoint_encryption_key: SecretStr | None = None
+    memory_checkpoint_encryption_key_version: str = ""
+    hr_enabled: bool = False
+    hr_internal_secret: SecretStr | None = None
+    hr_ocr_detection_model_dir: Path | None = None
+    hr_ocr_recognition_model_dir: Path | None = None
     runtime_database_url: SecretStr | None = None
     vector_database_url: SecretStr | None = None
     task_broker_url: SecretStr | None = None
@@ -172,6 +189,31 @@ class S7IntegrationSettings(BaseModel):
     cos_region: SecretStr | None = None
     cos_bucket: SecretStr | None = None
     cos_base_url: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def validate_hr_configuration(self) -> S7IntegrationSettings:
+        if self.memory_enabled and (
+            not self.context_enabled
+            or self.memory_encryption_key is None
+            or not self.memory_encryption_key_version
+        ):
+            raise ValueError("MEMORY_CONFIG_KEYS_REQUIRED")
+        if self.context_enabled and any(
+            secret is None or len(secret.get_secret_value().encode("utf-8")) < 32
+            for secret in (self.context_internal_secret, self.context_hmac_key)
+        ):
+            raise ValueError("CONTEXT_CONFIG_KEYS_REQUIRED")
+        if self.hr_enabled and (
+            self.hr_internal_secret is None
+            or len(self.hr_internal_secret.get_secret_value()) < 32
+        ):
+            raise ValueError("HR_INTERNAL_AUTH_CONFIG_REQUIRED")
+        if (self.hr_ocr_detection_model_dir is None) != (
+            self.hr_ocr_recognition_model_dir is None
+        ):
+            raise ValueError("HR_OCR_MODEL_DIRECTORIES_INCOMPLETE")
+        return self
+
     gates: dict[str, bool] = Field(
         default_factory=lambda: {g.value: False for g in IntegrationGate}
     )

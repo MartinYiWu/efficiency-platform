@@ -1,0 +1,34 @@
+{
+  "checkedDate": "2026-11-03",
+  "deepseek": {
+    "officialUrl": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+    "model": "deepseek-v4-flash",
+    "aliasFact": "legacy identifier served and billed at Flash rate, per official source",
+    "cnyPerMillionInputPeak": 2,
+    "cachedInputPeak": 0.04,
+    "outputPeak": 8,
+    "maximumInput": 65536,
+    "maximumOutput": 4096,
+    "worstCostCny": 0.16384,
+    "reservationCny": 0.2
+  },
+  "embedding": {
+    "officialUrl": "https://help.aliyun.com/zh/model-studio/model-pricing",
+    "model": "text-embedding-v4",
+    "region": "Beijing",
+    "cnyPerMillionInput": 0.5,
+    "maximumInput": 65536,
+    "reservationCny": 0.05
+  },
+  "rerank": {
+    "officialUrl": "https://help.aliyun.com/zh/model-studio/model-pricing",
+    "model": "qwen3-rerank",
+    "region": "Beijing",
+    "cnyPerMillionInput": 0.5,
+    "maximumInput": 65536,
+    "reservationCny": 0.05
+  },
+  "onlyThreeCasesAuthorized": true,
+  "providerAccountSpendingLimitIndependentlyVerified": false,
+  "noAccountLimitConfirmationClaimed": true
+}

@@ -7,6 +7,8 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 from uuid import UUID
 
+from efficiency_platform_agent.core.paid_budget import PaidBudgetError
+
 from .chunking import count_tokens
 from .conflict_screen import ConflictScreen, screen_conflicts
 from .equivalence import EquivalenceDecision, validate_parents, verify_equivalence
@@ -320,7 +322,9 @@ class CustomerServiceRetrieval:
                         ),
                     )
                 # 可选向量核验失败不丢候选，父原文校验和 Rerank 仍保持失败关闭。
-                except Exception as error:  # noqa: BLE001
+                except Exception as error:
+                    if isinstance(error, PaidBudgetError):
+                        raise
                     equivalence_errors = (getattr(error, "code", type(error).__name__),)
             shared_prompt_tokens = sum(
                 count_tokens(message.content_template)
@@ -392,6 +396,14 @@ class CustomerServiceRetrieval:
                     members=members,
                     stage_bound=any(
                         b.stage_key == "conflict_screen" for b in bundle.prompt_bindings
+                    ),
+                    batch_enabled=any(
+                        message.message_key == "conflict_screen_batch_v1"
+                        and message.role in {"SYSTEM", "DEVELOPER"}
+                        and message.trusted_instruction
+                        for binding in bundle.prompt_bindings
+                        if binding.stage_key == "conflict_screen"
+                        for message in binding.messages
                     ),
                 )
             assembly = assemble_evidence(

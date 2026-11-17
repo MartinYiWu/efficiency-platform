@@ -9,8 +9,8 @@ from collections.abc import Sequence
 
 import uvicorn
 
-from efficiency_platform_agent.harness.local_real_factory import (
-    build_local_agent_application,
+from efficiency_platform_agent.harness.async_factory import (
+    build_async_local_agent_application,
 )
 
 
@@ -28,18 +28,26 @@ def selector_loop_factory() -> asyncio.AbstractEventLoop:
     return asyncio.SelectorEventLoop()
 
 
+async def _serve(arguments: argparse.Namespace) -> None:
+    application = await build_async_local_agent_application(env_file=arguments.env_file)
+    try:
+        server = uvicorn.Server(
+            uvicorn.Config(
+                application.app,
+                host=arguments.host,
+                port=arguments.port,
+                log_level="info",
+            )
+        )
+        await server.serve()
+    finally:
+        await application.close()
+
+
 def main(argv: Sequence[str] | None = None) -> None:
-    """装配本地服务并交由 Uvicorn 启动。"""
+    """连接初始化、服务与关闭始终使用同一个数据库兼容事件循环。"""
     arguments = parse_arguments(argv)
-    application = build_local_agent_application(env_file=arguments.env_file)
-    uvicorn.run(
-        application.app,
-        host=arguments.host,
-        port=arguments.port,
-        log_level="info",
-        loop=(
-            "efficiency_platform_agent.main:selector_loop_factory"
-            if sys.platform == "win32"
-            else "auto"
-        ),
-    )
+    with asyncio.Runner(
+        loop_factory=selector_loop_factory if sys.platform == "win32" else None
+    ) as runner:
+        runner.run(_serve(arguments))

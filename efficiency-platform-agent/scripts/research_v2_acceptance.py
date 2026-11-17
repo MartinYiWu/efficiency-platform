@@ -39,9 +39,7 @@ def _run_async(coroutine):
     if sys.platform == "win32":
         return asyncio.run(
             coroutine,
-            loop_factory=lambda: asyncio.SelectorEventLoop(
-                selectors.SelectSelector()
-            ),
+            loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
         )
     return asyncio.run(coroutine)
 
@@ -163,18 +161,14 @@ def execute_live_acceptance(
         or timeout_seconds < 1
         or timeout_seconds > 600
     ):
-        raise LiveAcceptanceClientError(
-            "LIVE_TIMEOUT_INVALID", request_attempted=False
-        )
+        raise LiveAcceptanceClientError("LIVE_TIMEOUT_INVALID", request_attempted=False)
     request = LiveAcceptanceRequestV1(
         request_id=request_id,
         authorization_id=authorization_id,
         case_ids=case_ids,
         requested_budget_microunits=approved_budget_microunits,
     )
-    endpoint = (
-        base_url.rstrip("/") + "/v1/internal/research-v2/live-acceptance"
-    )
+    endpoint = base_url.rstrip("/") + "/v1/internal/research-v2/live-acceptance"
     payload = request.model_dump(mode="json")
     post = requester or _post_live_acceptance
     try:
@@ -223,9 +217,7 @@ def _post_live_acceptance(
             "LIVE_SERVER_UNAVAILABLE", request_attempted=True
         ) from exc
     if response.status_code != 200:
-        raise LiveAcceptanceClientError(
-            "LIVE_SERVER_REJECTED", request_attempted=True
-        )
+        raise LiveAcceptanceClientError("LIVE_SERVER_REJECTED", request_attempted=True)
     try:
         decoded = response.json()
     except ValueError as exc:
@@ -300,110 +292,8 @@ async def execute_direct_local_acceptance(
     database_url: str,
     env_file: Path,
 ) -> dict[str, object]:
-    """在本机组合真实模型、免费来源和 X01 PostgreSQL 账本。"""
-
-    from types import SimpleNamespace
-
-    from openai import AsyncOpenAI
-    from psycopg import AsyncConnection
-
-    from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
-    from efficiency_platform_agent.configuration.integration import (
-        S7IntegrationSettings,
-    )
-    from efficiency_platform_agent.contracts.live_acceptance_v2 import (
-        LiveAcceptanceRequestV1,
-    )
-    from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
-    from efficiency_platform_agent.harness.live_acceptance import (
-        JsonLiveAcceptanceAuthorizationStore,
-        LiveAcceptanceService,
-        PostgresLiveAcceptanceBudgetBinder,
-    )
-    from efficiency_platform_agent.harness.live_research_v2 import (
-        FreeSourceLiveAcceptanceRunner,
-        LiveFreeSourceCollector,
-    )
-    from efficiency_platform_agent.providers.llm.deepseek import (
-        DeepSeekModelProvider,
-    )
-    from efficiency_platform_agent.providers.llm.registry import (
-        ModelProviderRegistry,
-    )
-    from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
-
-    settings = S7IntegrationSettings.from_env_file(env_file)
-
-    def required(name: str) -> str:
-        value = getattr(settings, name)
-        if value is None or not value.get_secret_value().strip():
-            raise ValueError(f"LIVE_MODEL_CONFIGURATION_MISSING:{name}")
-        return value.get_secret_value()
-
-    api_key = required("deepseek_api_key")
-    base_url = required("deepseek_base_url")
-    model_id = required("deepseek_balanced_model")
-    client = AsyncOpenAI(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=120.0,
-        max_retries=0,
-    )
-    provider = DeepSeekModelProvider(
-        SimpleNamespace(chat=client.chat, close=client.close),
-        model_id,
-        timeout_ms=120_000,
-    )
-    registry = ModelProviderRegistry()
-    provider_id = "deepseek_live_research_acceptance"
-    registry.register(provider_id, provider)
-    candidate = ModelCandidate(
-        "deepseek-live-research-acceptance",
-        provider_id,
-        model_id,
-        ModelTier.BALANCED,
-        True,
-        False,
-        64_000,
-        True,
-        False,
-    )
-    runner = FreeSourceLiveAcceptanceRunner(
-        LiveFreeSourceCollector(),
-        ModelRuntime(ModelPolicyRouter((candidate,)), registry),
-    )
-    connection = await AsyncConnection.connect(database_url)
-    try:
-        service = LiveAcceptanceService(
-            authorizations=JsonLiveAcceptanceAuthorizationStore.from_files(
-                (authorization_file,)
-            ),
-            budget_binder=PostgresLiveAcceptanceBudgetBinder(
-                connection, "agent_runtime"
-            ),
-            runner=runner,
-        )
-        authorization = json.loads(authorization_file.read_text(encoding="utf-8"))
-        view = await service.execute(
-            LiveAcceptanceRequestV1(
-                request_id=request_id,
-                authorization_id=str(authorization["authorization_id"]),
-                case_ids=case_ids,
-                requested_budget_microunits=approved_budget_microunits,
-            ),
-            tenant_id=tenant_id,
-        )
-        return {
-            **view.model_dump(mode="json"),
-            "schema_version": "research-v2-live-acceptance-report/2",
-            "model_id": model_id,
-            "cost_observed": view.used_cost_microunits > 0,
-            "source_policy": "verified-free-public-only",
-            "case_evidence": runner.records,
-        }
-    finally:
-        await connection.close()
-        await provider.close()
+    """旧入口禁用；真实付费请求须切换到受保护的 Java/Agent 入口。"""
+    raise RuntimeError("PAID_LEGACY_ENTRY_DISABLED: use protected Java/Agent entry")
 
 
 def main() -> int:
@@ -437,9 +327,7 @@ def main() -> int:
                 "status": "BLOCKED",
                 "execution_mode": "live",
                 "external_io": False,
-                "reason_codes": [
-                    "LIVE_AUTHORIZATION_DATABASE_TENANT_REQUEST_REQUIRED"
-                ],
+                "reason_codes": ["LIVE_AUTHORIZATION_DATABASE_TENANT_REQUEST_REQUIRED"],
             }
         else:
             try:
@@ -481,9 +369,7 @@ def main() -> int:
                 "status": "BLOCKED",
                 "execution_mode": "live",
                 "external_io": False,
-                "reason_codes": [
-                    "LIVE_AUTHORIZATION_BASE_TENANT_REQUEST_REQUIRED"
-                ],
+                "reason_codes": ["LIVE_AUTHORIZATION_BASE_TENANT_REQUEST_REQUIRED"],
             }
         else:
             try:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import time
 import uuid
 from collections.abc import Iterator
@@ -45,6 +47,7 @@ from efficiency_platform_agent.agents.customer_service.retrieval import (
 from efficiency_platform_agent.agents.customer_service.retrieval_snapshot_repository import (
     InMemoryRetrievalSnapshotRepository,
     MySqlRetrievalSnapshotRepository,
+    RetrievalSnapshotRepository,
 )
 from efficiency_platform_agent.agents.customer_service.service import (
     CustomerServiceRunService,
@@ -54,6 +57,7 @@ from efficiency_platform_agent.agents.customer_service.vector_repository import 
     DocumentChunkRepository,
 )
 from efficiency_platform_agent.api.app import create_app
+from efficiency_platform_agent.api.paid_budget_scope import PaidBudgetScopeMiddleware
 from efficiency_platform_agent.capabilities.document.docling_parser import DoclingParser
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
 from efficiency_platform_agent.capabilities.ocr.paddle import PaddleOCRAdapter
@@ -64,7 +68,13 @@ from efficiency_platform_agent.configuration.integration import (
     IntegrationGate,
     S7IntegrationSettings,
 )
+from efficiency_platform_agent.configuration.paid_budget import default_paid_budget_path
 from efficiency_platform_agent.configuration.research import ResearchPipelineSettings
+from efficiency_platform_agent.context.dispatch import (
+    ContextDispatch,
+    ControlledModelProvider,
+    ControlledStreamingModelProvider,
+)
 from efficiency_platform_agent.contracts.research_ports_v2 import ResearchServiceV2
 from efficiency_platform_agent.conversation.direct_submission import (
     DirectConversationSubmissionStore,
@@ -86,7 +96,7 @@ from efficiency_platform_agent.core.budget import BudgetGuard
 from efficiency_platform_agent.core.diagnostics import NoopDiagnosticRecorder
 from efficiency_platform_agent.core.enums import StrategyMode
 from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
-from efficiency_platform_agent.core.ports import ModelProvider
+from efficiency_platform_agent.core.ports import ModelProvider, StreamingModelProvider
 from efficiency_platform_agent.core.run import ExecutionBudget
 from efficiency_platform_agent.core.runtime_ports import RunEventStore, RunRepository
 from efficiency_platform_agent.harness.operation_agent_factory import (
@@ -95,6 +105,9 @@ from efficiency_platform_agent.harness.operation_agent_factory import (
 from efficiency_platform_agent.harness.research_v2_adapter import (
     ResearchBriefStoreV2,
     ResearchV2ProviderAdapter,
+)
+from efficiency_platform_agent.memory.execution_authority import (
+    StoredMemoryPacketValidator,
 )
 from efficiency_platform_agent.observability.local_execution_log import (
     LocalExecutionLogger,
@@ -119,6 +132,7 @@ from efficiency_platform_agent.persistence.in_memory import (
     InMemoryRunEventStore,
     InMemoryRunRepository,
 )
+from efficiency_platform_agent.persistence.memory_cipher import MemorySnapshotCipher
 from efficiency_platform_agent.persistence.mysql_ranked_references import (
     InMemoryRankedReferenceRepository,
     MySqlRankedReferenceRepository,
@@ -129,6 +143,7 @@ from efficiency_platform_agent.persistence.mysql_runtime import (
     MySqlRunRepository,
     MySqlRuntimeDatabase,
 )
+from efficiency_platform_agent.persistence.paid_budget import SqlitePaidBudgetLedger
 from efficiency_platform_agent.prompts.mysql_repository import MySqlPromptRepository
 from efficiency_platform_agent.prompts.runtime import PromptAssembler
 from efficiency_platform_agent.providers.database.psycopg_pool import (
@@ -141,6 +156,7 @@ from efficiency_platform_agent.providers.embedding.dashscope import (
     DashScopeEmbeddingProvider,
 )
 from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
+from efficiency_platform_agent.providers.paid_http import PaidHttpTransport
 from efficiency_platform_agent.providers.rerank.dashscope import DashScopeRerankProvider
 from efficiency_platform_agent.providers.rerank.dashscope_http import (
     DashScopeRerankHttpClient,
@@ -218,6 +234,9 @@ class LocalAgentApplication:
 
     async def close(self) -> None:
         """等待后台任务并关闭组合根拥有的客户端。"""
+        customer = getattr(self.app.state, "customer_service_run_service", None)
+        if customer is not None:
+            await customer.close()
         await self.runtime.wait_for_background_tasks()
         if self.http_client is not None:
             await self.http_client.aclose()
@@ -265,6 +284,9 @@ def build_local_agent_application(
     *,
     env_file: str | Path = ".env",
     provider: ModelProvider | None = None,
+    context_dispatch: ContextDispatch | None = None,
+    memory_runtime: Any = None,
+    memory_database: MySqlRuntimeDatabase | None = None,
     test_mode: bool = False,
     http_client: Any | None = None,
     research_provider: Any | None = None,
@@ -284,6 +306,16 @@ def build_local_agent_application(
     | None = None,
 ) -> LocalAgentApplication:
     """默认装配真实 DeepSeek；Fake Provider 必须显式开启测试模式。"""
+    if (
+        test_mode
+        and provider is None
+        and (
+            not isinstance(http_client, httpx.AsyncClient)
+            or not isinstance(http_client._transport, httpx.MockTransport)
+            or bool(http_client._mounts)
+        )
+    ):
+        raise ValueError("PAID_TEST_CLIENT_REQUIRED")
     if provider is not None and not test_mode:
         raise ValueError("自定义 Provider 仅允许显式测试模式")
     if research_provider is not None and not test_mode:
@@ -311,7 +343,62 @@ def build_local_agent_application(
     ):
         raise RuntimeError("LIVE_ACCEPTANCE_PERSISTENCE_NOT_READY")
     resolved = settings or S7IntegrationSettings.from_env_file(env_file)
+    context_authorizer = None
+    if resolved.context_enabled:
+        if context_dispatch is None or context_dispatch.stage_store is None:
+            raise ValueError("CONTEXT_DISPATCH_REQUIRED")
+        if (
+            resolved.context_hmac_key is None
+            or resolved.context_internal_secret is None
+        ):
+            raise ValueError("CONTEXT_AUTH_CONFIG_REQUIRED")
+        context_dispatch.validate_key(
+            resolved.context_hmac_key.get_secret_value().encode()
+        )
+        if not test_mode:
+            from efficiency_platform_agent.persistence.context_manifest import (
+                MySqlContextManifestStore,
+            )
+            from efficiency_platform_agent.persistence.context_stage import (
+                MySqlContextStageStore,
+            )
+
+            from .context_authority import ServerDispatchAuthority
+
+            if not isinstance(
+                context_dispatch.store, MySqlContextManifestStore
+            ) or not isinstance(context_dispatch.stage_store, MySqlContextStageStore):
+                raise ValueError("CONTEXT_PERSISTENT_STORE_REQUIRED")
+            if not isinstance(context_dispatch.authority, ServerDispatchAuthority):
+                raise ValueError("CONTEXT_PUBLISHED_AUTHORITY_REQUIRED")
+            context_dispatch.authority.assert_ready()
+        from .hr_factory import internal_hr_authorizer
+
+        context_authorizer = internal_hr_authorizer(
+            resolved.context_internal_secret.get_secret_value()
+        )
+    elif context_dispatch is not None:
+        raise ValueError("CONTEXT_FEATURE_DISABLED")
+    if resolved.hr_enabled and test_mode:
+        raise ValueError("HR_CONFIG_PROMPT_STORAGE_REQUIRED")
     runtime_database: MySqlRuntimeDatabase | None = None
+    memory_store = None
+    memory_cipher = None
+    if resolved.memory_enabled:
+        if test_mode:
+            raise ValueError("MEMORY_PERSISTENT_STORE_REQUIRED")
+        from .memory_runtime import MemoryRuntimeComponents
+        if not isinstance(memory_runtime, MemoryRuntimeComponents):
+            raise ValueError("MEMORY_RUNTIME_COMPONENTS_REQUIRED")
+        assert resolved.memory_encryption_key is not None
+        memory_cipher = MemorySnapshotCipher(
+            resolved.memory_encryption_key_version,
+            {
+                resolved.memory_encryption_key_version: base64.b64decode(
+                    resolved.memory_encryption_key.get_secret_value(), validate=True
+                )
+            },
+        )
     run_repository: RunRepository
     run_event_store: RunEventStore
     ranked_reference_repository: RankedReferenceRepository
@@ -321,12 +408,12 @@ def build_local_agent_application(
         run_event_store = InMemoryRunEventStore()
         ranked_reference_repository = InMemoryRankedReferenceRepository()
         customer_service_release_repository = InMemoryReleaseRepository()
-        customer_service_retrieval_snapshots = InMemoryRetrievalSnapshotRepository()
-    else:
-        runtime_database = MySqlRuntimeDatabase(
-            _secret(resolved, "runtime_database_url")
+        customer_service_retrieval_snapshots: RetrievalSnapshotRepository = (
+            InMemoryRetrievalSnapshotRepository()
         )
-        run_repository = MySqlRunRepository(runtime_database.engine)
+    else:
+        runtime_database = memory_database or MySqlRuntimeDatabase(_secret(resolved, "runtime_database_url"))
+        run_repository = MySqlRunRepository(runtime_database.engine, memory_cipher)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
         ranked_reference_repository = MySqlRankedReferenceRepository(
             runtime_database.engine
@@ -337,6 +424,19 @@ def build_local_agent_application(
         customer_service_retrieval_snapshots = MySqlRetrievalSnapshotRepository(
             runtime_database.engine
         )
+        if resolved.memory_enabled:
+            assert memory_cipher is not None and context_dispatch is not None
+            from .context_authority import ServerDispatchAuthority
+
+            if not isinstance(context_dispatch.authority, ServerDispatchAuthority):
+                raise ValueError("MEMORY_PUBLISHED_AUTHORITY_REQUIRED")
+            if memory_runtime.store.store.engine is not runtime_database.engine:
+                raise ValueError("MEMORY_RUNTIME_DATABASE_BINDING_INVALID")
+            memory_store = memory_runtime.store
+            context_dispatch.authority.memory_execution_store = memory_store
+            context_dispatch.controller.install_memory_validator(
+                StoredMemoryPacketValidator(memory_store)
+            )
     prompt_assembler = (
         PromptAssembler(
             MySqlPromptRepository(runtime_database.engine), environment="dev"
@@ -415,10 +515,38 @@ def build_local_agent_application(
     }
     owns_client = provider is None and http_client is None
     client = http_client
+    paid_clients: tuple[httpx.AsyncClient, ...] = ()
+    paid_ledger = (
+        None if test_mode else SqlitePaidBudgetLedger(default_paid_budget_path())
+    )
+    # 同进程各Provider在预留前共用槽位；跨进程仍由固定总账执行最终限制。
+    paid_snapshot = paid_ledger.snapshot() if paid_ledger is not None else {}
+    paid_limits = cast(dict[str, Any], paid_snapshot.get("limits", {}))
+    paid_request_slots = (
+        asyncio.Semaphore(max(1, int(paid_limits.get("max_inflight", 1))))
+        if paid_ledger is not None
+        else None
+    )
+    model_client = client
     if provider is None:
         client = client or httpx.AsyncClient()
         base_url = _secret(resolved, "deepseek_base_url")
         api_key = _secret(resolved, "deepseek_api_key")
+        model_client = client
+        if paid_ledger is not None:
+            model_client = httpx.AsyncClient(
+                transport=PaidHttpTransport(
+                    paid_ledger,
+                    httpx.AsyncHTTPTransport(retries=0),
+                    "deepseek",
+                    request_slots=paid_request_slots,
+                    allowed_url=base_url.rstrip("/") + "/chat/completions",
+                    require_context_guard=resolved.context_enabled,
+                ),
+                trust_env=False,
+                follow_redirects=False,
+            )
+            paid_clients += (model_client,)
 
     provider_registry = ModelProviderRegistry()
     candidates: list[ModelCandidate] = []
@@ -428,16 +556,42 @@ def build_local_agent_application(
         current = provider
         if current is None:
             current = DeepSeekStreamingProvider(
-                client,
+                model_client,
                 model,
                 api_key=api_key,
                 base_url=base_url,
                 timeout_ms=_OPERATION_MODEL_TIMEOUT_MS,
+                max_retries=0 if resolved.context_enabled else 1,
                 diagnostic_recorder=execution_logger,
             )
+        if context_dispatch is not None:
+            current = (
+                ControlledStreamingModelProvider(
+                    current,
+                    context_dispatch,
+                    "deepseek",
+                    model,
+                    paid_transport=not test_mode,
+                )
+                if isinstance(current, StreamingModelProvider)
+                else ControlledModelProvider(
+                    current,
+                    context_dispatch,
+                    "deepseek",
+                    model,
+                    paid_transport=not test_mode,
+                )
+            )
+        customer_current = current
+        if resolved.memory_enabled:
+            from efficiency_platform_agent.orchestration.context_gate import (
+                FencedModelProvider,
+            )
+            current = FencedModelProvider(current, memory_runtime.registry, "official")
+            customer_current = FencedModelProvider(customer_current, memory_runtime.registry, "NO_CHECKPOINT")
         provider_registry.register(provider_id, current)
         candidates.append(_candidate(provider_id, provider_id, model, tier))
-        customer_service_model_providers.setdefault(model, current)
+        customer_service_model_providers.setdefault(model, customer_current)
 
     cancellation = InMemoryCancellationSignal()
     model_cancellation = _RunScopedModelCancellation(cancellation)
@@ -482,6 +636,7 @@ def build_local_agent_application(
             direct_submissions.resolve,
             model_call_scope=model_cancellation.bind,
             output_publisher=publish_conversation_delta,
+            checkpointer=memory_runtime.saver if resolved.memory_enabled else None,
         )
     )
     clock = _SystemClock()
@@ -490,6 +645,9 @@ def build_local_agent_application(
         cancellation_signal=cancellation,
         clock=clock,
         diagnostic_recorder=execution_logger,
+        memory_registry=memory_runtime.registry if resolved.memory_enabled else None,
+        checkpoint_store=memory_runtime.owned if resolved.memory_enabled else None,
+        checkpoint_serializer=memory_runtime.serializer if resolved.memory_enabled else None,
     )
     runtime = AgentRuntimeService(
         repository=run_repository,
@@ -505,6 +663,7 @@ def build_local_agent_application(
         cancellation_signal=cancellation,
         event_hub=event_hub,
         diagnostic_recorder=execution_logger,
+        memory_execution_store=memory_store,
     )
     runtime_service = runtime
     local_live_components = None
@@ -630,6 +789,7 @@ def build_local_agent_application(
     if not test_mode:
         from openai import AsyncOpenAI
 
+        assert paid_ledger is not None
         vector_connection = PsycopgPoolConnection(
             _secret(resolved, "vector_database_url")
         )
@@ -637,6 +797,21 @@ def build_local_agent_application(
         embedding_client = AsyncOpenAI(
             api_key=_secret(resolved, "embedding_dashscope_api_key"),
             base_url=_secret(resolved, "embedding_dashscope_base_url"),
+            max_retries=0,
+            http_client=httpx.AsyncClient(
+                transport=PaidHttpTransport(
+                    paid_ledger,
+                    httpx.AsyncHTTPTransport(retries=0),
+                    "embedding",
+                    request_slots=paid_request_slots,
+                    allowed_url=_secret(
+                        resolved, "embedding_dashscope_base_url"
+                    ).rstrip("/")
+                    + "/embeddings",
+                ),
+                trust_env=False,
+                follow_redirects=False,
+            ),
         )
         embedding = DashScopeEmbeddingProvider(
             embedding_client,
@@ -644,9 +819,21 @@ def build_local_agent_application(
             dimensions=resolved.embedding_dimensions,
         )
         assert client is not None
+        rerank_client = httpx.AsyncClient(
+            transport=PaidHttpTransport(
+                paid_ledger,
+                httpx.AsyncHTTPTransport(retries=0),
+                "rerank",
+                request_slots=paid_request_slots,
+                allowed_url=resolved.rerank_dashscope_base_url,
+            ),
+            trust_env=False,
+            follow_redirects=False,
+        )
+        paid_clients += (rerank_client,)
         rerank = DashScopeRerankProvider(
             DashScopeRerankHttpClient(
-                client,
+                rerank_client,
                 api_key=_secret(resolved, "rerank_dashscope_api_key"),
                 base_url=resolved.rerank_dashscope_base_url,
             ),
@@ -697,8 +884,59 @@ def build_local_agent_application(
             customer_service_release_repository,
             customer_service_gateway,
             customer_service_retrieval_snapshots,
+            context_required=resolved.context_enabled,
+            memory_execution_store=memory_store,
         )
-        customer_service_resources = (embedding_client, vector_connection)
+        customer_service_resources = (
+            embedding_client,
+            vector_connection,
+            *paid_clients,
+        )
+
+    hr_endpoint = None
+    hr_authorizer = None
+    dependency_probe = None if runtime_database is None else runtime_database.ping
+    if resolved.hr_enabled:
+        from efficiency_platform_agent.agents.hr.ocr import build_local_hr_ocr
+
+        from .hr_factory import (
+            HrPolicyModelProvider,
+            build_hr_endpoint,
+            internal_hr_authorizer,
+            validate_hr_prompt_assets,
+        )
+
+        if prompt_assembler is None or paid_ledger is None:
+            raise ValueError("HR_CONFIG_PROMPT_STORAGE_REQUIRED")
+        assert resolved.hr_internal_secret is not None
+        hr_endpoint = build_hr_endpoint(
+            prompt_assembler,
+            HrPolicyModelProvider(customer_service_model_providers),
+            paid_ledger,
+            ocr=build_local_hr_ocr(
+                resolved.hr_ocr_detection_model_dir,
+                resolved.hr_ocr_recognition_model_dir,
+            ),
+        )
+        hr_endpoint.memory_execution_store = memory_store
+        hr_authorizer = internal_hr_authorizer(
+            resolved.hr_internal_secret.get_secret_value()
+        )
+        customer_service_resources += (hr_endpoint.controls,)
+        assert runtime_database is not None
+        hr_database = runtime_database
+        hr_prompt_repository = MySqlPromptRepository(hr_database.engine)
+
+        async def hr_dependency_probe() -> None:
+            await hr_database.ping()
+            try:
+                await validate_hr_prompt_assets(
+                    hr_prompt_repository, set(customer_service_model_providers)
+                )
+            except ValueError:
+                raise RuntimeError("HR_CONFIG_PUBLISHED_ASSETS_NOT_READY") from None
+
+        dependency_probe = hr_dependency_probe
 
     app = create_app(
         runtime,
@@ -708,12 +946,29 @@ def build_local_agent_application(
         customer_service_ingest_service=customer_service_ingest_service,
         customer_service_release_repository=customer_service_release_repository,
         customer_service_run_service=customer_service_run_service,
+        hr_skill_endpoint=hr_endpoint,
+        hr_skill_authorizer=hr_authorizer,
+        context_internal_authorizer=context_authorizer,
+        memory_enabled=resolved.memory_enabled,
+        memory_execution_store=memory_store,
         runtime_mode="s2_fake_in_memory" if test_mode else "local_real_mysql",
-        dependency_probe=(None if runtime_database is None else runtime_database.ping),
+        memory_erase_threads=memory_runtime.erasure.prepare_and_erase if resolved.memory_enabled else None,
+        memory_cleanup_journal=memory_runtime.journal if resolved.memory_enabled else None,
+        memory_resume_execution=memory_runtime.registry.resume if resolved.memory_enabled else None,
+        memory_manifest_reader=cast(
+            MySqlContextManifestStore, context_dispatch.store
+        ).execution_manifests
+        if resolved.memory_enabled and context_dispatch is not None
+        else None,
+        dependency_probe=dependency_probe,
     )
     app.state.local_live_research_components = local_live_components
+    if paid_ledger is not None:
+        app.add_middleware(PaidBudgetScopeMiddleware)
+        app.state.paid_budget_ledger = paid_ledger
     app.state.ranked_reference_repository = ranked_reference_repository
     app.state.local_test_mode = test_mode
+    app.state.hr_enabled = resolved.hr_enabled
     app.state.research_v2_enabled = resolved_research_v2.v2_enabled
     app.state.research_v2_production_ready = resolved_research_v2.production_ready
     app.state.live_acceptance_enabled = resolved_live_acceptance_service is not None
@@ -725,7 +980,7 @@ def build_local_agent_application(
         client if owns_client else None,
         research_client,
         runtime_database,
-        customer_service_resources,
+        customer_service_resources + ((memory_runtime,) if resolved.memory_enabled else ()),
     )
     app.router.add_event_handler("shutdown", application.close)
     return application

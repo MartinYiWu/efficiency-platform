@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import time
 from collections.abc import Sequence
 from urllib.parse import urlsplit
@@ -12,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from efficiency_platform_agent.core.runtime import RunEventRecord, RunRecord
 
+from .memory_cipher import MemorySnapshotCipher, SealedMemorySnapshot
 from .mysql_codec import decode_event, decode_run, encode_event, encode_run
 
 
@@ -24,7 +27,9 @@ def _validate_runtime_database_url(value: str) -> str:
     if not parsed.hostname:
         raise ValueError("AGENT_RUNTIME_DATABASE_URL 缺少主机")
     if parsed.path.removeprefix("/") != "ai_efficiency_platform_agent":
-        raise ValueError("AGENT_RUNTIME_DATABASE_URL 必须指向 ai_efficiency_platform_agent")
+        raise ValueError(
+            "AGENT_RUNTIME_DATABASE_URL 必须指向 ai_efficiency_platform_agent"
+        )
     return value
 
 
@@ -60,8 +65,56 @@ class MySqlRuntimeDatabase:
 class MySqlRunRepository:
     """使用完整 JSON 快照和版本条件保存 Run。"""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(
+        self, engine: AsyncEngine, memory_cipher: MemorySnapshotCipher | None = None
+    ) -> None:
         self.engine = engine
+        self.memory_cipher = memory_cipher
+
+    def _encode(self, record: RunRecord) -> str:
+        raw = json.loads(encode_run(record))
+        memory = raw["request"]["metadata"].get("memory_execution")
+        if memory is not None:
+            if self.memory_cipher is None:
+                raise ValueError("MEMORY_ENCRYPTION_KEY_REQUIRED")
+            execution = memory["packet"]["execution_id"]
+            sealed = self.memory_cipher.seal(
+                record.request.tenant_id,
+                execution,
+                record.run_id,
+                json.dumps(memory, ensure_ascii=False, separators=(",", ":")).encode(),
+            )
+            raw["request"]["metadata"]["memory_execution"] = {
+                "execution_id": execution,
+                "key_version": sealed.key_version,
+                "nonce": base64.b64encode(sealed.nonce).decode("ascii"),
+                "ciphertext": base64.b64encode(sealed.ciphertext).decode("ascii"),
+            }
+        return json.dumps(raw, ensure_ascii=False, separators=(",", ":"))
+
+    def _decode(self, value: str | dict) -> RunRecord:
+        raw = json.loads(value) if isinstance(value, str) else value
+        if raw.get("memory_scrubbed") is True:
+            raise ValueError("MEMORY_ACCESS_REVOKED")
+        memory = raw["request"]["metadata"].get("memory_execution")
+        if memory is not None:
+            if self.memory_cipher is None:
+                raise ValueError("MEMORY_ENCRYPTION_KEY_REQUIRED")
+            try:
+                opened = self.memory_cipher.open(
+                    raw["request"]["tenant_id"],
+                    memory["execution_id"],
+                    raw["run_id"],
+                    SealedMemorySnapshot(
+                        base64.b64decode(memory["ciphertext"], validate=True),
+                        base64.b64decode(memory["nonce"], validate=True),
+                        memory["key_version"],
+                    ),
+                )
+                raw["request"]["metadata"]["memory_execution"] = json.loads(opened)
+            except (KeyError, TypeError, ValueError):
+                raise ValueError("MEMORY_SNAPSHOT_UNAVAILABLE") from None
+        return decode_run(raw)
 
     async def create(self, record: RunRecord) -> None:
         now = int(time.time() * 1000)
@@ -81,7 +134,7 @@ class MySqlRunRepository:
                         "request_id": record.request.request_id,
                         "status": record.status.value,
                         "version": record.version,
-                        "state_json": encode_run(record),
+                        "state_json": self._encode(record),
                         "created_at": now,
                         "updated_at": now,
                     },
@@ -114,7 +167,7 @@ class MySqlRunRepository:
                 {"run_id": run_id, "tenant_id": tenant_id},
             )
             value = result.scalar_one_or_none()
-        return None if value is None else decode_run(value)
+        return None if value is None else self._decode(value)
 
     async def get_by_request_id(
         self, request_id: str, tenant_id: str
@@ -128,7 +181,7 @@ class MySqlRunRepository:
                 {"request_id": request_id, "tenant_id": tenant_id},
             )
             value = result.scalar_one_or_none()
-        return None if value is None else decode_run(value)
+        return None if value is None else self._decode(value)
 
     async def save(self, record: RunRecord, expected_version: int) -> None:
         if record.version != expected_version + 1:
@@ -143,7 +196,7 @@ class MySqlRunRepository:
                 {
                     "status": record.status.value,
                     "next_version": record.version,
-                    "state_json": encode_run(record),
+                    "state_json": self._encode(record),
                     "updated_at": int(time.time() * 1000),
                     "run_id": record.run_id,
                     "tenant_id": record.request.tenant_id,

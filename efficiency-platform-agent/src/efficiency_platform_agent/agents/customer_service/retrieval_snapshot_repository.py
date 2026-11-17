@@ -18,6 +18,7 @@ _SNAPSHOT_NAMESPACE = UUID("997e5350-2269-433a-b6a7-f7719d2831ca")
 
 class RetrievalSnapshotRepository(Protocol):
     async def save(self, run_id: UUID, result: GraphResult) -> None: ...
+    async def erase_run(self, run_id: UUID) -> bool: ...
 
 
 class InMemoryRetrievalSnapshotRepository:
@@ -28,10 +29,31 @@ class InMemoryRetrievalSnapshotRepository:
         if result.retrieval_trace is not None:
             self.values[run_id] = result
 
+    async def erase_run(self, run_id: UUID) -> bool:
+        self.values.pop(run_id, None)
+        return run_id not in self.values
+
 
 class MySqlRetrievalSnapshotRepository:
     def __init__(self, engine: AsyncEngine) -> None:
         self.engine = engine
+
+    async def erase_run(self, run_id: UUID) -> bool:
+        # 仅供已核原执行owner并join实际任务后的清理回调，不能直接用于业务HTTP。
+        async with self.engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM agent_customer_service_retrieval_snapshot WHERE run_id=:run"
+                ),
+                {"run": str(run_id)},
+            )
+            remaining = await connection.scalar(
+                text(
+                    "SELECT COUNT(*) FROM agent_customer_service_retrieval_snapshot WHERE run_id=:run"
+                ),
+                {"run": str(run_id)},
+            )
+            return remaining == 0
 
     async def save(self, run_id: UUID, result: GraphResult) -> None:
         trace = result.retrieval_trace

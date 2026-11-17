@@ -1,1 +1,1 @@
-export { PlatformShell } from './PlatformShell';
+export { default as PlatformShell } from './PlatformShell.vue';

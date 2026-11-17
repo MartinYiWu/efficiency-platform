@@ -1,0 +1,731 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "D:\\软件目录\\efficiency-platform\\ai-efficiency-platform-ui-vue\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "--config",
+      "playwright.visual.config.ts"
+    ],
+    "configFile": "D:\\软件目录\\efficiency-platform\\ai-efficiency-platform-ui-vue\\playwright.visual.config.ts",
+    "rootDir": "D:/软件目录/efficiency-platform/ai-efficiency-platform-ui-vue/e2e",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "D:/软件目录/efficiency-platform/ai-efficiency-platform-ui-vue/test-results/migration-visual",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "chromium",
+        "name": "chromium",
+        "testDir": "D:/软件目录/efficiency-platform/ai-efficiency-platform-ui-vue/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "migration-visual.spec.ts"
+        ],
+        "timeout": 180000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "list",
+        null
+      ],
+      [
+        "json",
+        {
+          "outputFile": "../docs/verification/2026-11-03-vue-migration/visual-results.json"
+        }
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.62.1",
+    "workers": 1,
+    "webServer": {
+      "command": "pnpm exec vite --host 127.0.0.1 --port 5191 --strictPort",
+      "url": "http://127.0.0.1:5191",
+      "reuseExistingServer": false,
+      "env": {
+        "VITE_API_BASE_URL": "",
+        "VITE_API_PROXY_TARGET": "http://127.0.0.1:1"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "migration-visual.spec.ts",
+      "file": "migration-visual.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "全部44页面离线视觉与响应式 1440px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 50794,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "/ai-assistants/operations/chat",
+                      "duration": 1964
+                    },
+                    {
+                      "title": "/ai-assistants/customer-service/chat",
+                      "duration": 1301
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases",
+                      "duration": 1202
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb",
+                      "duration": 1150
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb/imports",
+                      "duration": 1102
+                    },
+                    {
+                      "title": "/knowledge-center/documents/d",
+                      "duration": 1207
+                    },
+                    {
+                      "title": "/ai-center/agents",
+                      "duration": 1240
+                    },
+                    {
+                      "title": "/ai-center/agents/a",
+                      "duration": 1072
+                    },
+                    {
+                      "title": "/ai-center/prompts",
+                      "duration": 1142
+                    },
+                    {
+                      "title": "/ai-center/model-policies",
+                      "duration": 1215
+                    },
+                    {
+                      "title": "/ai-center/rag-policies",
+                      "duration": 1212
+                    },
+                    {
+                      "title": "/ai-center/rag-debug",
+                      "duration": 1175
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations",
+                      "duration": 1206
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/ds",
+                      "duration": 1154
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/runs/er",
+                      "duration": 1100
+                    },
+                    {
+                      "title": "/ai-center/runs",
+                      "duration": 1177
+                    },
+                    {
+                      "title": "/ai-center/runs/r",
+                      "duration": 1186
+                    },
+                    {
+                      "title": "/ai-center/feedback",
+                      "duration": 1363
+                    },
+                    {
+                      "title": "/ai-assistants/hr/chat",
+                      "duration": 989
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/upload",
+                      "duration": 1105
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/batches/batch-1",
+                      "duration": 1035
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/candidates/candidate-1/confirm",
+                      "duration": 1168
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/audit",
+                      "duration": 1067
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/synonyms",
+                      "duration": 1106
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent",
+                      "duration": 1059
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent/candidate-1",
+                      "duration": 1074
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching",
+                      "duration": 1196
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/candidate-1",
+                      "duration": 1182
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/filtered",
+                      "duration": 1125
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/guide",
+                      "duration": 1128
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/questions",
+                      "duration": 1145
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/generate",
+                      "duration": 1087
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews",
+                      "duration": 1088
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings",
+                      "duration": 1094
+                    },
+                    {
+                      "title": "/ai-assistants/hr/workbench",
+                      "duration": 1267
+                    },
+                    {
+                      "title": "/ai-assistants/hr/component-states",
+                      "duration": 1092
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions",
+                      "duration": 1113
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/templates",
+                      "duration": 1089
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/position-1",
+                      "duration": 1045
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new",
+                      "duration": 1143
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/soft-requirements",
+                      "duration": 1025
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/hard-conditions",
+                      "duration": 961
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/preview",
+                      "duration": 1037
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/weights",
+                      "duration": 963
+                    }
+                  ],
+                  "startTime": "2026-11-03T04:20:27.275Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "530d1965860b56824012-8b4045f8b588990192dd",
+          "file": "migration-visual.spec.ts",
+          "line": 32,
+          "column": 3
+        },
+        {
+          "title": "全部44页面离线视觉与响应式 1024px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 45830,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "/ai-assistants/operations/chat",
+                      "duration": 1433
+                    },
+                    {
+                      "title": "/ai-assistants/customer-service/chat",
+                      "duration": 1202
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases",
+                      "duration": 1165
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb",
+                      "duration": 1087
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb/imports",
+                      "duration": 1014
+                    },
+                    {
+                      "title": "/knowledge-center/documents/d",
+                      "duration": 1200
+                    },
+                    {
+                      "title": "/ai-center/agents",
+                      "duration": 1172
+                    },
+                    {
+                      "title": "/ai-center/agents/a",
+                      "duration": 1111
+                    },
+                    {
+                      "title": "/ai-center/prompts",
+                      "duration": 1245
+                    },
+                    {
+                      "title": "/ai-center/model-policies",
+                      "duration": 1190
+                    },
+                    {
+                      "title": "/ai-center/rag-policies",
+                      "duration": 1192
+                    },
+                    {
+                      "title": "/ai-center/rag-debug",
+                      "duration": 1123
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations",
+                      "duration": 1102
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/ds",
+                      "duration": 1077
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/runs/er",
+                      "duration": 1052
+                    },
+                    {
+                      "title": "/ai-center/runs",
+                      "duration": 1067
+                    },
+                    {
+                      "title": "/ai-center/runs/r",
+                      "duration": 1006
+                    },
+                    {
+                      "title": "/ai-center/feedback",
+                      "duration": 1084
+                    },
+                    {
+                      "title": "/ai-assistants/hr/chat",
+                      "duration": 933
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/upload",
+                      "duration": 923
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/batches/batch-1",
+                      "duration": 912
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/candidates/candidate-1/confirm",
+                      "duration": 994
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/audit",
+                      "duration": 945
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/synonyms",
+                      "duration": 940
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent",
+                      "duration": 990
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent/candidate-1",
+                      "duration": 978
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching",
+                      "duration": 977
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/candidate-1",
+                      "duration": 938
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/filtered",
+                      "duration": 923
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/guide",
+                      "duration": 955
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/questions",
+                      "duration": 981
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/generate",
+                      "duration": 972
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews",
+                      "duration": 936
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings",
+                      "duration": 964
+                    },
+                    {
+                      "title": "/ai-assistants/hr/workbench",
+                      "duration": 1014
+                    },
+                    {
+                      "title": "/ai-assistants/hr/component-states",
+                      "duration": 942
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions",
+                      "duration": 1022
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/templates",
+                      "duration": 994
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/position-1",
+                      "duration": 941
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new",
+                      "duration": 974
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/soft-requirements",
+                      "duration": 936
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/hard-conditions",
+                      "duration": 953
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/preview",
+                      "duration": 981
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/weights",
+                      "duration": 927
+                    }
+                  ],
+                  "startTime": "2026-11-03T04:21:18.377Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "530d1965860b56824012-7e3c0ef5db148489bb50",
+          "file": "migration-visual.spec.ts",
+          "line": 32,
+          "column": 3
+        },
+        {
+          "title": "全部44页面离线视觉与响应式 390px",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 180000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 47211,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "steps": [
+                    {
+                      "title": "/ai-assistants/operations/chat",
+                      "duration": 1330
+                    },
+                    {
+                      "title": "/ai-assistants/customer-service/chat",
+                      "duration": 1251
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases",
+                      "duration": 1167
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb",
+                      "duration": 1120
+                    },
+                    {
+                      "title": "/knowledge-center/knowledge-bases/kb/imports",
+                      "duration": 1052
+                    },
+                    {
+                      "title": "/knowledge-center/documents/d",
+                      "duration": 1195
+                    },
+                    {
+                      "title": "/ai-center/agents",
+                      "duration": 1132
+                    },
+                    {
+                      "title": "/ai-center/agents/a",
+                      "duration": 1105
+                    },
+                    {
+                      "title": "/ai-center/prompts",
+                      "duration": 1087
+                    },
+                    {
+                      "title": "/ai-center/model-policies",
+                      "duration": 1425
+                    },
+                    {
+                      "title": "/ai-center/rag-policies",
+                      "duration": 1262
+                    },
+                    {
+                      "title": "/ai-center/rag-debug",
+                      "duration": 1195
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations",
+                      "duration": 1160
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/ds",
+                      "duration": 1116
+                    },
+                    {
+                      "title": "/ai-center/rag-evaluations/runs/er",
+                      "duration": 1145
+                    },
+                    {
+                      "title": "/ai-center/runs",
+                      "duration": 1228
+                    },
+                    {
+                      "title": "/ai-center/runs/r",
+                      "duration": 1084
+                    },
+                    {
+                      "title": "/ai-center/feedback",
+                      "duration": 1121
+                    },
+                    {
+                      "title": "/ai-assistants/hr/chat",
+                      "duration": 973
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/upload",
+                      "duration": 980
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/batches/batch-1",
+                      "duration": 987
+                    },
+                    {
+                      "title": "/ai-assistants/hr/resumes/candidates/candidate-1/confirm",
+                      "duration": 1006
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/audit",
+                      "duration": 1013
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings/synonyms",
+                      "duration": 974
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent",
+                      "duration": 978
+                    },
+                    {
+                      "title": "/ai-assistants/hr/talent/candidate-1",
+                      "duration": 980
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching",
+                      "duration": 972
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/candidate-1",
+                      "duration": 1022
+                    },
+                    {
+                      "title": "/ai-assistants/hr/matching/filtered",
+                      "duration": 962
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/guide",
+                      "duration": 957
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/questions",
+                      "duration": 968
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews/generate",
+                      "duration": 1007
+                    },
+                    {
+                      "title": "/ai-assistants/hr/interviews",
+                      "duration": 1000
+                    },
+                    {
+                      "title": "/ai-assistants/hr/settings",
+                      "duration": 962
+                    },
+                    {
+                      "title": "/ai-assistants/hr/workbench",
+                      "duration": 1001
+                    },
+                    {
+                      "title": "/ai-assistants/hr/component-states",
+                      "duration": 966
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions",
+                      "duration": 1036
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/templates",
+                      "duration": 1024
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/position-1",
+                      "duration": 990
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new",
+                      "duration": 1032
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/soft-requirements",
+                      "duration": 983
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/hard-conditions",
+                      "duration": 1068
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/preview",
+                      "duration": 1005
+                    },
+                    {
+                      "title": "/ai-assistants/hr/positions/new/weights",
+                      "duration": 996
+                    }
+                  ],
+                  "startTime": "2026-11-03T04:22:04.224Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "530d1965860b56824012-e5e7446c62af3684b789",
+          "file": "migration-visual.spec.ts",
+          "line": 32,
+          "column": 3
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-03T04:20:22.758Z",
+    "duration": 150323.265,
+    "expected": 3,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

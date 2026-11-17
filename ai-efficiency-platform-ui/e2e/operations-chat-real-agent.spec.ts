@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-test('运营助手通过真实 Java 与 Agent HTTP/SSE 完成对话并在刷新后恢复', async ({ page }, testInfo) => {
+test('运营助手通过真实 Java 与 Agent HTTP/SSE 完成对话并在刷新后恢复', async ({
+  page,
+}, testInfo) => {
   test.setTimeout(90_000);
 
   const apiRequests: Array<{ method: string; path: string; status?: number }> = [];
@@ -31,18 +33,14 @@ test('运营助手通过真实 Java 与 Agent HTTP/SSE 完成对话并在刷新�
   const createResponse = await createResponsePromise;
   expect(createResponse.status()).toBe(200);
 
-  await expect
-    .poll(() => new URL(page.url()).searchParams.get('conversationId'))
-    .not.toBeNull();
+  await expect.poll(() => new URL(page.url()).searchParams.get('conversationId')).not.toBeNull();
   const conversationId = new URL(page.url()).searchParams.get('conversationId');
   await page.getByLabel('输入消息').fill('你是谁');
 
   const submitResponsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === 'POST' &&
-      /\/api\/operations\/conversations\/[^/]+\/messages$/.test(
-        new URL(response.url()).pathname,
-      ),
+      /\/api\/operations\/conversations\/[^/]+\/messages$/.test(new URL(response.url()).pathname),
   );
   const streamResponsePromise = page.waitForResponse(
     (response) =>

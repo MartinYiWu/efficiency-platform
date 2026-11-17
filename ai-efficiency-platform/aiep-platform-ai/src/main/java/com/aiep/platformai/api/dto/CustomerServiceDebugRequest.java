@@ -14,9 +14,16 @@ public record CustomerServiceDebugRequest(
         @JsonProperty("agent_release_id") String agentReleaseId,
         @JsonProperty("agent_version_id") String agentVersionId,
         @JsonProperty("rag_policy_version_id") String ragPolicyVersionId,
-        @JsonProperty("knowledge_bindings") List<KnowledgeBinding> knowledgeBindings) {
+        @JsonProperty("knowledge_bindings") List<KnowledgeBinding> knowledgeBindings,
+        @JsonProperty("memory_context") MemoryContextEnvelope memoryContext) {
+
+    public CustomerServiceDebugRequest(String contractVersion, String agentKey, String tenantId, String question,
+            String agentReleaseId, String agentVersionId, String ragPolicyVersionId, List<KnowledgeBinding> knowledgeBindings) {
+        this(contractVersion, agentKey, tenantId, question, agentReleaseId, agentVersionId, ragPolicyVersionId, knowledgeBindings, MemoryContextEnvelope.disabled());
+    }
 
     public CustomerServiceDebugRequest {
+        if (memoryContext == null) memoryContext = MemoryContextEnvelope.disabled();
         CustomerServiceDtoSupport.requireContract(contractVersion, "customer-service-rag-debug/1");
         if (!"customer-service".equals(agentKey)) {
             throw new IllegalArgumentException("agent_key 必须为 customer-service");
@@ -27,6 +34,11 @@ public record CustomerServiceDebugRequest(
         CustomerServiceDtoSupport.requireText(agentVersionId, "agent_version_id");
         CustomerServiceDtoSupport.requireText(ragPolicyVersionId, "rag_policy_version_id");
         knowledgeBindings = CustomerServiceDtoSupport.immutableList(knowledgeBindings, "knowledge_bindings");
+        var scope = memoryContext.scope();
+        if (scope != null && (!tenantId.equals(scope.tenantId()) || !"customer-service".equals(scope.topLevelAgentId())
+                || !"TASK_ONLY".equals(scope.sessionKind()) || scope.sessionId() != null)) {
+            throw new IllegalArgumentException("MEMORY_DEBUG_SCOPE_INVALID");
+        }
     }
 
     /** 调试限定的知识库与确切索引版本。 */

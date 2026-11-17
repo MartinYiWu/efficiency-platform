@@ -1,0 +1,80 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": {
+      "title": ""
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": {
+      "contractVersion": "customer-service-message/1",
+      "message": "如何申请售后？",
+      "clientRequestId": "507a03d9-e8d2-4553-9a2e-a6ea2e60a899"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/runs/run-1/cancel",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1/events",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1/timeline",
+    "status": 200,
+    "body": null
+  }
+]

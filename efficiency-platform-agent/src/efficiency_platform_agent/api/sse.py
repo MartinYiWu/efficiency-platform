@@ -61,6 +61,7 @@ async def stream_run_events(
     after_sequence: int = 0,
     keep_alive_seconds: float = 15.0,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+    can_emit: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[str]:
     """先回放再监听实时事件，并在空闲期发送 SSE 注释保活。"""
     if keep_alive_seconds <= 0:
@@ -70,8 +71,13 @@ async def stream_run_events(
     try:
         replayed = await event_hub.replay(run_id, after_sequence)
         for event in replayed:
+            if event_hub.is_memory_scrubbed(run_id) or can_emit is not None and not await can_emit():
+                replayed.clear()
+                return
             if event.sequence <= cursor:
                 continue
+            if event_hub.is_memory_scrubbed(run_id):
+                return
             cursor = event.sequence
             yield render_sse(event)
             if event.event == "stream_done":
@@ -79,6 +85,8 @@ async def stream_run_events(
         if event_hub.is_closed(run_id):
             return
         while True:
+            if event_hub.is_memory_scrubbed(run_id) or can_emit is not None and not await can_emit():
+                return
             if is_disconnected is not None and await is_disconnected():
                 return
             try:
@@ -86,10 +94,18 @@ async def stream_run_events(
                     anext(subscription), timeout=keep_alive_seconds
                 )
             except TimeoutError:
+                if event_hub.is_memory_scrubbed(run_id) or can_emit is not None and not await can_emit():
+                    return
                 yield ": keep-alive\n\n"
                 continue
+            except StopAsyncIteration:
+                return
+            if event_hub.is_memory_scrubbed(run_id) or can_emit is not None and not await can_emit():
+                return
             if event.sequence <= cursor:
                 continue
+            if event_hub.is_memory_scrubbed(run_id):
+                return
             cursor = event.sequence
             yield render_sse(event)
             if event.event == "stream_done":

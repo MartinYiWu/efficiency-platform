@@ -67,24 +67,12 @@ class RealGateProbeSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["external_io"])
 
     async def test_web_search_probe_is_closed_by_default(self) -> None:
-        result = await probe_deepseek_web_search(approval_file=self.approval_file)
-        self.assertEqual(result["status"], "NOT_EXECUTED")
-        self.assertIn(
-            result["reason"],
-            {"gate_disabled", "network_probe_authorization_missing"},
-        )
-        self.assertFalse(result["external_io"])
+        with self.assertRaisesRegex(RuntimeError, "^PAID_LEGACY_ENTRY_DISABLED"):
+            await probe_deepseek_web_search(approval_file=self.approval_file)
 
     async def test_web_search_acceptance_is_closed_by_default(self) -> None:
-        result = await run_deepseek_web_search_acceptance(
-            approval_file=self.approval_file
-        )
-        self.assertEqual(result["status"], "NOT_EXECUTED")
-        self.assertIn(
-            result["reason"],
-            {"gate_disabled", "charged_acceptance_authorization_missing"},
-        )
-        self.assertFalse(result["external_io"])
+        with self.assertRaisesRegex(RuntimeError, "^PAID_LEGACY_ENTRY_DISABLED"):
+            await run_deepseek_web_search_acceptance(approval_file=self.approval_file)
 
 
 __all__ = ["RealGateProbeSafetyTests"]

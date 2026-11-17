@@ -6,7 +6,12 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from efficiency_platform_agent.core.run import JsonObject
+from efficiency_platform_agent.core.context_projection import (
+    ToolProjection,
+    ToolProjectionPort,
+)
+from efficiency_platform_agent.core.memory import require_count, require_id
+from efficiency_platform_agent.core.run import JsonObject, ToolResult
 
 type ToolModel = type[BaseModel]
 
@@ -27,8 +32,28 @@ class ToolSpec:
     max_attempts: int
     timeout_ms: int
     max_output_bytes: int
+    projection_port: ToolProjectionPort | None = None
+    projection_schema: str | None = None
+    projection_version: str | None = None
+    model_visible_token_upper_bound: int | None = None
 
     def __post_init__(self) -> None:
+        projection_fields = (
+            self.projection_schema,
+            self.projection_version,
+            self.model_visible_token_upper_bound,
+        )
+        if self.projection_port is None:
+            if any(value is not None for value in projection_fields):
+                raise ValueError("TOOL_PROJECTION_PUBLICATION_INVALID")
+        else:
+            if any(value is None for value in projection_fields):
+                raise ValueError("TOOL_PROJECTION_PUBLICATION_REQUIRED")
+            require_id(self.projection_schema)  # type: ignore[arg-type]
+            require_id(self.projection_version)  # type: ignore[arg-type]
+            require_count(self.model_visible_token_upper_bound)  # type: ignore[arg-type]
+            if not callable(getattr(self.projection_port, "project", None)):
+                raise ValueError("TOOL_PROJECTION_PORT_INVALID")
         for name in (
             "tool_name",
             "semantic_version",
@@ -86,3 +111,19 @@ class ToolInvocationRecord:
 
 
 JsonObjectType = JsonObject
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectedToolResult:
+    """完整受治理结果留在程序侧，模型只读 projection。"""
+
+    full_result: ToolResult
+    projection: ToolProjection | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.full_result, ToolResult):
+            raise TypeError("PROJECTED_TOOL_RESULT_INVALID")
+        if (self.full_result.error is None) != isinstance(
+            self.projection, ToolProjection
+        ):
+            raise ValueError("PROJECTED_TOOL_RESULT_INVALID")

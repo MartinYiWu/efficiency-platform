@@ -94,6 +94,19 @@ class PromptAssembler:
             autoescape=False,
         )
 
+    async def published_metadata(self, prompt_key: str) -> dict[str, object]:
+        """只读已发布绑定，不渲染正文、不创建运行快照或发送模型请求。"""
+        bundle = await self._repository.resolve(prompt_key, self._environment_name)
+        if bundle.version.status != "released":
+            raise ValueError("HR_CONFIG_PUBLISHED_ASSETS_NOT_READY")
+        return {
+            "prompt_version": bundle.version.semantic_version,
+            "prompt_hash": bundle.version.checksum,
+            "model_route_version": bundle.model_policy.semantic_version,
+            "model_route": bundle.model_policy.model_name,
+            "output_schema_hash": bundle.output_contract.checksum,
+        }
+
     async def assemble(
         self,
         *,
@@ -109,9 +122,7 @@ class PromptAssembler:
         bundle = await self._repository.load_snapshot(run_id, stage)
         snapshot_exists = bundle is not None
         if bundle is None:
-            bundle = await self._repository.resolve(
-                prompt_key, self._environment_name
-            )
+            bundle = await self._repository.resolve(prompt_key, self._environment_name)
 
         from .mysql_repository import validate_prompt_bundle
 
@@ -161,10 +172,10 @@ class PromptAssembler:
             )
             serialized = self._serialize_value(normalized)
             if len(serialized) > definition.max_length:
-                raise PromptConfigurationError(
-                    "PROMPT_VARIABLE_TOO_LONG", name
-                )
-            render_values[name] = serialized if definition.value_type == "json" else normalized
+                raise PromptConfigurationError("PROMPT_VARIABLE_TOO_LONG", name)
+            render_values[name] = (
+                serialized if definition.value_type == "json" else normalized
+            )
             variable_snapshot[name] = {
                 "source": prompt_value.source,
                 "sensitive": definition.sensitive,
@@ -179,13 +190,10 @@ class PromptAssembler:
                 ).render(render_values)
                 messages.append(PromptMessage(template.role, content))
         except TemplateError as exc:
-            raise PromptConfigurationError(
-                "PROMPT_RENDER_FAILED", str(exc)
-            ) from exc
+            raise PromptConfigurationError("PROMPT_RENDER_FAILED", str(exc)) from exc
 
         rendered_payload = [
-            {"role": message.role, "content": message.content}
-            for message in messages
+            {"role": message.role, "content": message.content} for message in messages
         ]
         rendered_checksum = self._sha256(
             json.dumps(rendered_payload, ensure_ascii=False, sort_keys=True)

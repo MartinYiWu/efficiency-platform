@@ -1,0 +1,240 @@
+[
+  {
+    "path": "/",
+    "redirect": "/ai-assistants/hr/workbench"
+  },
+  {
+    "path": "/ai-assistants/operations/chat",
+    "component": "OperationsChatPage",
+    "file": "../../pages/operations-assistant/chat/OperationsChatPage.vue"
+  },
+  {
+    "path": "/ai-assistants/customer-service/chat",
+    "component": "CustomerServiceChatPage",
+    "file": "../../pages/customer-service/CustomerServiceChatPage.vue"
+  },
+  {
+    "path": "/knowledge-center/knowledge-bases",
+    "component": "KnowledgeBaseListPage",
+    "file": "../../pages/knowledge-center/KnowledgeBaseListPage.vue"
+  },
+  {
+    "path": "/knowledge-center/knowledge-bases/:baseId",
+    "component": "KnowledgeBaseDetailPage",
+    "file": "../../pages/knowledge-center/KnowledgeBaseDetailPage.vue"
+  },
+  {
+    "path": "/knowledge-center/knowledge-bases/:baseId/imports",
+    "component": "KnowledgeImportPage",
+    "file": "../../pages/knowledge-center/KnowledgeImportPage.vue"
+  },
+  {
+    "path": "/knowledge-center/documents/:documentId",
+    "component": "KnowledgeDocumentPage",
+    "file": "../../pages/knowledge-center/KnowledgeDocumentPage.vue"
+  },
+  {
+    "path": "/ai-center/agents",
+    "component": "AgentListPage",
+    "file": "../../pages/ai-center/AgentListPage.vue"
+  },
+  {
+    "path": "/ai-center/agents/:agentId",
+    "component": "AgentDetailPage",
+    "file": "../../pages/ai-center/AgentDetailPage.vue"
+  },
+  {
+    "path": "/ai-center/prompts",
+    "component": "PromptManagementPage",
+    "file": "../../pages/ai-center/PromptManagementPage.vue"
+  },
+  {
+    "path": "/ai-center/model-policies",
+    "component": "ModelPolicyPage",
+    "file": "../../pages/ai-center/ModelPolicyPage.vue"
+  },
+  {
+    "path": "/ai-center/rag-policies",
+    "component": "RagPolicyPage",
+    "file": "../../pages/ai-center/RagPolicyPage.vue"
+  },
+  {
+    "path": "/ai-center/rag-debug",
+    "component": "RagDebugPage",
+    "file": "../../pages/ai-center/RagDebugPage.vue"
+  },
+  {
+    "path": "/ai-center/rag-evaluations",
+    "component": "RagEvaluationListPage",
+    "file": "../../pages/ai-center/RagEvaluationListPage.vue"
+  },
+  {
+    "path": "/ai-center/rag-evaluations/:datasetId",
+    "component": "RagEvaluationDatasetPage",
+    "file": "../../pages/ai-center/RagEvaluationDatasetPage.vue"
+  },
+  {
+    "path": "/ai-center/rag-evaluations/runs/:runId",
+    "component": "RagEvaluationRunPage",
+    "file": "../../pages/ai-center/RagEvaluationRunPage.vue"
+  },
+  {
+    "path": "/ai-center/runs",
+    "component": "RunListPage",
+    "file": "../../pages/ai-center/RunListPage.vue"
+  },
+  {
+    "path": "/ai-center/runs/:runId",
+    "component": "RunReplayPage",
+    "file": "../../pages/ai-center/RunReplayPage.vue"
+  },
+  {
+    "path": "/ai-center/feedback",
+    "component": "FeedbackPage",
+    "file": "../../pages/ai-center/FeedbackPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/chat",
+    "component": "HrChatPage",
+    "file": "../../pages/hr-assistant/chat/HrChatPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/resumes",
+    "redirect": "/ai-assistants/hr/resumes/upload"
+  },
+  {
+    "path": "/ai-assistants/hr/resumes/upload",
+    "component": "ResumeUploadPage",
+    "file": "../../pages/hr-assistant/resumes/ResumeUploadPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/resumes/batches/:batchId",
+    "component": "ResumeProgressPage",
+    "file": "../../pages/hr-assistant/resumes/ResumeProgressPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/resumes/candidates/:candidateId/confirm",
+    "component": "ResumeCorrectionPage",
+    "file": "../../pages/hr-assistant/resumes/ResumeCorrectionPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/settings/audit",
+    "component": "AuditPage",
+    "file": "../../pages/hr-assistant/settings/AuditPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/settings/synonyms",
+    "component": "SkillSynonymPage",
+    "file": "../../pages/hr-assistant/settings/SkillSynonymPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/talent",
+    "component": "TalentSearchPage",
+    "file": "../../pages/hr-assistant/talent/TalentSearchPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/talent/:candidateId",
+    "component": "CandidateProfilePage",
+    "file": "../../pages/hr-assistant/talent/CandidateProfilePage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/matching",
+    "component": "MatchResultsPage",
+    "file": "../../pages/hr-assistant/matching/MatchResultsPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/matching/:candidateId",
+    "component": "MatchDetailPage",
+    "file": "../../pages/hr-assistant/matching/MatchDetailPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/matching/filtered",
+    "component": "FilteredResumesPage",
+    "file": "../../pages/hr-assistant/matching/FilteredResumesPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/interviews/guide",
+    "component": "InterviewGuidePreviewPage",
+    "file": "../../pages/hr-assistant/interviews/InterviewGuidePreviewPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/interviews/questions",
+    "component": "InterviewQuestionSetPage",
+    "file": "../../pages/hr-assistant/interviews/InterviewQuestionSetPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/interviews/generate",
+    "component": "InterviewGeneratePage",
+    "file": "../../pages/hr-assistant/interviews/InterviewGeneratePage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/interviews",
+    "component": "HrModuleEntryPage",
+    "file": "../../pages/hr-assistant/module-entry/HrModuleEntryPage.vue",
+    "props": {
+      "title": "面试准备",
+      "description": "配置、编辑与导出结构化面试指南。",
+      "nextPage": "PAGE-16 面试题生成配置"
+    }
+  },
+  {
+    "path": "/ai-assistants/hr/settings",
+    "component": "SkillSynonymPage",
+    "file": "../../pages/hr-assistant/settings/SkillSynonymPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/workbench",
+    "component": "HrWorkbenchPage",
+    "file": "../../pages/hr-assistant/workbench/HrWorkbenchPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/component-states",
+    "component": "HrComponentStatesPage",
+    "file": "../../pages/hr-assistant/component-states/HrComponentStatesPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions",
+    "component": "PositionListPage",
+    "file": "../../pages/hr-assistant/positions/PositionListPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/templates",
+    "component": "PositionTemplateLibraryPage",
+    "file": "../../pages/hr-assistant/positions/PositionTemplateLibraryPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/:positionId",
+    "component": "PositionDetailPage",
+    "file": "../../pages/hr-assistant/positions/PositionDetailPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/new",
+    "component": "PositionBasicPage",
+    "file": "../../pages/hr-assistant/positions/PositionBasicPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/new/soft-requirements",
+    "component": "PositionWizardPage",
+    "file": "../../pages/hr-assistant/positions/PositionWizardPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/new/hard-conditions",
+    "component": "PositionHardConditionsPage",
+    "file": "../../pages/hr-assistant/positions/PositionHardConditionsPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/new/preview",
+    "component": "PositionPreviewPage",
+    "file": "../../pages/hr-assistant/positions/PositionPreviewPage.vue"
+  },
+  {
+    "path": "/ai-assistants/hr/positions/new/weights",
+    "component": "PositionWeightsPage",
+    "file": "../../pages/hr-assistant/positions/PositionWeightsPage.vue"
+  },
+  {
+    "path": "*",
+    "component": "NotFoundPage",
+    "file": "../../pages/not-found/NotFoundPage.vue"
+  }
+]

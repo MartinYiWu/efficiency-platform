@@ -1,0 +1,38 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": {
+      "title": ""
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 402,
+    "body": {
+      "contractVersion": "customer-service-message/1",
+      "message": "如何申请售后？",
+      "clientRequestId": "6de4a6d3-71c0-4b8b-a0d0-fff68cb478bf"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  }
+]

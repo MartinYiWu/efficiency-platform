@@ -1,0 +1,16 @@
+{
+  "runtimeDependencies": {
+    "@ant-design/icons-vue": "7.0.1",
+    "ant-design-vue": "4.2.6",
+    "axios": "1.20.0",
+    "markdown-it": "14.1.0",
+    "pinia": "3.0.4",
+    "vue": "3.5.26",
+    "vue-router": "4.6.4",
+    "zod": "4.5.4"
+  },
+  "forbiddenRuntimeDependencies": [],
+  "forbiddenSourceImports": [],
+  "pageComponents": 44,
+  "routeRecords": 47
+}

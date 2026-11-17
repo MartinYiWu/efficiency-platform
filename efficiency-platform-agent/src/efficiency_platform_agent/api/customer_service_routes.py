@@ -5,27 +5,56 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from efficiency_platform_agent.agents.customer_service.service import (
     CustomerServiceNotFoundError,
     CustomerServiceRunService,
+    CustomerServiceScopeError,
 )
 from efficiency_platform_agent.agents.customer_service.state import (
     CustomerServiceRunRequest,
     DebugRequest,
 )
+from efficiency_platform_agent.core.run_context_binding import bind_conversation_scope
+
+from .context_auth import InternalAuthorizer, authorize_memory_context
 
 
-def build_customer_service_router(service: CustomerServiceRunService) -> APIRouter:
+def build_customer_service_router(
+    service: CustomerServiceRunService,
+    authorize: InternalAuthorizer | None = None,
+    *,
+    memory_enabled: bool = False,
+) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/v1/customer-service/conversations/{conversation_id}/messages", status_code=202)
-    async def submit(conversation_id: UUID, body: CustomerServiceRunRequest) -> dict[str, object]:
+    @router.post(
+        "/v1/customer-service/conversations/{conversation_id}/messages", status_code=202
+    )
+    async def submit(
+        conversation_id: UUID, request: Request, body: CustomerServiceRunRequest
+    ) -> dict[str, object]:
         if body.conversation_id != conversation_id:
             raise HTTPException(422, detail="conversation_id 不一致")
-        return (await service.submit(body)).model_dump(mode="json")
+        scope = await authorize_memory_context(
+            request,
+            body.memory_context,
+            authorize,
+            tenant=body.tenant_id,
+            user=body.user_id,
+            domain="customer-service",
+            session_id=str(conversation_id),
+            memory_enabled=memory_enabled,
+        )
+        with bind_conversation_scope(
+            scope, memory_context=body.memory_context.to_core()
+        ):
+            try:
+                return (await service.submit(body)).model_dump(mode="json")
+            except CustomerServiceScopeError as error:
+                raise HTTPException(409, detail="CONTEXT_SCOPE_MISMATCH") from error
 
     @router.get("/v1/customer-service/runs/{run_id}/events")
     async def events(
@@ -45,7 +74,7 @@ def build_customer_service_router(service: CustomerServiceRunService) -> APIRout
                     value = event.model_dump(mode="json")
                     yield f"id: {event.sequence}\nevent: {event.event_type}\ndata: {json.dumps(value, ensure_ascii=False)}\n\n"
             except CustomerServiceNotFoundError:
-                yield "event: error\ndata: {\"error_code\":\"RUN_NOT_FOUND\"}\n\n"
+                yield 'event: error\ndata: {"error_code":"RUN_NOT_FOUND"}\n\n'
 
         return StreamingResponse(stream(), media_type="text/event-stream")
 
@@ -57,9 +86,25 @@ def build_customer_service_router(service: CustomerServiceRunService) -> APIRout
             raise HTTPException(404, detail="Run 不存在") from error
 
     @router.post("/internal/v1/customer-service/rag-debug-runs")
-    async def debug(body: DebugRequest) -> dict[str, object]:
+    async def debug(request: Request, body: DebugRequest) -> dict[str, object]:
+        scope = await authorize_memory_context(
+            request,
+            body.memory_context,
+            authorize,
+            tenant=body.tenant_id,
+            user=body.memory_context.scope.user_id if body.memory_context.scope else "",
+            domain="customer-service",
+            session_id=None,
+            session_kind="TASK_ONLY",
+            memory_enabled=memory_enabled,
+        )
         try:
-            return await service.debug(body)
+            with bind_conversation_scope(
+                scope, memory_context=body.memory_context.to_core()
+            ):
+                return await service.debug(body)
+        except CustomerServiceScopeError as error:
+            raise HTTPException(409, detail="CONTEXT_SCOPE_MISMATCH") from error
         except CustomerServiceNotFoundError as error:
             raise HTTPException(404, detail=str(error)) from error
 

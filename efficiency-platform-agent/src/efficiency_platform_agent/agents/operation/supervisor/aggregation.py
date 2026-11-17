@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from efficiency_platform_agent.core.context_projection import (
+    SpecialistContextSlice,
+    SpecialistResultProjection,
+)
+from efficiency_platform_agent.core.memory import SourceDependency
 from efficiency_platform_agent.core.multi_agent import (
     CompletionStatus,
     TaskExecutionStatus,
@@ -32,6 +37,8 @@ class AggregationResult:
     failures: tuple[str, ...]
     conflicts: tuple[str, ...]
     quality_reports: tuple[OperationQualityReport, ...] = ()
+    safety_dependencies: tuple[SourceDependency, ...] = ()
+    result_projections: tuple[SpecialistResultProjection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +102,8 @@ class ResultAggregator:
         graph: TaskGraph,
         outcomes: tuple[TaskOutcome, ...],
         envelopes: tuple[object, ...] = (),
+        *,
+        context_slices: tuple[SpecialistContextSlice, ...] = (),
     ) -> AggregationResult:
         """按图拓扑顺序聚合结果、范围、警告、失败和冲突。"""
         if not isinstance(graph, TaskGraph):
@@ -113,6 +122,9 @@ class ResultAggregator:
         if unknown_outcomes:
             raise ValueError("结果引用了任务图外的任务")
         envelope_task_ids: set[str] = set()
+        slices = {item.scope.subtask_id: item for item in context_slices}
+        if len(slices) != len(context_slices):
+            raise ValueError("CONTEXT_SLICE_DUPLICATE")
         for envelope in envelopes:
             task_id = getattr(envelope, "task_id", None)
             if not isinstance(task_id, str) or not task_id:
@@ -120,6 +132,12 @@ class ResultAggregator:
             if task_id in envelope_task_ids:
                 raise ValueError("同一任务只能有一个结果封装")
             envelope_task_ids.add(task_id)
+            if task_id not in nodes:
+                raise ValueError("结果封装引用了任务图外的任务")
+            if isinstance(envelope, SpecialistResultProjection):
+                if task_id not in slices:
+                    raise ValueError("RESULT_PROJECTION_SLICE_REQUIRED")
+                envelope.validate_slice(slices[task_id])
         completed: list[str] = []
         missing: list[str] = []
         warnings: list[str] = []
@@ -135,10 +153,14 @@ class ResultAggregator:
         has_waiting_input = False
         has_cancelled = False
         successful_tasks = 0
+        partial_projection = False
+        dependencies: list[SourceDependency] = []
+        projections: list[SpecialistResultProjection] = []
 
         for task_id in graph.topological_order:
             node = nodes[task_id]
             outcome = by_id.get(task_id)
+            envelope = _envelope_for(envelopes, task_id)
             if outcome is None:
                 _append_unique(missing, task_id)
                 _append_unique(failures, f"{task_id}:MISSING_OUTCOME")
@@ -169,8 +191,34 @@ class ResultAggregator:
                 and not dependency_blocked
             ):
                 successful_tasks += 1
-                for scope in outcome.completed_scope or (task_id,):
+                projection = (
+                    envelope
+                    if isinstance(envelope, SpecialistResultProjection)
+                    else None
+                )
+                for scope in (
+                    projection.completed_scope
+                    if projection is not None
+                    else outcome.completed_scope or (task_id,)
+                ):
                     _append_unique(completed, scope)
+                if projection is not None:
+                    projections.append(projection)
+                    for dependency in projection.safety_dependencies:
+                        if dependency not in dependencies:
+                            dependencies.append(dependency)
+                    for scope in projection.missing_scope:
+                        _append_unique(missing, scope)
+                    if projection.completeness != "COMPLETE":
+                        partial_projection = True
+                        _append_unique(warnings, f"{task_id}:{projection.completeness}")
+                else:
+                    legacy_missing = tuple(getattr(envelope, "missing_scope", ()))
+                    for scope in (*outcome.missing_scope, *legacy_missing):
+                        _append_unique(missing, scope)
+                    if outcome.missing_scope or legacy_missing:
+                        partial_projection = True
+                        _append_unique(warnings, f"{task_id}:PARTIAL")
             elif outcome.status is TaskExecutionStatus.SUCCEEDED and dependency_blocked:
                 _append_unique(missing, task_id)
                 for scope in outcome.missing_scope or (task_id,):
@@ -215,7 +263,7 @@ class ResultAggregator:
             status = CompletionStatus.WAITING_INPUT
         elif has_required_failure:
             status = CompletionStatus.FAILED
-        elif has_optional_failure or not all_succeeded:
+        elif has_optional_failure or not all_succeeded or partial_projection:
             status = CompletionStatus.PARTIAL
         else:
             status = CompletionStatus.COMPLETE
@@ -229,6 +277,8 @@ class ResultAggregator:
             failures=tuple(failures),
             conflicts=tuple(conflicts),
             quality_reports=tuple(quality_reports),
+            safety_dependencies=tuple(dependencies),
+            result_projections=tuple(projections),
         )
 
     @staticmethod

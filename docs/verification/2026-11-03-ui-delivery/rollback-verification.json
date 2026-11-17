@@ -1,0 +1,33 @@
+{
+  "isolatedDirectory": "D:\\软件目录\\efficiency-platform\\.local-acceptance\\ui-delivery-20261103\\vue-20261103-6455b4f6106a",
+  "activeWorkspaceTouched": false,
+  "reactBackupTouched": false,
+  "sharedHashAssets": 159,
+  "steps": [
+    {
+      "phase": "previous",
+      "dist": "D:\\软件目录\\efficiency-platform\\.local-acceptance\\ui-delivery-20261103\\baseline-dist",
+      "deepLinkStatus": 200,
+      "indexSha256": "5f85ecd63927b8643025aedf5c935e62914bb66143965cef928909e3058d62e4",
+      "retainedOldAsset": "/assets/AgentDetailPage-x773OENP.js",
+      "retainedOldAssetAccessible": true
+    },
+    {
+      "phase": "candidate",
+      "dist": "D:\\软件目录\\efficiency-platform\\.local-acceptance\\ui-delivery-20261103\\vue-20261103-6455b4f6106a\\unpacked\\dist",
+      "deepLinkStatus": 200,
+      "indexSha256": "c307de3271bb030c69a470c095a3b9e4ca0ff2c803cb07db418834280a3eb57b",
+      "retainedOldAsset": "/assets/AgentDetailPage-x773OENP.js",
+      "retainedOldAssetAccessible": true
+    },
+    {
+      "phase": "rollback",
+      "dist": "D:\\软件目录\\efficiency-platform\\.local-acceptance\\ui-delivery-20261103\\baseline-dist",
+      "deepLinkStatus": 200,
+      "indexSha256": "5f85ecd63927b8643025aedf5c935e62914bb66143965cef928909e3058d62e4",
+      "retainedOldAsset": "/assets/AgentDetailPage-x773OENP.js",
+      "retainedOldAssetAccessible": true
+    }
+  ],
+  "rollbackRestoresPreviousIndex": true
+}

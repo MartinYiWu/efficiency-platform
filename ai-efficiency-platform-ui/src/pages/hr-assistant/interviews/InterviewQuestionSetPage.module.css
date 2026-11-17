@@ -7,15 +7,15 @@
   width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
-  color: #0f172a;
+  color: var(--text-primary);
 }
 .header,
 .question,
 .tree,
 .setting {
   background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
 }
 .header {
   align-items: center;
@@ -25,15 +25,15 @@
 }
 .header h1 {
   display: inline;
-  font-size: 28px;
+  font-size: 24px;
   margin: 0 14px 0 0;
 }
 .header span {
   margin-left: 9px;
-  color: #475569;
+  color: var(--text-secondary);
 }
 .header p {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 13px;
   margin: 7px 0 0;
 }
@@ -42,9 +42,9 @@
   gap: 8px;
 }
 .ai {
-  background: #f5f3ff;
+  background: var(--primary-bg);
   border-radius: 6px;
-  color: #6d4ac3;
+  color: var(--v1-accent);
   font-size: 13px;
   margin: 14px 0;
   padding: 10px 14px;
@@ -70,7 +70,7 @@
   float: right;
 }
 .tree section {
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--v1-border-soft);
   display: grid;
   gap: 5px;
   padding: 10px 0;
@@ -79,13 +79,13 @@
   font-size: 13px;
 }
 .tree small {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 .tree button {
   background: transparent;
   border: 0;
-  color: #64748b;
+  color: var(--text-secondary);
   cursor: pointer;
   font: 12px inherit;
   overflow: hidden;
@@ -96,7 +96,7 @@
 }
 .tree button:hover,
 .treeActive {
-  color: #2563eb !important;
+  color: var(--v1-primary) !important;
 }
 .tree .ant-tag {
   font-size: 11px;
@@ -104,7 +104,7 @@
   width: max-content;
 }
 .time {
-  background: #eff6ff;
+  background: var(--color-info-bg);
   border-radius: 6px;
   display: grid;
   gap: 7px;
@@ -112,26 +112,26 @@
   padding: 10px;
 }
 .time span {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .time i,
 .bar {
-  background: #dbeafe;
+  background: var(--color-info-bg);
   border-radius: 99px;
   height: 5px;
   overflow: hidden;
 }
 .time em,
 .bar em {
-  background: #2563eb;
+  background: var(--v1-primary);
   display: block;
   height: 100%;
   width: 97%;
 }
 .time strong,
 .setting strong {
-  color: #16a34a;
+  color: var(--v1-success);
   font-size: 12px;
 }
 .questions {
@@ -154,17 +154,17 @@
 }
 .toolbar button:not(.ant-btn) {
   background: #fff;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v1-border);
   border-radius: 5px;
-  color: #64748b;
+  color: var(--text-secondary);
   cursor: pointer;
   font: 12px inherit;
   padding: 4px 9px;
 }
 .toolbar .filterActive {
-  background: #eff6ff !important;
-  border-color: #2563eb !important;
-  color: #2563eb !important;
+  background: var(--color-info-bg) !important;
+  border-color: var(--v1-primary) !important;
+  color: var(--v1-primary) !important;
 }
 .question {
   margin-bottom: 10px;
@@ -172,7 +172,7 @@
 }
 .question > header {
   align-items: center;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--v1-border-soft);
   display: flex;
   gap: 8px;
   min-width: 0;
@@ -181,7 +181,7 @@
 .question > header > button {
   background: transparent;
   border: 0;
-  color: #0f172a;
+  color: var(--text-primary);
   cursor: pointer;
   flex: 1;
   font-weight: 600;
@@ -192,7 +192,7 @@
   white-space: nowrap;
 }
 .question > header > span {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -209,15 +209,15 @@
   padding: 10px;
 }
 .source {
-  background: #f8fafc;
-  color: #475569;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
 }
 .source .ant-btn {
   float: right;
 }
 .purpose {
-  background: #eff6ff;
-  border-left: 3px solid #2563eb;
+  background: var(--color-info-bg);
+  border-left: 3px solid var(--v1-primary);
 }
 .purpose b,
 .expect b,
@@ -226,7 +226,7 @@
   margin-bottom: 4px;
 }
 .expect {
-  background: #f0fdf4;
+  background: var(--color-success-bg);
   margin-top: 8px;
 }
 .expect ul {
@@ -234,7 +234,7 @@
   padding-left: 18px;
 }
 .follow {
-  background: #f8fafc;
+  background: var(--bg-secondary);
   margin-top: 8px;
 }
 .follow p {
@@ -252,26 +252,26 @@
   padding: 10px;
 }
 .rubric section:nth-child(1) {
-  background: #f0fdf4;
+  background: var(--color-success-bg);
 }
 .rubric section:nth-child(2) {
-  background: #eff6ff;
+  background: var(--color-info-bg);
 }
 .rubric section:nth-child(3) {
-  background: #fff7ed;
+  background: var(--color-warning-bg);
 }
 .rubric p {
-  color: #475569;
+  color: var(--text-secondary);
   line-height: 18px;
   margin: 4px 0 0;
 }
 .detail > footer {
-  border-top: 1px solid #f1f5f9;
+  border-top: 1px solid var(--v1-border-soft);
   margin-top: 10px;
   padding-top: 8px;
 }
 .add {
-  border: 1px dashed #93c5fd;
+  border: 1px dashed var(--color-info-bg);
   border-radius: 8px;
   display: flex;
   justify-content: space-between;
@@ -283,8 +283,8 @@
 }
 .setting {
   background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
   padding: 12px;
 }
 .setting h2 {
@@ -292,7 +292,7 @@
   margin: 0 0 8px;
 }
 .setting p {
-  color: #475569;
+  color: var(--text-secondary);
   font-size: 12px;
   margin: 7px 0;
 }
@@ -314,7 +314,7 @@
 .footer {
   align-items: center;
   background: #fff;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid var(--v1-border);
   bottom: 0;
   display: flex;
   justify-content: space-between;
@@ -324,7 +324,7 @@
   z-index: 2;
 }
 .footer span {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 .footer div {
@@ -430,12 +430,16 @@
   grid-column: 1 / -1;
   margin: 0;
   padding: 8px 0;
-  color: var(--ui-text-secondary, #64748b);
+  color: var(--ui-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.6;
-  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  border-bottom: 1px solid var(--ui-border, var(--v1-border));
 }
 
 .page h1 {
-  color: #0f172a !important;
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.3;
+  margin: 0 0 4px !important;
 }

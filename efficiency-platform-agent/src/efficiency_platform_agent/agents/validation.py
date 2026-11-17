@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 
 from efficiency_platform_agent.core.agent import AgentSpec
+from efficiency_platform_agent.core.memory import MemoryPolicy
 from efficiency_platform_agent.core.ports import AgentPlugin
 from efficiency_platform_agent.core.run import ExtensionDescriptor
 
@@ -17,6 +19,21 @@ class AgentValidator:
 
         if not isinstance(spec, AgentSpec):
             raise AgentDefinitionError("Agent 定义必须是 AgentSpec")
+
+    def validate_memory_policy(
+        self, spec: AgentSpec, policies: Mapping[str, MemoryPolicy]
+    ) -> MemoryPolicy:
+        self.validate_spec(spec)
+        policy = policies.get(spec.memory_policy_id)
+        if (
+            policy is not None
+            and policy.policy_id == spec.memory_policy_id
+            and spec.agent_id in policy.agent_ids
+        ):
+            return policy
+        return MemoryPolicy(
+            spec.memory_policy_id, "disabled", "operations", frozenset(), enabled=False
+        )
 
     def validate_instance(self, spec: AgentSpec, plugin: AgentPlugin) -> None:
         """验证运行实例与注册定义的全部共享治理字段一致。"""

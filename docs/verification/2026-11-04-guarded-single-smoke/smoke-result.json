@@ -1,0 +1,139 @@
+{
+  "budget_id": "flash-settlement-once-1793763795717",
+  "passed": true,
+  "stage": "provider_settlement_only",
+  "error_code": null,
+  "answer_nonempty": true,
+  "usage": {
+    "input_tokens": 34,
+    "output_tokens": 9,
+    "cached_tokens": 0,
+    "reasoning_tokens": 7
+  },
+  "elapsed_ms": 744,
+  "diagnostics": [
+    "event=paid_http_usage reservation_id=528c173653134e139714068deec27199 provider=deepseek outcome=settled complete=True close_ok=True diagnostic={\"done\": true, \"encoding\": \"gzip\", \"invalid\": false, \"reason\": \"VALID_USAGE\", \"reasoning_usage_seen\": true, \"sse\": true, \"terminal\": true, \"usage_seen\": true}"
+  ],
+  "stop_command_exit": 0,
+  "ledger": {
+    "budget_id": "flash-settlement-once-1793763795717",
+    "calls": 1,
+    "cost_microunits": 140,
+    "run_calls": 1,
+    "run_cost_microunits": 140,
+    "inflight": 0,
+    "stopped": "operator_stop",
+    "429_responses": 0,
+    "limits": {
+      "budget_id": "flash-settlement-once-1793763795717",
+      "max_calls": 1,
+      "max_cost_microunits": 20000,
+      "deadline_epoch_ms": 1793764395717,
+      "max_run_calls": 1,
+      "max_run_cost_microunits": 20000,
+      "max_run_duration_ms": 120000,
+      "max_inflight": 1,
+      "max_429_responses": 3,
+      "max_input_tokens": 8192,
+      "max_output_tokens": 256,
+      "max_reasoning_tokens": 256,
+      "max_run_input_tokens": 8192,
+      "max_run_output_tokens": 256,
+      "max_run_reasoning_tokens": 256
+    },
+    "remaining_calls": 0,
+    "remaining_cost_microunits": 19860,
+    "deadline_epoch_ms": 1793764395717,
+    "prices": [
+      {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "max_request_bytes": 8192,
+        "max_output_tokens": 256,
+        "max_cost_microunits_per_attempt": 20000,
+        "pricing_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing; checked 2026-11-04; peak CNY/1M; legacy name billed as Flash",
+        "pricing_version": "official-20261104-peak-cny",
+        "max_input_tokens": 8192,
+        "input_microunits_per_million": 2000000,
+        "cached_input_microunits_per_million": 40000,
+        "output_microunits_per_million": 8000000
+      }
+    ],
+    "accounting": {
+      "actual_tokens": {
+        "input_tokens": 34,
+        "output_tokens": 9,
+        "reasoning_tokens": 7
+      },
+      "held_tokens": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "effective_tokens": {
+        "input_tokens": 34,
+        "output_tokens": 9,
+        "reasoning_tokens": 7
+      },
+      "actual_cost_microunits": 140,
+      "held_cost_microunits": 0,
+      "unknown_attempts": 0,
+      "cost_overflow": false
+    },
+    "scopes": [
+      {
+        "scope_id": "single-generation-settlement",
+        "calls": 1,
+        "cost_microunits": 140,
+        "stopped": 0,
+        "accounting": {
+          "actual_tokens": {
+            "input_tokens": 34,
+            "output_tokens": 9,
+            "reasoning_tokens": 7
+          },
+          "held_tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "effective_tokens": {
+            "input_tokens": 34,
+            "output_tokens": 9,
+            "reasoning_tokens": 7
+          },
+          "actual_cost_microunits": 140,
+          "held_cost_microunits": 0,
+          "unknown_attempts": 0,
+          "cost_overflow": false
+        }
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "reservation_id": "528c173653134e139714068deec27199",
+      "scope_id": "single-generation-settlement",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 4538,
+        "output_tokens": 256,
+        "reasoning_tokens": 256
+      },
+      "reserved_cost_microunits": 20000,
+      "reported_usage": {
+        "cached_tokens": 0,
+        "input_tokens": 34,
+        "output_tokens": 9,
+        "reasoning_tokens": 7
+      },
+      "reported_cost_microunits": 140,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    }
+  ]
+}

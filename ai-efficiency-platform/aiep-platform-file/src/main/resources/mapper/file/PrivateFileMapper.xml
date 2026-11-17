@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.platformfile.repository.PrivateFileMapper">
+ <select id="lock" resultType="com.aiep.platformfile.repository.PrivateFileMapper$Row">SELECT <include refid="cols"/> FROM pf_private_file WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <sql id="cols">id,tenant_id,hash,size_bytes,filename,object_path,status</sql>
+ <select id="byHash" resultType="com.aiep.platformfile.repository.PrivateFileMapper$Row">SELECT <include refid="cols"/> FROM pf_private_file WHERE tenant_id=#{tenant} AND hash=#{hash} AND status='ACTIVE'</select>
+ <select id="byId" resultType="com.aiep.platformfile.repository.PrivateFileMapper$Row">SELECT <include refid="cols"/> FROM pf_private_file WHERE tenant_id=#{tenant} AND id=#{id} AND status='ACTIVE'</select>
+ <insert id="insert">INSERT INTO pf_private_file(id,tenant_id,hash,size_bytes,filename,object_path,status) VALUES(#{id},#{tenantId},#{hash},#{sizeBytes},#{filename},#{objectPath},#{status})</insert>
+ <insert id="reference">INSERT IGNORE INTO pf_private_reference(tenant_id,source_ref,file_id) VALUES(#{tenant},#{source},#{file})</insert>
+ <select id="authorized" resultType="int">SELECT COUNT(file_id) FROM pf_private_reference WHERE tenant_id=#{tenant} AND source_ref=#{source} AND file_id=#{file}</select>
+ <select id="referenced" resultType="com.aiep.platformfile.repository.PrivateFileMapper$Row">SELECT f.id,f.tenant_id,f.hash,f.size_bytes,f.filename,f.object_path,f.status FROM pf_private_file f JOIN pf_private_reference r ON r.tenant_id=f.tenant_id AND r.file_id=f.id WHERE r.tenant_id=#{tenant} AND r.source_ref=#{source}</select>
+ <delete id="unreference">DELETE FROM pf_private_reference WHERE tenant_id=#{tenant} AND source_ref=#{source}</delete>
+ <delete id="unreferenceFile">DELETE FROM pf_private_reference WHERE tenant_id=#{tenant} AND source_ref=#{source} AND file_id=#{file}</delete>
+ <select id="references" resultType="long">SELECT COUNT(source_ref) FROM pf_private_reference WHERE tenant_id=#{tenant} AND file_id=#{file}</select>
+ <update id="markDeleted">UPDATE pf_private_file SET status='DELETE_PENDING' WHERE tenant_id=#{tenant} AND id=#{file} AND status='ACTIVE'</update>
+ <update id="completeDeletion">UPDATE pf_private_file SET status='DELETED' WHERE tenant_id=#{tenant} AND id=#{file} AND status='DELETE_PENDING'</update>
+ <select id="pendingDeletions" resultType="com.aiep.platformfile.repository.PrivateFileMapper$Row">SELECT <include refid="cols"/> FROM pf_private_file WHERE status='DELETE_PENDING' LIMIT 100</select>
+ <delete id="clearReferences">DELETE r FROM pf_private_reference r JOIN pf_private_file f ON f.tenant_id=r.tenant_id AND f.id=r.file_id WHERE f.tenant_id=#{tenant} AND f.id=#{file} AND f.status='DELETED'</delete>
+</mapper>

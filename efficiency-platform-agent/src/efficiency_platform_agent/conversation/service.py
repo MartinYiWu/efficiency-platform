@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import inspect
+import json
 import re
 import time
 from collections import OrderedDict
@@ -65,7 +66,12 @@ from efficiency_platform_agent.contracts.research_request_policy import (
 from efficiency_platform_agent.contracts.stream_events import StreamEventName
 from efficiency_platform_agent.core.budget import BudgetCharge, BudgetGuard
 from efficiency_platform_agent.core.enums import StrategyMode
+from efficiency_platform_agent.core.memory import ConversationScope
 from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunRequest
+from efficiency_platform_agent.core.run_context_binding import (
+    current_conversation_scope,
+    current_memory_context,
+)
 from efficiency_platform_agent.core.runtime import UsageSnapshot
 from efficiency_platform_agent.harness.errors import HarnessError
 from efficiency_platform_agent.harness.intent_v2_delegate import (
@@ -539,12 +545,23 @@ class ConversationSubmissionStore:
 
 
 @dataclass(frozen=True, slots=True)
+class _PendingSubmission:
+    scope: ConversationScope | None
+    conversation_id: str
+    user_id: str
+    message: str
+    future: asyncio.Future[ConversationSubmitViewV1]
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
 class _IdempotencyEntry:
     conversation_id: str
     user_id: str
     message: str
     view: ConversationSubmitViewV1
     expires_at: float
+    fingerprint: str
 
 
 @dataclass(slots=True)
@@ -563,7 +580,7 @@ class _ContextEntry:
 class _ActiveRun:
     tenant_id: str
     request_id: str
-    context_key: tuple[str, str]
+    context_key: tuple[str, ...]
     context_entry: _ContextEntry
 
 
@@ -613,9 +630,7 @@ class ConversationService:
         intent_v2_coordinator: IntentV2ConversationCoordinator | None = None,
         ranked_reference_validator: Callable[[ReferencedRankedInput], Awaitable[None]]
         | None = None,
-        ranked_reference_resolver: Callable[
-            [str, str, str], Awaitable[str | None]
-        ]
+        ranked_reference_resolver: Callable[[str, str, str], Awaitable[str | None]]
         | None = None,
         ranked_reference_loader: RankedReferenceLoader | None = None,
         max_contexts: int = 256,
@@ -647,11 +662,9 @@ class ConversationService:
         self.max_active_runs = max_active_runs
         self.ttl_seconds = ttl_seconds
         self.monotonic = monotonic
-        self._contexts: OrderedDict[tuple[str, str], _ContextEntry] = OrderedDict()
+        self._contexts: OrderedDict[tuple[str, ...], _ContextEntry] = OrderedDict()
         self._requests: OrderedDict[tuple[str, str], _IdempotencyEntry] = OrderedDict()
-        self._pending: dict[
-            tuple[str, str], asyncio.Future[ConversationSubmitViewV1]
-        ] = {}
+        self._pending: dict[tuple[str, str], _PendingSubmission] = {}
         self._active_runs: dict[str, _ActiveRun] = {}
         self._lock = asyncio.Lock()
         register = getattr(runtime, "add_run_state_listener", None)
@@ -675,7 +688,68 @@ class ConversationService:
         if not tenant_id.strip():
             raise HarnessError("INVALID_TENANT", "租户标识无效", category="request")
         request_key = (tenant_id, message.request_id)
-        context_key = (tenant_id, conversation_id)
+        scope = current_conversation_scope()
+        memory = current_memory_context()
+        if message.history and (
+            memory is None or message.memory_context.to_core() != memory
+        ):
+            raise HarnessError(
+                "CONTEXT_SCOPE_MISMATCH", "历史缺少原认证授权", category="request"
+            )
+        if memory is not None:
+            store = self.runtime.memory_execution_store
+            if store is None:
+                raise HarnessError(
+                    "MEMORY_AUTHORITY_REQUIRED",
+                    "记忆执行权威未就绪",
+                    category="request",
+                )
+            original = await store.get(tenant_id, memory.packet.execution_id)
+            if original is not None and (
+                original.state != "ACTIVE" or original.context != memory
+            ):
+                raise HarnessError(
+                    "CONTEXT_SCOPE_MISMATCH", "原执行授权已失效", category="request"
+                )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "message": message.model_dump(mode="json"),
+                    "scope": None
+                    if scope is None
+                    else {
+                        name: getattr(scope, name)
+                        for name in (
+                            "tenant_id",
+                            "user_id",
+                            "domain",
+                            "top_level_agent_id",
+                            "session_kind",
+                            "session_id",
+                        )
+                    },
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        if scope is not None and (
+            scope.tenant_id != tenant_id
+            or scope.user_id != message.user_id
+            or scope.domain != "operations"
+            or scope.session_id != conversation_id
+        ):
+            raise HarnessError(
+                "CONTEXT_SCOPE_MISMATCH", "上下文作用域不匹配", category="request"
+            )
+        context_key = (
+            scope.history_key if scope is not None else (tenant_id, conversation_id)
+        )
+        if context_key is None:
+            raise HarnessError(
+                "CONTEXT_HISTORY_DISABLED", "此运行禁止会话历史", category="request"
+            )
         owner = False
         async with self._lock:
             now = self.monotonic()
@@ -686,6 +760,7 @@ class ConversationService:
                     existing.conversation_id != conversation_id
                     or existing.user_id != message.user_id
                     or existing.message != message.message
+                    or existing.fingerprint != fingerprint
                 ):
                     raise HarnessError(
                         "REQUEST_ID_CONFLICT",
@@ -694,7 +769,20 @@ class ConversationService:
                     )
                 self._requests.move_to_end(request_key)
                 return existing.view
-            pending = self._pending.get(request_key)
+            pending_entry = self._pending.get(request_key)
+            if pending_entry is not None and (
+                pending_entry.scope != scope
+                or pending_entry.conversation_id != conversation_id
+                or pending_entry.user_id != message.user_id
+                or pending_entry.message != message.message
+                or pending_entry.fingerprint != fingerprint
+            ):
+                raise HarnessError(
+                    "REQUEST_ID_CONFLICT",
+                    "request_id 已用于其他消息",
+                    category="request",
+                )
+            pending = pending_entry.future if pending_entry is not None else None
             if pending is None:
                 if len(self._pending) + len(self._active_runs) >= self.max_active_runs:
                     raise HarnessError(
@@ -704,7 +792,14 @@ class ConversationService:
                         retryable=True,
                     )
                 pending = asyncio.get_running_loop().create_future()
-                self._pending[request_key] = pending
+                self._pending[request_key] = _PendingSubmission(
+                    scope,
+                    conversation_id,
+                    message.user_id,
+                    message.message,
+                    pending,
+                    fingerprint,
+                )
                 owner = True
             context_entry = self._context_entry(context_key, now)
 
@@ -754,6 +849,7 @@ class ConversationService:
                     message.message,
                     view,
                     expires_at,
+                    fingerprint,
                 )
                 self._requests.move_to_end(request_key)
                 self._evict_requests()
@@ -786,7 +882,7 @@ class ConversationService:
         tenant_id: str,
         conversation_id: str,
         message: ConversationMessageV1,
-        context_key: tuple[str, str],
+        context_key: tuple[str, ...],
         entry: _ContextEntry,
         previous_run: tuple[str, str] | None = None,
     ) -> RunPipelinePreparation:
@@ -847,8 +943,20 @@ class ConversationService:
                 reference_intent = rewrite_intent(message.message)
             async with self._lock:
                 context = ConversationContext()
-                for turn in () if referenced_inputs else entry.context.turns:
-                    context.append(turn)
+                if message.memory_context.memory_mode == "EXACT_ONLY":
+                    for item in message.history:
+                        context.append(
+                            ConversationTurn(
+                                item.role,
+                                item.content,
+                                tuple(
+                                    dep.to_core() for dep in item.safety_dependencies
+                                ),
+                            )
+                        )
+                else:
+                    for turn in () if referenced_inputs else entry.context.turns:
+                        context.append(turn)
                 entry.expires_at = self.monotonic() + self.ttl_seconds
                 if self._contexts.get(context_key) is entry:
                     self._contexts.move_to_end(context_key)
@@ -1452,7 +1560,7 @@ class ConversationService:
                 )
         return tuple(profiles)
 
-    def _context_entry(self, key: tuple[str, str], now: float) -> _ContextEntry:
+    def _context_entry(self, key: tuple[str, ...], now: float) -> _ContextEntry:
         entry = self._contexts.get(key)
         if entry is None:
             if len(self._contexts) >= self.max_contexts:
@@ -1484,9 +1592,9 @@ class ConversationService:
         for key, request_entry in tuple(self._requests.items()):
             if request_entry.expires_at <= now:
                 self._requests.pop(key, None)
-        for key, context_entry in tuple(self._contexts.items()):
+        for context_key, context_entry in tuple(self._contexts.items()):
             if context_entry.expires_at <= now and not context_entry.waiting_runs:
-                self._contexts.pop(key, None)
+                self._contexts.pop(context_key, None)
 
     def _evict_requests(self) -> None:
         while len(self._requests) > self.max_requests:
@@ -1545,6 +1653,29 @@ class ConversationService:
                     entry.context.append(ConversationTurn("assistant", content))
         await self.submissions.discard(active.tenant_id, active.request_id)
         await self.direct_submissions.discard(active.tenant_id, active.request_id)
+
+    async def scrub_memory_execution(self, record) -> bool:
+        scope = record.context.packet.scope
+        if record.runtime_kind != "OPERATIONS" or scope.history_key is None:
+            return False
+        async with self._lock:
+            if any(active.context_key == scope.history_key for active in self._active_runs.values()):
+                return False
+            if any(pending.scope == scope for pending in self._pending.values()):
+                return False
+            for key, entry in tuple(self._requests.items()):
+                if key[0] == scope.tenant_id and entry.view.run_id == record.runtime_id:
+                    if entry.user_id != scope.user_id or entry.conversation_id != scope.session_id:
+                        return False
+                    self._requests[key] = replace(entry, message="")
+            cached = self._contexts.get(scope.history_key)
+            if cached is not None:
+                cached.context.clear()
+                cached.pending_intent = None
+                cached.pending_v2 = False
+                cached.latest_run = None
+                cached.latest_ranked_run = None
+            return True
 
     @staticmethod
     def _operation_payload(request: OperationRequest) -> dict[str, Any]:

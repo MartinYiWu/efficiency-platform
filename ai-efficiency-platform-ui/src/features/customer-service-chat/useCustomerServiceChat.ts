@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { computed, shallowRef, ref, onMounted, onBeforeUnmount } from 'vue';
 
-import type { Conversation, MessageView, PublicProgress } from '../../entities/customer-service/model';
+import type {
+  Conversation,
+  MessageView,
+  PublicProgress,
+} from '../../entities/customer-service/model';
 import {
   cancelRun,
   createConversation,
@@ -44,28 +48,46 @@ function findAssistantIndex(messages: MessageView[], runId: string) {
 }
 
 export function useCustomerServiceChat() {
-  const [state, setState] = useState(empty);
-  const abortRef = useRef<AbortController | undefined>(undefined);
-  const selectedConversationRef = useRef<string | undefined>(undefined);
-  const conversationListRequestRef = useRef(0);
-  const busy = state.status === 'SUBMITTING' || state.status === 'STREAMING';
-  const refreshConversations = useCallback(async () => {
-    const request = ++conversationListRequestRef.current;
+  const state = shallowRef(empty);
+  const setState = (
+    value: typeof state.value | ((current: typeof state.value) => typeof state.value),
+  ) => {
+    state.value = typeof value === 'function' ? value(state.value) : value;
+  };
+  const abortRef = ref<AbortController | undefined>(undefined);
+  const selectedConversationRef = ref<string | undefined>(undefined);
+  const conversationListRequestRef = ref(0);
+  let generation = 0;
+  let disposed = false;
+  let activeRequestId: string | undefined;
+  let cancelRequestedRequestId: string | undefined;
+  onBeforeUnmount(() => {
+    disposed = true;
+    generation += 1;
+    abortRef.value?.abort();
+  });
+  const busy = computed(
+    () => state.value.status === 'SUBMITTING' || state.value.status === 'STREAMING',
+  );
+  const refreshConversations = async () => {
+    const request = ++conversationListRequestRef.value;
     const page = await listConversations();
-    if (request === conversationListRequestRef.current)
+    if (!disposed && request === conversationListRequestRef.value)
       setState((value) => ({ ...value, conversations: page.items }));
     return page.items;
-  }, []);
-  const consume = useCallback(async (runId: string, afterSequence = 0, conversationId?: string) => {
-    abortRef.current?.abort();
+  };
+  const consume = async (runId: string, afterSequence = 0, conversationId?: string) => {
+    const currentGeneration = generation;
+    abortRef.value?.abort();
     const controller = new AbortController();
-    abortRef.current = controller;
+    abortRef.value = controller;
     setState((value) => ({ ...value, runId, status: 'STREAMING', sequence: afterSequence }));
     try {
       for await (const event of connectCustomerServiceRun(runId, {
         afterSequence,
         signal: controller.signal,
       })) {
+        if (disposed || controller.signal.aborted || generation !== currentGeneration) break;
         if (event.event === 'run.progress' && event.payload.stage === 'conversation_title')
           void refreshConversations().catch(() => undefined);
         setState((current) => {
@@ -139,17 +161,30 @@ export function useCustomerServiceChat() {
               ...current,
               sequence: event.id,
               status: 'CANCELLED',
+              messages: current.messages.map((item) =>
+                item.message.runId === runId && item.message.role === 'ASSISTANT'
+                  ? {
+                      ...item,
+                      message: { ...item.message, status: 'CANCELLED', answerMode: null },
+                    }
+                  : item,
+              ),
             };
           return {
             ...current,
             sequence: event.id,
             status: 'FAILED',
             error: `${event.payload.errorMessage}（${event.payload.errorCode}）`,
+            messages: current.messages.map((item) =>
+              item.message.runId === runId && item.message.role === 'ASSISTANT'
+                ? { ...item, message: { ...item.message, status: 'FAILED', answerMode: null } }
+                : item,
+            ),
           };
         });
       }
     } catch (error) {
-      if (!controller.signal.aborted)
+      if (!disposed && !controller.signal.aborted && generation === currentGeneration)
         setState((value) => ({
           ...value,
           status: 'FAILED',
@@ -160,7 +195,14 @@ export function useCustomerServiceChat() {
         const currentRun = await getRun(runId).catch(() => null);
         if (conversationId) {
           const persisted = await listMessages(conversationId).catch(() => null);
-          if (persisted)
+          if (
+            persisted &&
+            !disposed &&
+            !controller.signal.aborted &&
+            generation === currentGeneration &&
+            state.value.conversationId === conversationId &&
+            state.value.runId === runId
+          )
             setState((value) => ({
               ...value,
               messages: persisted,
@@ -169,113 +211,152 @@ export function useCustomerServiceChat() {
         }
       }
     }
-  }, [refreshConversations]);
-  const selectConversation = useCallback(
-    async (conversationId: string) => {
-      selectedConversationRef.current = conversationId;
-      abortRef.current?.abort();
-      const messages = await listMessages(conversationId);
-      if (selectedConversationRef.current !== conversationId) return;
-      const pending = messages.find((item) =>
+  };
+  const selectConversation = async (conversationId: string) => {
+    const currentGeneration = ++generation;
+    selectedConversationRef.value = conversationId;
+    abortRef.value?.abort();
+    const messages = await listMessages(conversationId);
+    if (
+      disposed ||
+      generation !== currentGeneration ||
+      selectedConversationRef.value !== conversationId
+    )
+      return;
+    const pending = messages.find(
+      (item) =>
         item.message.role === 'ASSISTANT' && ['PENDING', 'STREAMING'].includes(item.message.status),
-      );
-      setState((value) => ({
-        ...value,
-        conversationId,
-        messages,
-        status: pending ? 'STREAMING' : 'IDLE',
-        runId: pending?.message.runId ?? undefined,
-        sequence: 0,
-        progressByRun: {},
-        error: undefined,
-      }));
-      const runIds = [...new Set(messages.flatMap((item) =>
-        item.message.role === 'ASSISTANT' && item.message.runId ? [item.message.runId] : [],
-      ))];
-      const timelines = await Promise.all(runIds.map((runId) => getTimeline(runId).catch(() => null)));
-      if (selectedConversationRef.current !== conversationId) return;
-      setState((value) => {
-        if (value.conversationId !== conversationId) return value;
-        const updated = [...value.messages];
-        const progressByRun = { ...value.progressByRun };
-        for (const timeline of timelines) {
-          if (!timeline) continue;
-          progressByRun[timeline.runId] = timeline.steps;
-          const index = findAssistantIndex(updated, timeline.runId);
-          if (index >= 0) updated[index] = timeline.assistant;
-        }
-        return { ...value, messages: updated, progressByRun };
-      });
-      const active = timelines.find((timeline) =>
-        timeline && ['PENDING', 'RUNNING'].includes(timeline.status),
-      );
-      if (active) void consume(active.runId, active.lastEventSequence, conversationId);
-    },
-    [consume],
-  );
-  useEffect(() => {
-    let active = true;
-    const timer = window.setTimeout(() => {
-      void refreshConversations()
-        .then(async (items) => {
-          if (!active) return;
-          if (active && items[0]) await selectConversation(items[0].id);
-        })
-        .catch((error: Error & { traceId?: string }) =>
-          setState((value) => ({
-            ...value,
-            status: 'FAILED',
-            error: error.message,
-            traceId: error.traceId,
-          })),
-        );
-    }, 0);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-      abortRef.current?.abort();
-    };
-  }, [refreshConversations, selectConversation]);
+    );
+    setState((value) => ({
+      ...value,
+      conversationId,
+      messages,
+      status: pending ? 'STREAMING' : 'IDLE',
+      runId: pending?.message.runId ?? undefined,
+      sequence: 0,
+      progressByRun: {},
+      error: undefined,
+    }));
+    const runIds = [
+      ...new Set(
+        messages.flatMap((item) =>
+          item.message.role === 'ASSISTANT' && item.message.runId ? [item.message.runId] : [],
+        ),
+      ),
+    ];
+    const timelines = await Promise.all(
+      runIds.map((runId) => getTimeline(runId).catch(() => null)),
+    );
+    if (
+      disposed ||
+      generation !== currentGeneration ||
+      selectedConversationRef.value !== conversationId
+    )
+      return;
+    setState((value) => {
+      if (value.conversationId !== conversationId) return value;
+      const updated = [...value.messages];
+      const progressByRun = { ...value.progressByRun };
+      for (const timeline of timelines) {
+        if (!timeline) continue;
+        progressByRun[timeline.runId] = timeline.steps;
+        const index = findAssistantIndex(updated, timeline.runId);
+        if (index >= 0) updated[index] = timeline.assistant;
+      }
+      return { ...value, messages: updated, progressByRun };
+    });
+    const active = timelines.find(
+      (timeline) => timeline && ['PENDING', 'RUNNING'].includes(timeline.status),
+    );
+    if (active) void consume(active.runId, active.lastEventSequence, conversationId);
+  };
+  (() => {
+    let cleanup0: (() => void) | undefined;
+    onMounted(() => {
+      cleanup0 = (() => {
+        let active = true;
+        const timer = window.setTimeout(() => {
+          void refreshConversations()
+            .then(async (items) => {
+              if (!active) return;
+              if (active && items[0]) await selectConversation(items[0].id);
+            })
+            .catch((error: Error & { traceId?: string }) =>
+              setState((value) => ({
+                ...value,
+                status: 'FAILED',
+                error: error.message,
+                traceId: error.traceId,
+              })),
+            );
+        }, 0);
+        return () => {
+          active = false;
+          window.clearTimeout(timer);
+          abortRef.value?.abort();
+        };
+      })();
+    });
+    onBeforeUnmount(() => cleanup0?.());
+  })();
   const newConversation = async () => {
-    if (busy) return;
-    selectedConversationRef.current = undefined;
-    abortRef.current?.abort();
-    setState((value) => ({ ...value, conversationId: undefined, messages: [], status: 'IDLE',
-      runId: undefined, sequence: 0, progressByRun: {}, error: undefined }));
+    if (busy.value) return;
+    generation += 1;
+    selectedConversationRef.value = undefined;
+    abortRef.value?.abort();
+    setState((value) => ({
+      ...value,
+      conversationId: undefined,
+      messages: [],
+      status: 'IDLE',
+      runId: undefined,
+      sequence: 0,
+      progressByRun: {},
+      error: undefined,
+    }));
   };
   const removeConversation = async (id: string) => {
-    if (busy) return;
+    if (busy.value) return;
     try {
       await deleteConversation(id);
       const remaining = await refreshConversations();
-      if (state.conversationId !== id) return;
+      if (state.value.conversationId !== id) return;
       if (remaining[0]) await selectConversation(remaining[0].id);
       else await newConversation();
     } catch (error) {
-      setState((value) => ({ ...value, error: error instanceof Error ? error.message : '删除会话失败' }));
+      setState((value) => ({
+        ...value,
+        error: error instanceof Error ? error.message : '删除会话失败',
+      }));
     }
   };
   const renameConversation = async (id: string, title: string) => {
     const conversation = await saveConversationTitle(id, title);
-    conversationListRequestRef.current += 1;
+    conversationListRequestRef.value += 1;
     setState((value) => ({
       ...value,
-      conversations: value.conversations.map((item) => item.id === id ? conversation : item),
+      conversations: value.conversations.map((item) => (item.id === id ? conversation : item)),
     }));
   };
   const send = async (text: string) => {
-    if (busy || !text.trim()) return;
+    if (busy.value || !text.trim()) return;
     const requestId = crypto.randomUUID();
+    const currentGeneration = ++generation;
+    activeRequestId = requestId;
+    cancelRequestedRequestId = undefined;
+    abortRef.value?.abort();
     const now = new Date().toISOString();
-    setState((value) => ({ ...value, status: 'SUBMITTING', error: undefined }));
-    let conversationId = state.conversationId;
+    setState((value) => ({ ...value, runId: undefined, status: 'SUBMITTING', error: undefined }));
+    let conversationId = state.value.conversationId;
     try {
       if (!conversationId) {
         const conversation = await createConversation('');
+        if (disposed || generation !== currentGeneration) return;
         conversationId = conversation.id;
-        selectedConversationRef.current = conversation.id;
+        selectedConversationRef.value = conversation.id;
         setState((value) => ({ ...value, conversationId: conversation.id }));
         await refreshConversations();
+        if (disposed || generation !== currentGeneration) return;
       }
       const activeConversationId = conversationId;
       const user: MessageView = {
@@ -295,23 +376,28 @@ export function useCustomerServiceChat() {
       };
       setState((value) => ({
         ...value,
-        messages: [...value.messages, user, {
-          message: {
-            id: `local-assistant-${requestId}`,
-            conversationId: activeConversationId,
-            tenantId: 'dev',
-            role: 'ASSISTANT',
-            content: '',
-            status: 'PENDING',
-            answerMode: null,
-            runId: null,
-            clientRequestId: null,
-            createdAt: now,
+        messages: [
+          ...value.messages,
+          user,
+          {
+            message: {
+              id: `local-assistant-${requestId}`,
+              conversationId: activeConversationId,
+              tenantId: 'dev',
+              role: 'ASSISTANT',
+              content: '',
+              status: 'PENDING',
+              answerMode: null,
+              runId: null,
+              clientRequestId: null,
+              createdAt: now,
+            },
+            citations: [],
           },
-          citations: [],
-        }],
+        ],
       }));
       const submitted = await submitMessage(activeConversationId, text.trim(), requestId);
+      if (disposed || generation !== currentGeneration) return;
       setState((value) => ({
         ...value,
         messages: value.messages.map((item) =>
@@ -321,13 +407,21 @@ export function useCustomerServiceChat() {
         ),
         runId: submitted.runId,
       }));
+      if (cancelRequestedRequestId === requestId) {
+        await cancel();
+        if (state.value.status === 'CANCELLED' || disposed || generation !== currentGeneration)
+          return;
+      }
       await consume(submitted.runId, 0, activeConversationId);
       await refreshConversations().catch(() => undefined);
     } catch (error) {
+      if (disposed || generation !== currentGeneration) return;
       const value = error as Error & { traceId?: string };
       setState((current) => ({
         ...current,
-        messages: current.messages.filter((item) => item.message.id !== `local-assistant-${requestId}`),
+        messages: current.messages.filter(
+          (item) => item.message.id !== `local-assistant-${requestId}`,
+        ),
         status: 'FAILED',
         error: value.message,
         traceId: value.traceId,
@@ -335,10 +429,39 @@ export function useCustomerServiceChat() {
     }
   };
   const cancel = async () => {
-    if (!state.runId || !busy) return;
-    await cancelRun(state.runId);
-    abortRef.current?.abort();
-    setState((value) => ({ ...value, status: 'CANCELLED' }));
+    if (!busy.value) return;
+    if (state.value.status === 'SUBMITTING' && !state.value.runId) {
+      cancelRequestedRequestId = activeRequestId;
+      return;
+    }
+    if (!state.value.runId) return;
+    const cancellingRunId = state.value.runId;
+    const controller = abortRef.value;
+    const cancelled = await cancelRun(cancellingRunId);
+    if (cancelled.status !== 'CANCELLED') return;
+    controller?.abort();
+    setState((value) =>
+      value.runId !== cancellingRunId
+        ? value
+        : {
+            ...value,
+            status: 'CANCELLED',
+            messages: value.messages.map((item) =>
+              item.message.runId === cancellingRunId && item.message.role === 'ASSISTANT'
+                ? { ...item, message: { ...item.message, status: 'CANCELLED', answerMode: null } }
+                : item,
+            ),
+          },
+    );
   };
-  return { state, busy, send, cancel, selectConversation, newConversation, removeConversation, renameConversation };
+  return {
+    state,
+    busy,
+    send,
+    cancel,
+    selectConversation,
+    newConversation,
+    removeConversation,
+    renameConversation,
+  };
 }

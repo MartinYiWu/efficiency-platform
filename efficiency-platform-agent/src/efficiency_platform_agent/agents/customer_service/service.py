@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import traceback
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from time import perf_counter
+from time import monotonic, perf_counter, time
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
+
+from efficiency_platform_agent.contracts.memory_context import MemoryContextEnvelope
+from efficiency_platform_agent.core.execution_control import RunControl, execution_scope
+from efficiency_platform_agent.core.memory_execution import (
+    MemoryExecutionRecord,
+    MemoryExecutionStore,
+)
+from efficiency_platform_agent.core.run_context_binding import (
+    RunContextBinding,
+    bind_run_context,
+    current_conversation_scope,
+    current_memory_context,
+)
 
 from .graph import CustomerServiceGraph, GraphResult
 from .intent import StructuredStageGateway
@@ -51,6 +65,14 @@ class _Run:
     submitted_at: float = field(default_factory=perf_counter)
     first_answer_logged: bool = False
     stage_events_emitted: bool = False
+    control: RunControl | None = None
+    context_binding: RunContextBinding | None = None
+    stop_confirmed: bool = False
+    scrub_anchor: tuple[str, str, str, str] | None = None
+
+
+class CustomerServiceScopeError(ValueError):
+    pass
 
 
 class CustomerServiceNotFoundError(LookupError):
@@ -66,7 +88,12 @@ class CustomerServiceRunService:
             [CustomerServiceReleaseBundle], StructuredStageGateway
         ],
         retrieval_snapshots: RetrievalSnapshotRepository | None = None,
+        *,
+        context_required: bool = False,
+        memory_execution_store: MemoryExecutionStore | None = None,
     ) -> None:
+        self.context_required = context_required
+        self.memory_execution_store = memory_execution_store
         self.graph = graph
         self.releases = releases
         self.gateway_factory = gateway_factory
@@ -76,16 +103,97 @@ class CustomerServiceRunService:
         self._runs: dict[UUID, _Run] = {}
         self._requests: dict[tuple[str, str], UUID] = {}
         self._lock = asyncio.Lock()
+        self._closing = False
 
     async def submit(self, request: CustomerServiceRunRequest) -> RunView:
+        if self._closing:
+            raise CustomerServiceScopeError("CUSTOMER_SERVICE_CLOSED")
+        scope = current_conversation_scope()
+        memory = current_memory_context()
+        if memory is not None:
+            if self.memory_execution_store is None:
+                raise CustomerServiceScopeError("MEMORY_AUTHORITY_REQUIRED")
+            prior_authorization = await self.memory_execution_store.get(
+                request.tenant_id, memory.packet.execution_id
+            )
+            if prior_authorization is not None and (
+                prior_authorization.state != "ACTIVE"
+                or prior_authorization.context != memory
+            ):
+                raise CustomerServiceScopeError("MEMORY_ACCESS_REVOKED")
+        if scope is not None and (
+            scope.tenant_id != request.tenant_id
+            or scope.user_id != request.user_id
+            or scope.domain != "customer-service"
+            or scope.session_id != str(request.conversation_id)
+        ):
+            raise CustomerServiceScopeError("CONTEXT_SCOPE_MISMATCH")
         key = (request.tenant_id, request.request_id)
         async with self._lock:
+            if self._closing:
+                raise CustomerServiceScopeError("CUSTOMER_SERVICE_CLOSED")
             current = self._requests.get(key)
             if current is not None:
-                return self._runs[current].view
+                original = self._runs[current]
+                if original.scrub_anchor is not None:
+                    raise CustomerServiceScopeError("MEMORY_ACCESS_REVOKED")
+                if (
+                    original.context_binding.conversation
+                    if original.context_binding
+                    else None
+                ) != scope or original.request != request:
+                    raise CustomerServiceScopeError("CONTEXT_SCOPE_MISMATCH")
+                return original.view
             run_id = uuid4()
+            scope = current_conversation_scope()
+            control = RunControl()
+            binding = (
+                RunContextBinding(
+                    scope,
+                    str(run_id),
+                    str(run_id),
+                    int(time() + control.deadline - monotonic()),
+                )
+                if scope is not None
+                else None
+            )
+            memory = current_memory_context()
+            if memory is not None:
+                if binding is None or self.memory_execution_store is None:
+                    raise CustomerServiceScopeError("MEMORY_AUTHORITY_REQUIRED")
+                fingerprint = hashlib.sha256(
+                    request.model_dump_json().encode()
+                ).hexdigest()
+                try:
+                    claimed, created = await self.memory_execution_store.claim(
+                        memory,
+                        str(run_id),
+                        "CUSTOMER_SERVICE",
+                        fingerprint,
+                        binding.deadline_epoch_seconds,
+                    )
+                except ValueError:
+                    raise CustomerServiceScopeError(
+                        "MEMORY_EXECUTION_CONFLICT_409"
+                    ) from None
+                if not created:
+                    stored = self._runs.get(UUID(claimed.runtime_id))
+                    if stored is None or stored.request != request:
+                        raise CustomerServiceScopeError(
+                            "MEMORY_RUNTIME_RESTORE_REQUIRED"
+                        )
+                    return stored.view
+                binding = RunContextBinding(
+                    binding.conversation,
+                    memory.packet.task_id,
+                    memory.packet.execution_id,
+                    claimed.deadline_epoch_seconds,
+                    claimed.context,
+                )
             run = _Run(
                 request=request,
+                control=control,
+                context_binding=binding,
                 view=RunView(
                     run_id=run_id,
                     request_id=request.request_id,
@@ -114,6 +222,8 @@ class CustomerServiceRunService:
             RunStatus.CANCELLED,
         }:
             return run.view
+        if run.control is not None:
+            run.control.stop()
         if run.task is not None:
             run.task.cancel()
         run.view = run.view.model_copy(update={"status": RunStatus.CANCELLED})
@@ -127,14 +237,98 @@ class CustomerServiceRunService:
         )
         return run.view
 
+    async def stop_memory_execution(self, run_id: UUID) -> None:
+        run = self._runs.get(run_id)
+        if run is None or run.task is None or run.task is asyncio.current_task():
+            raise ValueError("MEMORY_STOP_PENDING")
+        await self.cancel(run_id)
+        _, pending = await asyncio.wait({run.task}, timeout=5)
+        if pending:
+            raise ValueError("MEMORY_STOP_PENDING")
+        if run.control is not None:
+            async with asyncio.timeout(5):
+                await run.control.close()
+        run.stop_confirmed = True
+
+    async def scrub_memory_execution(self, record: MemoryExecutionRecord) -> bool:
+        if record.runtime_kind != "CUSTOMER_SERVICE" or record.state != "REVOKED":
+            return False
+        try:
+            runtime_id = UUID(record.runtime_id)
+        except ValueError:
+            return False
+        scope = record.context.packet.scope
+        anchor = (
+            scope.tenant_id,
+            record.context.packet.execution_id,
+            record.request_fingerprint,
+            record.context.packet_digest,
+        )
+        async with self._lock:
+            run = self._runs.get(runtime_id)
+            if run is None:
+                return False
+            if run.scrub_anchor is not None:
+                return run.scrub_anchor == anchor
+            if (
+                not run.stop_confirmed
+                or run.task is None
+                or not run.task.done()
+                or run.context_binding is None
+                or run.context_binding.memory_context != record.context
+                or run.request.tenant_id != scope.tenant_id
+                or run.request.user_id != scope.user_id
+                or str(run.request.conversation_id) != scope.session_id
+                or hashlib.sha256(run.request.model_dump_json().encode()).hexdigest()
+                != record.request_fingerprint
+            ):
+                return False
+            erase = getattr(self.retrieval_snapshots, "erase_run", None)
+            if erase is None or await erase(runtime_id) is not True:
+                return False
+            # 原对象也会被已打开的事件流持有，必须原位清缓冲并禁止后续yield。
+            run.request = run.request.model_copy(
+                update={
+                    "message": "[已遗忘]",
+                    "history": (),
+                    "memory_context": MemoryContextEnvelope(),
+                }
+            )
+            run.context_binding = None
+            run.events.clear()
+            run.streamed_blocks.clear()
+            run.task = None
+            run.control = None
+            run.view = run.view.model_copy(update={"status": RunStatus.CANCELLED})
+            run.scrub_anchor = anchor
+            run.changed.set()
+            return True
+
+    async def close(self) -> None:
+        async with self._lock:
+            self._closing = True
+            pending = tuple(
+                run.view.run_id for run in self._runs.values() if run.task is not None
+            )
+        outcomes = await asyncio.gather(
+            *(self.stop_memory_execution(identifier) for identifier in pending),
+            return_exceptions=True,
+        )
+        if any(isinstance(outcome, BaseException) for outcome in outcomes):
+            raise ValueError("MEMORY_STOP_PENDING")
+
     async def events(
         self, run_id: UUID, after_sequence: int = 0
     ) -> AsyncIterator[RunEvent]:
         run = self._require(run_id)
         cursor = after_sequence
         while True:
+            if run.scrub_anchor is not None:
+                return
             pending = [item for item in run.events if item.sequence > cursor]
             for item in pending:
+                if run.scrub_anchor is not None:
+                    return
                 cursor = item.sequence
                 yield item
             if run.view.status in {
@@ -148,6 +342,36 @@ class CustomerServiceRunService:
             await run.changed.wait()
 
     async def debug(self, request: DebugRequest) -> dict[str, Any]:
+        scope = current_conversation_scope()
+        if (
+            (self.context_required and scope is None)
+            or (
+                request.memory_context.scope is not None
+                and scope != request.memory_context.scope.to_core()
+            )
+            or (
+                scope is not None
+                and (
+                    scope.tenant_id != request.tenant_id
+                    or scope.domain != "customer-service"
+                    or scope.session_kind != "TASK_ONLY"
+                    or scope.session_id is not None
+                )
+            )
+        ):
+            raise CustomerServiceScopeError("CONTEXT_SCOPE_MISMATCH")
+        debug_run_id = uuid4()
+        control = RunControl()
+        binding = (
+            RunContextBinding(
+                scope,
+                str(debug_run_id),
+                str(debug_run_id),
+                int(time() + control.deadline - monotonic()),
+            )
+            if scope is not None
+            else None
+        )
         bundle = await self.releases.get(request.agent_release_id)
         if bundle is None:
             raise CustomerServiceNotFoundError("Release 不存在")
@@ -167,13 +391,20 @@ class CustomerServiceRunService:
             request_id=f"debug-{uuid4().hex}",
             conversation_id=uuid4(),
             tenant_id=request.tenant_id,
-            user_id="debug",
+            user_id=scope.user_id if scope is not None else "debug",
             agent_release_id=release_id,
             message=request.question,
             history=(),
         )
-        debug_run_id = uuid4()
-        result = await self.graph.run(run_request, bundle, self.gateway_factory(bundle))
+        try:
+            with bind_run_context(binding), execution_scope(control):
+                async with asyncio.timeout(max(0, control.deadline - monotonic())):
+                    result = await self.graph.run(
+                        run_request, bundle, self.gateway_factory(bundle)
+                    )
+                    control.check()
+        finally:
+            await control.close()
         await self.retrieval_snapshots.save(debug_run_id, result)
         facts = self._retrieval_facts(result)
         return {
@@ -269,53 +500,73 @@ class CustomerServiceRunService:
         }
 
     async def _execute(self, run: _Run) -> None:
+        control = run.control or RunControl()
+        run.control = control
         try:
-            run.view = run.view.model_copy(update={"status": RunStatus.RUNNING})
-            self._append(
-                run,
-                "run.started",
-                RunStatus.RUNNING,
-                RunEventPayload(
-                    stage="intent",
-                    phase="STARTED",
-                    progress_percent=5,
-                    public_summary="正在理解问题",
-                ),
-            )
-            bundle = await self.releases.get(run.request.agent_release_id)
-            if bundle is None:
-                raise CustomerServiceNotFoundError("Release 不存在")
-            if isinstance(self.graph, CustomerServiceGraph):
-                result = await self.graph.run(
-                    run.request,
-                    bundle,
-                    self.gateway_factory(bundle),
-                    on_answer_block=lambda block, mode: self._stream_answer_block(
-                        run, block, mode
-                    ),
-                    on_stage=lambda stage, phase: self._stream_stage(run, stage, phase),
-                    on_conversation_title=lambda title: self._append(
+            with bind_run_context(run.context_binding), execution_scope(control):
+                async with asyncio.timeout(max(0, control.deadline - monotonic())):
+                    run.view = run.view.model_copy(update={"status": RunStatus.RUNNING})
+                    self._append(
                         run,
-                        "conversation.title",
+                        "run.started",
                         RunStatus.RUNNING,
                         RunEventPayload(
-                            stage="conversation_title",
-                            public_summary="会话标题已更新",
-                            conversation_title=title,
+                            stage="intent",
+                            phase="STARTED",
+                            progress_percent=5,
+                            public_summary="正在理解问题",
                         ),
-                    ),
-                )
-            else:
-                result = await self.graph.run(
-                    run.request, bundle, self.gateway_factory(bundle)
-                )
-            await self.retrieval_snapshots.save(run.view.run_id, result)
-            self._publish_result(run, result)
+                    )
+                    bundle = await self.releases.get(run.request.agent_release_id)
+                    if bundle is None:
+                        raise CustomerServiceNotFoundError("Release 不存在")
+                    if isinstance(self.graph, CustomerServiceGraph):
+                        result = await self.graph.run(
+                            run.request,
+                            bundle,
+                            self.gateway_factory(bundle),
+                            on_answer_block=lambda block, mode: (
+                                self._stream_answer_block(run, block, mode)
+                            ),
+                            on_stage=lambda stage, phase: self._stream_stage(
+                                run, stage, phase
+                            ),
+                            on_conversation_title=lambda title: self._append(
+                                run,
+                                "conversation.title",
+                                RunStatus.RUNNING,
+                                RunEventPayload(
+                                    stage="conversation_title",
+                                    public_summary="会话标题已更新",
+                                    conversation_title=title,
+                                ),
+                            ),
+                        )
+                    else:
+                        result = await self.graph.run(
+                            run.request, bundle, self.gateway_factory(bundle)
+                        )
+                    control.check()
+                    await self.retrieval_snapshots.save(run.view.run_id, result)
+                    control.check()
+                    self._publish_result(run, result)
         except asyncio.CancelledError:
             return
         except Exception as error:  # noqa: BLE001 - 运行边界必须转换为公开失败事件
-            run.view = run.view.model_copy(update={"status": RunStatus.FAILED})
-            code = str(getattr(error, "code", "CUSTOMER_SERVICE_RUN_FAILED"))
+            if run.view.status is RunStatus.CANCELLED:
+                return
+            timed_out = (
+                isinstance(error, TimeoutError)
+                or monotonic() >= control.deadline
+                or getattr(error, "code", None) == "AGENT_TASK_DEADLINE"
+            )
+            status = RunStatus.TIMED_OUT if timed_out else RunStatus.FAILED
+            run.view = run.view.model_copy(update={"status": status})
+            code = (
+                "AGENT_TASK_DEADLINE"
+                if timed_out
+                else str(getattr(error, "code", "CUSTOMER_SERVICE_RUN_FAILED"))
+            )
             message = str(getattr(error, "safe_message", "智能客服运行失败"))
             frames = " > ".join(
                 f"{Path(frame.filename).name}:{frame.name}:{frame.lineno}"
@@ -333,7 +584,7 @@ class CustomerServiceRunService:
             self._append(
                 run,
                 "run.failed",
-                RunStatus.FAILED,
+                status,
                 RunEventPayload(
                     stage="failed",
                     progress_percent=100,
@@ -341,6 +592,9 @@ class CustomerServiceRunService:
                     error_message=message,
                 ),
             )
+
+        finally:
+            await control.close()
 
     def _publish_result(self, run: _Run, result: GraphResult) -> None:
         if not run.stage_events_emitted:
@@ -409,6 +663,8 @@ class CustomerServiceRunService:
         )
 
     def _stream_answer_block(self, run: _Run, block: str, mode: AnswerMode) -> None:
+        if run.control is not None:
+            run.control.check()
         run.streamed_blocks.append(block)
         self._append(
             run,
@@ -420,6 +676,8 @@ class CustomerServiceRunService:
     def _stream_stage(
         self, run: _Run, stage: str, phase: Literal["STARTED", "COMPLETED"]
     ) -> None:
+        if run.control is not None:
+            run.control.check()
         summaries = {
             ("intent", "COMPLETED"): "已理解问题",
             ("retrieval", "STARTED"): "正在查找公司资料",
@@ -462,6 +720,17 @@ class CustomerServiceRunService:
                 run.view.run_id,
                 (perf_counter() - run.submitted_at) * 1000,
             )
+        if (
+            run.view.status
+            in {
+                RunStatus.CANCELLED,
+                RunStatus.FAILED,
+                RunStatus.TIMED_OUT,
+                RunStatus.SUCCEEDED,
+            }
+            and status is RunStatus.RUNNING
+        ):
+            return
         run.events.append(
             RunEvent(
                 run_id=run.view.run_id,
@@ -475,7 +744,10 @@ class CustomerServiceRunService:
 
     def _require(self, run_id: UUID) -> _Run:
         try:
-            return self._runs[run_id]
+            run = self._runs[run_id]
+            if run.scrub_anchor is not None:
+                raise CustomerServiceNotFoundError("Run 不存在")
+            return run
         except KeyError as error:
             raise CustomerServiceNotFoundError("Run 不存在") from error
 

@@ -13,7 +13,7 @@
 }
 .page h1 {
   margin: 0 !important;
-  font-size: 28px !important;
+  font-size: 24px !important;
 }
 .card {
   display: grid;
@@ -23,7 +23,7 @@
   text-align: center;
 }
 .card :global(.anticon) {
-  color: #1677ff;
+  color: var(--v1-primary);
   font-size: 44px;
 }
 .card h2 {
@@ -32,25 +32,28 @@
 }
 .card :global(.ant-typography) {
   max-width: 420px;
-  color: #64748b;
+  color: var(--text-secondary);
 }
 
 .demoNotice {
   grid-column: 1 / -1;
   margin: 0;
   padding: 8px 0;
-  color: var(--ui-text-secondary, #64748b);
+  color: var(--ui-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.6;
-  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  border-bottom: 1px solid var(--ui-border, var(--v1-border));
 }
 
 .card {
   min-height: 240px;
-  border-inline: 0;
-  border-radius: 0;
+  border-radius: var(--v1-radius);
 }
 
 .page h1 {
-  color: #0f172a !important;
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.3;
+  margin: 0 0 4px !important;
 }

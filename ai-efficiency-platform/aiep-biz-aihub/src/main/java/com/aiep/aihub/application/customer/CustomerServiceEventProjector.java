@@ -18,6 +18,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class CustomerServiceEventProjector {
     private final CustomerServiceMappers repository;
     private final ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryPacketService memoryPackets;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryDependencyService memoryDependencies;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.platformai.api.AiInvokeFacade ai;
 
     public CustomerServiceEventProjector(CustomerServiceMappers repository, ObjectMapper objectMapper) {
         this.repository = repository;
@@ -29,6 +35,12 @@ public class CustomerServiceEventProjector {
         RunPO run = repository.findRun(javaRunId, tenantId);
         if (run == null || !event.runId().equals(run.agentRunId())) {
             throw new IllegalArgumentException("CUSTOMER_SERVICE_AGENT_RUN_MISMATCH");
+        }
+        com.aiep.aihub.api.memory.MemoryScopeDTO memoryScope=null;
+        java.util.List<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency> actualMemoryInputs=java.util.List.of();
+        if(memoryPackets!=null&&memoryPackets.enabled()&&java.util.Set.of("answer.delta","answer.completed","citation.ready").contains(event.eventType())) {
+            memoryScope=memoryPackets.issuedScope(tenantId,javaRunId);
+            actualMemoryInputs=memoryPackets.verifyManifest(memoryScope,javaRunId,run.agentRunId(),ai.queryMemoryManifest(tenantId,javaRunId));
         }
         if (event.sequence() <= run.lastEventSequence()) {
             return publicEvent(javaRunId, event, false);
@@ -47,6 +59,8 @@ public class CustomerServiceEventProjector {
         }
         MessagePO assistant = repository.findAssistantMessageByRun(javaRunId, tenantId);
         if (assistant == null) throw new IllegalStateException("CUSTOMER_SERVICE_ASSISTANT_MESSAGE_MISSING");
+        if(memoryScope!=null)memoryDependencies.record(memoryScope,"MESSAGE",assistant.id(),"1",javaRunId,
+            actualMemoryInputs,java.util.List.of(actualMemoryInputs),java.util.List.of());
         if ("answer.delta".equals(event.eventType())) {
             String delta = event.payload().delta() == null ? "" : event.payload().delta();
             String separator = assistant.content().isBlank() ? "" : "\n\n";
@@ -81,6 +95,8 @@ public class CustomerServiceEventProjector {
     public java.util.List<PublicEvent> replay(String javaRunId, String tenantId, long afterSequence) {
         RunPO run = repository.findRun(javaRunId, tenantId);
         if (run == null) throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_FOUND");
+        if(memoryPackets!=null&&memoryPackets.enabled())memoryPackets.verifyManifest(memoryPackets.issuedScope(tenantId,javaRunId),
+            javaRunId,run.agentRunId(),ai.queryMemoryManifest(tenantId,javaRunId));
         if (!com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))
             throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_TERMINAL");
         java.util.List<PublicEvent> result = new java.util.ArrayList<>();

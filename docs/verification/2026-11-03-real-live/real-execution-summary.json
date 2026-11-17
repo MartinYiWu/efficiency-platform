@@ -1,0 +1,33 @@
+{
+  "requestedMaximumCases": 3,
+  "attemptedCases": 1,
+  "passedCases": 0,
+  "firstCaseStatus": "FAILED",
+  "firstCaseError": "BUDGET_EXHAUSTED",
+  "publicStages": [
+    "accepted",
+    "intent",
+    "conversation_title",
+    "retrieval"
+  ],
+  "paidHttpAttempts": 3,
+  "statusCodes": [
+    200,
+    200,
+    200
+  ],
+  "guardBlockCode": "BUDGET_EXHAUSTED",
+  "rootCause": "parallel rerank requests exceeded max_inflight=1; reproduced offline, total money/calls/tokens were not exhausted",
+  "unknownAttempts": 3,
+  "heldCostCny": 0.3,
+  "settledCostCny": 0.0,
+  "providerInvoiceVerified": false,
+  "budgetStopped": "operator_stop",
+  "automaticRenewal": false,
+  "noFurtherRealCalls": true,
+  "totalAuthorizedCapCny": 30,
+  "caseCapCny": 10,
+  "costIsNotTarget": true,
+  "rawQuestionsAnswersOrCredentialsLogged": false,
+  "javaRestarted": false
+}

@@ -10,7 +10,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
-  color: #17243c;
+  color: var(--text-primary);
 }
 .stepPanel,
 .formArea,
@@ -20,7 +20,7 @@
 .stepPanel {
   padding: 24px 16px;
   background: #fff;
-  border: 1px solid #e7edf6;
+  border: 1px solid var(--border-primary);
   border-radius: 12px;
 }
 .stepList {
@@ -31,7 +31,7 @@
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  color: #7b8799;
+  color: var(--text-tertiary);
 }
 .step > span {
   display: grid;
@@ -39,7 +39,7 @@
   height: 34px;
   place-items: center;
   color: #fff;
-  background: #95a0b2;
+  background: var(--text-tertiary);
   border-radius: 50%;
   font-weight: 700;
 }
@@ -51,27 +51,27 @@
   font-size: 12px;
 }
 .step.done > span {
-  background: #22b35d;
+  background: var(--color-success);
 }
 .step.current {
-  color: #2467ee;
+  color: var(--v1-primary);
 }
 .step.current > span {
-  background: #2467ee;
+  background: var(--v1-primary);
 }
 .templateSummary {
   display: grid;
   gap: 9px;
   padding: 16px;
   margin-top: 38px;
-  background: #f7faff;
-  border: 1px solid #cfe0ff;
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-bg);
   border-radius: 8px;
 }
 .templateSummary span,
 .tipRail p,
 .tipRail li {
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .templateSummary .ant-btn {
@@ -85,13 +85,13 @@
 }
 .formArea > h1 {
   margin: 14px 0 20px !important;
-  font-size: 28px !important;
+  font-size: 24px !important;
 }
 .infoBar {
   padding: 11px 14px;
-  color: #2467ee;
-  background: #eff6ff;
-  border: 1px solid #b9d3ff;
+  color: var(--v1-primary);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-bg);
   border-radius: 8px;
 }
 .infoBar svg {
@@ -100,8 +100,8 @@
 .skillCard,
 .expectationCard,
 .tipRail :global(.ant-card) {
-  border-color: #e3eaf4;
-  border-radius: 10px;
+  border-color: var(--border-primary);
+  border-radius: var(--v1-radius);
 }
 .skillCard {
   margin-top: 14px;
@@ -122,7 +122,7 @@
 .skillHeader {
   grid-template-columns: 18px minmax(120px, 1fr) minmax(120px, 1fr) 74px 32px;
   padding: 0 0 8px 0;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 12px;
 }
 .skillHeader span:first-child {
@@ -132,7 +132,7 @@
   margin: 9px 0;
 }
 .drag {
-  color: #91a0b5;
+  color: var(--text-tertiary);
   font-size: 20px;
 }
 .skillRow :global(.ant-slider) {
@@ -140,8 +140,6 @@
 }
 .addSkill {
   margin-top: 4px;
-  border-color: #a9cbff !important;
-  color: #1677ff !important;
 }
 .bonus {
   display: flex;
@@ -158,9 +156,9 @@
 .expectationCard :global(.ant-tag) {
   margin: 0;
   padding: 4px 9px;
-  color: #34507d;
-  background: #f1f6ff;
-  border-color: #d8e7ff;
+  color: var(--text-secondary);
+  background: var(--color-info-bg);
+  border-color: var(--color-info-bg);
 }
 .expectationCard {
   margin-top: 16px;
@@ -172,7 +170,7 @@
 }
 .expectationCard :global(.ant-card-body) > div + div {
   padding-left: 20px;
-  border-left: 1px solid #e7edf6;
+  border-left: 1px solid var(--border-primary);
 }
 .expectationCard :global(.ant-card-body) > div {
   display: grid;
@@ -197,20 +195,20 @@
   margin: 10px 0;
 }
 .tipRail em {
-  color: #16a34a;
+  color: var(--v1-success);
   font-style: normal;
 }
 .progress {
   height: 8px;
   margin: 16px 0;
-  background: #e5e7eb;
+  background: var(--border-primary);
   border-radius: 99px;
 }
 .progress span {
   display: block;
   width: 100%;
   height: 100%;
-  background: #22b35d;
+  background: var(--color-success);
   border-radius: inherit;
 }
 .footer {
@@ -223,7 +221,7 @@
   justify-content: space-between;
   padding: 12px 24px;
   background: #fff;
-  border-top: 1px solid #e4ebf4;
+  border-top: 1px solid var(--border-primary);
 }
 .footer > div {
   display: flex;
@@ -283,7 +281,7 @@
   }
   .expectationCard :global(.ant-card-body) > div + div {
     padding: 18px 0 0;
-    border-top: 1px solid #e7edf6;
+    border-top: 1px solid var(--border-primary);
     border-left: 0;
   }
   .footer {
@@ -306,16 +304,16 @@
 .basicGrid label {
   display: grid;
   gap: 8px;
-  color: #334155;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .basicGrid label > span {
-  color: #e5484d;
+  color: var(--color-error);
 }
 
 .basicGrid small {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 12px;
   font-weight: 400;
 }
@@ -333,7 +331,7 @@
   gap: 10px;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--v1-border-soft);
 }
 .conditionRow label {
   display: flex;
@@ -342,7 +340,7 @@
   font-size: 12px;
 }
 .conditionRow > span {
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 .boundaries {
@@ -371,17 +369,17 @@
   grid-column: 1 / -1;
   margin: 0;
   padding: 8px 0;
-  color: var(--ui-text-secondary, #64748b);
+  color: var(--ui-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.6;
-  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  border-bottom: 1px solid var(--ui-border, var(--v1-border));
 }
 
 .stepPanel {
   padding: 16px 0;
   border: 0;
-  border-bottom: 1px solid var(--ui-border);
-  border-radius: 0;
+  border-bottom: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
   background: transparent;
   min-width: 0;
 }
@@ -415,14 +413,6 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 0;
-}
-.page :global(.ant-card) {
-  border: 0;
-  border-bottom: 1px solid var(--ui-border);
-  border-radius: 0;
-}
-.page :global(.ant-card-body) {
-  padding-inline: 0;
 }
 @media (max-width: 1024px) {
   .conditionRow {
@@ -462,5 +452,27 @@
 }
 
 .page h1 {
-  color: #0f172a !important;
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.3;
+  margin: 0 0 4px !important;
+}
+
+.stepPanel {
+  padding: 16px;
+  border: 1px solid var(--v1-border);
+  background: #fff;
+  box-shadow: var(--v1-shadow-card);
+}
+.templateSummary {
+  padding: 12px;
+  border: 1px solid var(--color-info-bg);
+  background: #f8fbff;
+}
+.step.current {
+  color: var(--v1-accent);
+}
+.step.current > span {
+  background: var(--v1-accent);
 }

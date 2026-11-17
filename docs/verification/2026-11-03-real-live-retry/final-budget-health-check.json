@@ -1,0 +1,22 @@
+{
+  "allBudgetAuthorizationsStopped": true,
+  "ledgerBatches": 2,
+  "totalHttpAttempts": 21,
+  "totalAccountedCostCny": 3.106252,
+  "totalSettledCostCny": 0.006252,
+  "totalUnknownHeldCostCny": 3.1,
+  "inflight": 0,
+  "noAutoRenewal": true,
+  "health": [
+    {
+      "origin": "http://127.0.0.1:8080",
+      "http": 200,
+      "status": "UP"
+    },
+    {
+      "origin": "http://127.0.0.1:8090",
+      "http": 200,
+      "status": "ok"
+    }
+  ]
+}

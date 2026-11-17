@@ -7,6 +7,12 @@ from typing import cast
 
 from efficiency_platform_agent.agents.factory import AgentFactory
 from efficiency_platform_agent.core.agent import CapabilityRequirement
+from efficiency_platform_agent.core.context_projection import (
+    SpecialistContextSlice,
+    SpecialistResultProjection,
+    scope_json,
+)
+from efficiency_platform_agent.core.memory import SourceDependency
 from efficiency_platform_agent.core.multi_agent import (
     BudgetUsage,
     TaskDispatch,
@@ -110,6 +116,7 @@ class DispatchBuilder:
         attempt: int = 1,
         revision: int = 0,
         fence_token: int = 0,
+        context_slice: SpecialistContextSlice | None = None,
     ) -> TaskDispatch:
         """复核候选白名单后生成不含父态和注册表的调度包装。"""
         if not isinstance(node, TaskNode):
@@ -138,14 +145,31 @@ class DispatchBuilder:
             raise ValueError("SPECIALIST_UNAVAILABLE:permissions")
         if not node.allowed_tools.issubset(spec.allowed_tools):
             raise ValueError("SPECIALIST_UNAVAILABLE:tools")
+        if context_slice is not None:
+            if not isinstance(context_slice, SpecialistContextSlice):
+                raise TypeError("CONTEXT_SLICE_INVALID")
+            if (
+                input_data.items
+                or context_view is not None
+                or context_slice.scope.subtask_id != node.task_id
+                or context_slice.scope.execution_id != parent_run_id
+                or context_slice.scope.execution_agent_id != selected.agent_id
+                or not context_slice.allowed_tools.issubset(node.allowed_tools)
+                or context_slice.output_contract != node.output_schema_version
+            ):
+                raise ValueError("CONTEXT_SLICE_DISPATCH_MISMATCH")
         budget = self._ledger.budget_for(node.task_id, spec.budget)
         task = SupervisorTask(
             task_id=node.task_id,
             parent_run_id=parent_run_id,
             target_agent=selected.agent_id,
             input_data=input_data,
-            context_view=context_view or node.context_view,
-            allowed_tools=node.allowed_tools,
+            context_view=context_slice.to_json()
+            if context_slice is not None
+            else context_view or node.context_view,
+            allowed_tools=context_slice.allowed_tools
+            if context_slice is not None
+            else node.allowed_tools,
             budget=budget,
         )
         return TaskDispatch(
@@ -178,6 +202,98 @@ class SpecialistResultDecoder:
             "usage",
         }
     )
+
+    def decode_projected(
+        self, result: RunResult, slice_: SpecialistContextSlice
+    ) -> SpecialistResultProjection:
+        """显式适配新投影版本；旧 decode 的字段和版本不变。"""
+        if not isinstance(result, RunResult) or not isinstance(
+            result.output, JsonObject
+        ):
+            raise ValueError("OUTPUT_SCHEMA_INVALID:result")  # noqa: TRY004  # 统一隐藏输出内部类型
+        raw = self._object(
+            result.output,
+            "projection",
+            frozenset(
+                {
+                    "contract_version",
+                    "task_id",
+                    "scope",
+                    "conclusions",
+                    "evidence_refs",
+                    "unresolved_questions",
+                    "risks",
+                    "recommendations",
+                    "artifact_refs",
+                    "completeness",
+                    "completed_scope",
+                    "missing_scope",
+                    "source_dependencies",
+                    "safety_dependencies",
+                }
+            ),
+        )
+        if raw["scope"] != scope_json(slice_.scope):
+            raise ValueError("RESULT_PROJECTION_SLICE_MISMATCH")
+        recommendations = raw["recommendations"]
+        if not isinstance(recommendations, tuple):
+            raise ValueError("OUTPUT_SCHEMA_INVALID:recommendations")  # noqa: TRY004  # 统一输出契约错误
+        parsed_recommendations: list[tuple[str, str]] = []
+        for item in recommendations:
+            pair = _string_tuple(item, "recommendation")
+            if len(pair) != 2:
+                raise ValueError("OUTPUT_SCHEMA_INVALID:recommendations")
+            parsed_recommendations.append((pair[0], pair[1]))
+        projection = SpecialistResultProjection(
+            cast(str, raw["contract_version"]),
+            cast(str, raw["task_id"]),
+            slice_.scope,
+            _string_tuple(raw["conclusions"], "conclusions"),
+            _string_tuple(raw["evidence_refs"], "evidence_refs"),
+            _string_tuple(raw["unresolved_questions"], "unresolved_questions"),
+            _string_tuple(raw["risks"], "risks"),
+            tuple(parsed_recommendations),
+            _string_tuple(raw["artifact_refs"], "artifact_refs"),
+            cast(str, raw["completeness"]),
+            _string_tuple(raw["completed_scope"], "completed_scope"),
+            _string_tuple(raw["missing_scope"], "missing_scope"),
+            self._projection_dependencies(raw["source_dependencies"]),
+            self._projection_dependencies(raw["safety_dependencies"]),
+        )
+        projection.validate_slice(slice_)
+        return projection
+
+    @classmethod
+    def _projection_dependencies(cls, value: object) -> tuple[SourceDependency, ...]:
+        if not isinstance(value, tuple):
+            raise ValueError("OUTPUT_SCHEMA_INVALID:dependencies")  # noqa: TRY004  # 统一输出契约错误
+        dependencies: list[SourceDependency] = []
+        for item in value:
+            raw = cls._object(
+                item,
+                "dependency",
+                frozenset(
+                    {
+                        "source_type",
+                        "source_id",
+                        "source_version",
+                        "grant_epoch",
+                        "source_epoch",
+                        "deletion_epoch",
+                    }
+                ),
+            )
+            dependencies.append(
+                SourceDependency(
+                    cast(str, raw["source_type"]),
+                    cast(str, raw["source_id"]),
+                    cast(str, raw["source_version"]),
+                    cast(int, raw["grant_epoch"]),
+                    cast(int, raw["source_epoch"]),
+                    cast(int, raw["deletion_epoch"]),
+                )
+            )
+        return tuple(dependencies)
 
     def decode(self, result: RunResult) -> SpecialistResultEnvelope:
         """把 Specialist 的结构化输出转换为封装；任何缺失或未知字段均拒绝。"""

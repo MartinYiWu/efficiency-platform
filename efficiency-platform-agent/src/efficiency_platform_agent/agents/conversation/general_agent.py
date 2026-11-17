@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.direct_conversation import (
     DirectConversationSubmission,
     GeneralConversationExecution,
@@ -78,6 +79,9 @@ class GeneralConversationAgent:
             raise TypeError("model_runtime必须实现GeneralConversationModelRuntime")
         self.model_runtime = model_runtime
 
+    @stage_entry(
+        "direct", inputs=("submission.visible_history", "submission.current_message")
+    )
     async def execute(
         self,
         submission: DirectConversationSubmission,

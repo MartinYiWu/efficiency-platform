@@ -17,9 +17,15 @@ public record CustomerServiceRunRequest(
         @JsonProperty("user_id") String userId,
         @JsonProperty("agent_release_id") String agentReleaseId,
         @JsonProperty("message") String message,
-        @JsonProperty("history") List<HistoryMessage> history) {
+        @JsonProperty("history") List<HistoryMessage> history,
+        @JsonProperty("memory_context") MemoryContextEnvelope memoryContext) {
+
+    public CustomerServiceRunRequest(String contractVersion, String requestId, String conversationId, String tenantId, String userId, String agentReleaseId, String message, List<HistoryMessage> history) {
+        this(contractVersion, requestId, conversationId, tenantId, userId, agentReleaseId, message, history, MemoryContextEnvelope.disabled());
+    }
 
     public CustomerServiceRunRequest {
+        if (memoryContext == null) memoryContext = MemoryContextEnvelope.disabled();
         CustomerServiceDtoSupport.requireContract(contractVersion, "customer-service-run/1");
         CustomerServiceDtoSupport.requireText(requestId, "request_id");
         CustomerServiceDtoSupport.requireText(conversationId, "conversation_id");

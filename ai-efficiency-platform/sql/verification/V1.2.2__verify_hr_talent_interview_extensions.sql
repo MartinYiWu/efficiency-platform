@@ -1,0 +1,3 @@
+-- 只读核验：期望9张表；授权/个人正文不输出。
+SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('ai_hr_candidate_merge','ai_hr_candidate_source','ai_hr_interview_set','ai_hr_interview_assignment','ai_hr_contact_grant','ai_hr_deletion_job','ai_hr_audit','ai_hr_interview_export','ai_hr_talent_operation') ORDER BY table_name;
+SELECT table_name,index_name,non_unique,column_name,seq_in_index FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name IN ('ai_hr_candidate_merge','ai_hr_candidate_source','ai_hr_interview_set','ai_hr_interview_assignment','ai_hr_contact_grant','ai_hr_deletion_job','ai_hr_audit','ai_hr_interview_export','ai_hr_talent_operation') ORDER BY table_name,index_name,seq_in_index;

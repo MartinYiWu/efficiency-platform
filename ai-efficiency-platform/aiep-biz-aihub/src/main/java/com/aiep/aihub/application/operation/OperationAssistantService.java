@@ -1,5 +1,7 @@
 package com.aiep.aihub.application.operation;
 
+import com.aiep.aihub.application.memory.MemoryActorProvider;
+import com.aiep.aihub.application.memory.ConversationScopeResolver;
 import com.aiep.aihub.repository.operation.OperationArtifactMapper;
 import com.aiep.aihub.repository.operation.OperationArtifactPO;
 import com.aiep.aihub.repository.operation.OperationConversationMapper;
@@ -43,13 +45,35 @@ public class OperationAssistantService {
     private final AiInvokeFacade aiInvokeFacade;
     private final ObjectMapper objectMapper;
 
+    private final MemoryActorProvider actors;
+    private final ConversationScopeResolver scopes = new ConversationScopeResolver();
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryPacketService memoryPackets;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryDependencyService memoryDependencies;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryHistoryProjection memoryHistory;
+
+    public OperationAssistantService(
+            OperationConversationMapper conversationMapper, OperationMessageMapper messageMapper,
+            OperationRunMapper runMapper, OperationArtifactMapper artifactMapper,
+            AiInvokeFacade aiInvokeFacade, ObjectMapper objectMapper) {
+        this(conversationMapper,messageMapper,runMapper,artifactMapper,aiInvokeFacade,objectMapper,
+            new MemoryActorProvider() {
+                public OperationActor current() { throw new IllegalStateException("MEMORY_IDENTITY_REQUIRED"); }
+                public OperationActor revalidate(OperationActor actor) { throw new IllegalStateException("MEMORY_IDENTITY_REQUIRED"); }
+            });
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
     public OperationAssistantService(
             OperationConversationMapper conversationMapper,
             OperationMessageMapper messageMapper,
             OperationRunMapper runMapper,
             OperationArtifactMapper artifactMapper,
             AiInvokeFacade aiInvokeFacade,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper, MemoryActorProvider actors) {
+        this.actors = actors;
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
         this.runMapper = runMapper;
@@ -60,7 +84,7 @@ public class OperationAssistantService {
 
     @Transactional
     public OperationViews.ConversationView createConversation(String requestedTitle) {
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         LocalDateTime now = LocalDateTime.now();
         OperationConversationPO conversation = new OperationConversationPO();
         conversation.setId(UUID.randomUUID().toString());
@@ -78,7 +102,7 @@ public class OperationAssistantService {
     public OperationViews.RunView submitMessage(
             String conversationId, String message, String clientRequestId) {
         long startedAt = System.nanoTime();
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         OperationConversationPO conversation = ownedConversation(conversationId, actor);
         log.info("event=operation_submit_started conversationId={} clientRequestId={}",
                 conversationId, clientRequestId);
@@ -87,6 +111,8 @@ public class OperationAssistantService {
                 .eq(OperationMessagePO::getClientRequestId, clientRequestId)
                 .last("LIMIT 1"));
         if (duplicate != null) {
+            if (!conversationId.equals(duplicate.getConversationId()) || !message.equals(duplicate.getContent()))
+                throw new OperationAssistantException("IDEMPOTENCY_SCOPE_CONFLICT", "幂等标识已被其他会话使用");
             OperationRunPO priorRun = runMapper.selectOne(new LambdaQueryWrapper<OperationRunPO>()
                     .eq(OperationRunPO::getUserMessageId, duplicate.getId())
                     .last("LIMIT 1"));
@@ -123,14 +149,31 @@ public class OperationAssistantService {
         messageMapper.updateById(userMessage);
 
         try {
+            var memoryScope = scopes.conversation(actor, "operations", conversationId,
+                    conversation.getTenantId(), conversation.getUserId(), "operations");
+            var artifacts = availableArtifactContexts(conversationId, actor.tenantId());
+            var request = new OperationAgentMessageRequest(message, clientRequestId, actor.userId(), artifacts,
+                    actor.tenantId(), scopes.envelope(memoryScope));
+            if (memoryPackets != null && memoryPackets.enabled()) {
+                if (!artifacts.isEmpty()) throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_ARTIFACT_LINEAGE_REQUIRED");
+                var candidates=messageMapper.selectConversationMessages(conversationId,actor.tenantId()).stream()
+                    .filter(item->!item.getId().equals(userMessage.getId())&&item.getRunId()!=null)
+                    .filter(item->{var completed=runMapper.selectById(item.getRunId());return completed!=null&&actor.tenantId().equals(completed.getTenantId())&&"succeeded".equals(completed.getStatus());})
+                    .map(item->com.aiep.aihub.application.memory.MemoryHistoryProjection.message(memoryScope,item.getId(),item.getRole(),item.getContent())).toList();
+                var selected=memoryHistory.selectBounded(memoryScope,candidates,8,12000);
+                var history=new ArrayList<com.aiep.platformai.api.dto.MemoryHistoryMessage>();
+                var historyDependencies=new ArrayList<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency>();
+                for(var item:selected) {
+                    var closure=memoryDependencies.dependencies(memoryScope,"MESSAGE",item.id(),item.version());
+                    history.add(new com.aiep.platformai.api.dto.MemoryHistoryMessage(item.id(),item.version(),item.role(),item.content(),closure));
+                    historyDependencies.addAll(closure);
+                }
+                request=request.withHistory(history);
+                request = new OperationAgentMessageRequest(message, clientRequestId, actor.userId(), artifacts, actor.tenantId(),
+                        memoryPackets.issueMessage(memoryScope, run.getId(), userMessage.getId(), objectMapper.valueToTree(request), historyDependencies)).withHistory(history);
+            }
             OperationAgentRunResponse submitted = aiInvokeFacade.submitOperationMessage(
-                    conversationId,
-                    new OperationAgentMessageRequest(
-                            message,
-                            clientRequestId,
-                            actor.userId(),
-                            availableArtifactContexts(conversationId, actor.tenantId()),
-                            actor.tenantId()));
+                    conversationId, request);
             run.setAgentRunId(submitted.runId());
             run.setStatus(submitted.status());
             run.setUpdatedAt(LocalDateTime.now());
@@ -179,9 +222,21 @@ public class OperationAssistantService {
 
     @Transactional
     public void projectEvent(String runId, OperationAgentRunEvent event) {
-        OperationRunPO run = ownedRunForUpdate(runId);
+        projectEvent(runId, event, actors.current());
+    }
+
+    @Transactional
+    public void projectEvent(String runId, OperationAgentRunEvent event, OperationActor capturedActor) {
+        OperationRunPO run = ownedRunForUpdate(runId, actors.revalidate(capturedActor));
         if (!run.getAgentRunId().equals(event.runId())) {
             throw new OperationAssistantException("RUN_EVENT_MISMATCH", "运行事件标识不匹配");
+        }
+        java.util.List<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency> actualMemoryInputs=List.of();
+        com.aiep.aihub.api.memory.MemoryScopeDTO memoryScope=null;
+        if(memoryPackets!=null&&memoryPackets.enabled()&&Set.of("assistant_delta","deliverable","clarification_required","stream_done").contains(event.event())) {
+            var conversation=ownedConversation(run.getConversationId(),capturedActor);
+            memoryScope=scopes.conversation(capturedActor,"operations",run.getConversationId(),conversation.getTenantId(),conversation.getUserId(),"operations");
+            actualMemoryInputs=memoryPackets.verifyManifest(memoryScope,runId,run.getAgentRunId(),aiInvokeFacade.queryMemoryManifest(run.getTenantId(),runId));
         }
         if (TERMINAL_STATUSES.contains(run.getStatus())) {
             log.info("event=operation_event_ignored_terminal runId={} agentRunId={} sequence={} event={} status={}",
@@ -211,6 +266,10 @@ public class OperationAssistantService {
             run.setStatus(stringValue(event.payload().get("status")));
         }
         runMapper.updateById(run);
+        if(memoryScope!=null) {
+            var answer=assistantMessage(run);
+            if(answer!=null)memoryDependencies.record(memoryScope,"MESSAGE",answer.getId(),"1",runId,actualMemoryInputs,List.of(actualMemoryInputs),List.of());
+        }
         log.info("event=operation_event_projected runId={} agentRunId={} sequence={} event={} status={}",
                 run.getId(), run.getAgentRunId(), event.sequence(), event.event(), run.getStatus());
         if ("stream_done".equals(event.event())) {
@@ -221,7 +280,12 @@ public class OperationAssistantService {
 
     @Transactional
     public void failEventProjection(String runId, OperationAgentRunEvent event, Exception exception) {
-        OperationRunPO run = ownedRunForUpdate(runId);
+        failEventProjection(runId, event, exception, actors.current());
+    }
+
+    @Transactional
+    public void failEventProjection(String runId, OperationAgentRunEvent event, Exception exception, OperationActor capturedActor) {
+        OperationRunPO run = ownedRunForUpdate(runId, actors.revalidate(capturedActor));
         if (TERMINAL_STATUSES.contains(run.getStatus())) {
             return;
         }
@@ -255,11 +319,11 @@ public class OperationAssistantService {
     }
 
     public OperationViews.ConversationView getConversation(String conversationId) {
-        return toConversationView(ownedConversation(conversationId, OperationActor.developmentActor()));
+        return toConversationView(ownedConversation(conversationId, actors.current()));
     }
 
     public OperationViews.MessageListView listMessages(String conversationId) {
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         ownedConversation(conversationId, actor);
         List<OperationViews.MessageView> messages = messageMapper
                 .selectConversationMessages(conversationId, actor.tenantId())
@@ -281,7 +345,7 @@ public class OperationAssistantService {
     }
 
     public OperationViews.ArtifactListView listArtifacts(String conversationId) {
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         ownedConversation(conversationId, actor);
         List<OperationViews.ArtifactSummary> items = artifactMapper.selectList(
                         new LambdaQueryWrapper<OperationArtifactPO>()
@@ -506,7 +570,7 @@ public class OperationAssistantService {
     }
 
     private OperationRunPO ownedRun(String id) {
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         OperationRunPO value = runMapper.selectOne(new LambdaQueryWrapper<OperationRunPO>()
                 .eq(OperationRunPO::getId, id)
                 .eq(OperationRunPO::getTenantId, actor.tenantId())
@@ -519,7 +583,10 @@ public class OperationAssistantService {
     }
 
     private OperationRunPO ownedRunForUpdate(String id) {
-        OperationActor actor = OperationActor.developmentActor();
+        return ownedRunForUpdate(id, actors.current());
+    }
+
+    private OperationRunPO ownedRunForUpdate(String id, OperationActor actor) {
         OperationRunPO value = runMapper.selectForUpdate(id, actor.tenantId());
         if (value == null) {
             throw new OperationAssistantException("RUN_NOT_FOUND", "运行记录不存在");
@@ -529,7 +596,7 @@ public class OperationAssistantService {
     }
 
     private OperationArtifactPO ownedArtifact(String id) {
-        OperationActor actor = OperationActor.developmentActor();
+        OperationActor actor = actors.current();
         OperationArtifactPO value = artifactMapper.selectOne(new LambdaQueryWrapper<OperationArtifactPO>()
                 .eq(OperationArtifactPO::getId, id)
                 .eq(OperationArtifactPO::getTenantId, actor.tenantId())

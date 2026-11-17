@@ -1,0 +1,20 @@
+{
+  "userInstruction": "制定计划然后按计划开始实施",
+  "conditionSingleSmokePassed": true,
+  "originalCumulativeCapCny": 30,
+  "originalCumulativeCapHttp": 90,
+  "priorHttp": 22,
+  "priorAccountedCny": 3.106392,
+  "thisMaximumCases": 2,
+  "thisMaxHttp": 60,
+  "thisMaxCny": 20.0,
+  "singleCaseMaxCny": 10,
+  "singleCaseMaxHttp": 30,
+  "singleCaseMaxSeconds": 600,
+  "deadlineShanghai": "2026-11-04T12:16:34.618000+08:00",
+  "stopOnFailureOrUnknown": true,
+  "noAutoRenewal": true,
+  "noRawQuestionOrAnswerLogged": true,
+  "businessOrigin": "http://127.0.0.1:8080",
+  "browserVerificationPending": true
+}

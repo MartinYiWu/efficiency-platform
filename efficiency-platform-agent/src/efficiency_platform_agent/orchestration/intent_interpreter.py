@@ -10,9 +10,11 @@ from typing import Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.intent import IntentEnvelopeV1
 from efficiency_platform_agent.conversation.context import ConversationContext
 from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.context_dispatch import allow_context_repair
 from efficiency_platform_agent.core.model import (
     ModelDemand,
     ModelExecutionResult,
@@ -162,6 +164,7 @@ class IntentInterpreter:
         budget = remaining_budget or self._default_budget()
         return (await self.execute(text, context, remaining_budget=budget)).intent
 
+    @stage_entry("intent", inputs=("text", "context.turns"))
     async def execute(
         self,
         text: str,
@@ -208,6 +211,7 @@ class IntentInterpreter:
                 degraded=degraded,
                 attempts=attempts,
             ) from error
+        await allow_context_repair()
         repaired = await self.model_runtime.complete(
             repair_demand,
             self._repair_request(invalid_output),
@@ -286,6 +290,7 @@ class IntentInterpreter:
         return JsonObject(
             (
                 ("temperature", 0),
+                ("max_tokens", 2_000),
                 ("response_format", JsonObject((("type", "json_object"),))),
             )
         )

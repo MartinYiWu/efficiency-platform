@@ -1,0 +1,5 @@
+SELECT constraint_name,check_clause FROM information_schema.check_constraints WHERE constraint_schema=DATABASE() AND constraint_name IN ('ck_memory_execution_state','ck_memory_execution_body');
+SELECT trigger_name FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND trigger_name='trg_memory_execution_scrub';
+SELECT column_name,is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='agent_memory_invalidation_receipt' AND column_name IN ('cleanup_fingerprint','stop_confirmed','threads_receipt','scrub_receipt','expected_execution_revision','grant_epoch','source_epoch','deletion_epoch');
+SELECT column_name,is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='agent_memory_execution' AND column_name IN ('scrub_event_id','scrub_authority');
+SELECT COUNT(*) AS invalid_bodies FROM agent_memory_execution WHERE (state='SCRUBBED' AND (snapshot_ciphertext IS NOT NULL OR snapshot_nonce IS NOT NULL)) OR (state<>'SCRUBBED' AND (snapshot_ciphertext IS NULL OR snapshot_nonce IS NULL));

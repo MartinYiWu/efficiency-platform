@@ -22,6 +22,47 @@ def test_parse_arguments_uses_local_defaults() -> None:
     assert arguments.port == 8080
 
 
+def test_main_builds_serves_and_closes_in_one_running_loop(monkeypatch):
+    from efficiency_platform_agent import main as application_main
+
+    seen = []
+
+    async def close():
+        seen.append(("close", asyncio.get_running_loop()))
+
+    async def build_application(**kwargs):
+        seen.append(("build", asyncio.get_running_loop()))
+        return SimpleNamespace(app="application", close=close)
+
+    def old_sync_build(**kwargs):
+        asyncio.get_running_loop()
+        return SimpleNamespace(app="application", close=close)
+
+    class Server:
+        def __init__(self, config):
+            assert config.app == "application"
+
+        async def serve(self):
+            seen.append(("serve", asyncio.get_running_loop()))
+
+    monkeypatch.setattr(
+        application_main, "build_local_agent_application", old_sync_build, raising=False
+    )
+    monkeypatch.setattr(
+        application_main,
+        "build_async_local_agent_application",
+        build_application,
+        raising=False,
+    )
+    monkeypatch.setattr(application_main.uvicorn, "Server", Server)
+    monkeypatch.setattr(application_main.uvicorn, "run", lambda *args, **kwargs: None)
+
+    application_main.main([])
+
+    assert [event for event, _ in seen] == ["build", "serve", "close"]
+    assert len({id(loop) for _, loop in seen}) == 1
+
+
 def test_main_builds_application_and_starts_uvicorn_without_reading_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -30,21 +71,32 @@ def test_main_builds_application_and_starts_uvicorn_without_reading_env(
 
     calls: dict[str, object] = {}
 
-    def build_application(*, env_file: str) -> SimpleNamespace:
-        calls["env_file"] = env_file
-        return SimpleNamespace(app="application")
+    async def close() -> None:
+        calls["closed"] = True
 
-    def run_server(app: object, **kwargs: object) -> None:
-        calls["app"] = app
-        calls["server"] = kwargs
+    async def build_application(*, env_file: str) -> SimpleNamespace:
+        calls["env_file"] = env_file
+        return SimpleNamespace(app="application", close=close)
+
+    class Server:
+        def __init__(self, config):
+            calls["app"] = config.app
+            calls["server"] = {
+                "host": config.host,
+                "port": config.port,
+                "log_level": config.log_level,
+            }
+
+        async def serve(self):
+            pass
 
     def fail_if_read(*args: object, **kwargs: object) -> object:
         raise AssertionError("正式入口不应读取 .env 内容")
 
     monkeypatch.setattr(
-        application_main, "build_local_agent_application", build_application
+        application_main, "build_async_local_agent_application", build_application
     )
-    monkeypatch.setattr(application_main.uvicorn, "run", run_server)
+    monkeypatch.setattr(application_main.uvicorn, "Server", Server)
     monkeypatch.setattr(builtins, "open", fail_if_read)
 
     application_main.main(
@@ -56,15 +108,11 @@ def test_main_builds_application_and_starts_uvicorn_without_reading_env(
         "port": 9090,
         "log_level": "info",
     }
-    expected_server["loop"] = (
-        "efficiency_platform_agent.main:selector_loop_factory"
-        if sys.platform == "win32"
-        else "auto"
-    )
     assert calls == {
         "env_file": "local.env",
         "app": "application",
         "server": expected_server,
+        "closed": True,
     }
 
 
@@ -75,21 +123,38 @@ def test_main_passes_psycopg_compatible_loop_to_uvicorn_on_windows(
     from efficiency_platform_agent import main as application_main
 
     selected: list[object] = []
+
+    async def close():
+        pass
+
+    async def build_application(**kwargs):
+        selected.append(asyncio.get_running_loop())
+        return SimpleNamespace(app="application", close=close)
+
+    class Server:
+        def __init__(self, config):
+            pass
+
+        async def serve(self):
+            pass
+
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setattr(
         application_main,
-        "build_local_agent_application",
-        lambda **_: SimpleNamespace(app="application"),
+        "build_async_local_agent_application",
+        build_application,
     )
     monkeypatch.setattr(
         application_main.uvicorn,
-        "run",
-        lambda *_, **options: selected.append(options["loop"]),
+        "Server",
+        Server,
     )
 
     application_main.main([])
 
-    assert selected == ["efficiency_platform_agent.main:selector_loop_factory"]
+    assert len(selected) == 1
+    assert isinstance(selected[0], asyncio.SelectorEventLoop)
+    assert selected[0].is_closed()
 
 
 def test_legacy_script_forwards_to_package_main(

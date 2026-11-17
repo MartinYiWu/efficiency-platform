@@ -22,6 +22,11 @@ from pydantic import (
     model_validator,
 )
 
+from efficiency_platform_agent.contracts.memory_context import (
+    MemoryContextEnvelope,
+    MemoryContextInput,
+)
+
 from .contracts import BlockKind, EvidenceMode
 from .release_bundle import ModelPolicy
 
@@ -58,11 +63,12 @@ class HistoryMessage(StrictModel):
 
 
 class CustomerServiceRunRequest(StrictModel):
+    memory_context: MemoryContextInput = Field(default_factory=MemoryContextEnvelope)
     contract_version: Literal["customer-service-run/1"]
     request_id: str = Field(min_length=1, max_length=128)
     conversation_id: UUID
-    tenant_id: str = Field(min_length=1, max_length=64)
-    user_id: str = Field(min_length=1, max_length=64)
+    tenant_id: str = Field(min_length=1, max_length=128)
+    user_id: str = Field(min_length=1, max_length=128)
     agent_release_id: UUID
     message: str = Field(min_length=1, max_length=12000)
     history: tuple[HistoryMessage, ...] = Field(max_length=12)
@@ -451,9 +457,10 @@ class DebugKnowledgeBinding(StrictModel):
 
 
 class DebugRequest(StrictModel):
+    memory_context: MemoryContextInput = Field(default_factory=MemoryContextEnvelope)
     contract_version: Literal["customer-service-rag-debug/1"]
     agent_key: Literal["customer-service"]
-    tenant_id: str = Field(min_length=1, max_length=64)
+    tenant_id: str = Field(min_length=1, max_length=128)
     question: str = Field(min_length=1)
     agent_release_id: UUID
     agent_version_id: UUID

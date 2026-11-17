@@ -1,0 +1,112 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": {
+      "title": ""
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "POST",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": {
+      "contractVersion": "customer-service-message/1",
+      "message": "如何申请售后？",
+      "clientRequestId": "ad954b97-f764-4abf-a923-db0bf0e9564d"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1/events",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "PUT",
+    "path": "/api/customer-service/messages/answer-1/feedback",
+    "status": 200,
+    "body": {
+      "rating": "UP",
+      "reasonCode": null,
+      "comment": null
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/customer-service/conversations/conversation-1",
+    "status": 409,
+    "body": {
+      "title": "重复名称"
+    }
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/customer-service/conversations/conversation-1",
+    "status": 200,
+    "body": {
+      "title": "售后验收记录"
+    }
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1/timeline",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/conversations/conversation-1/messages",
+    "status": 200,
+    "body": null
+  },
+  {
+    "method": "GET",
+    "path": "/api/customer-service/runs/run-1/timeline",
+    "status": 200,
+    "body": null
+  }
+]

@@ -13,7 +13,8 @@ public class OperationAssistantExceptionHandler {
 
     @ExceptionHandler(OperationAssistantException.class)
     public ResponseEntity<ApiResponse<Void>> handleBusiness(OperationAssistantException exception) {
-        HttpStatus status = exception.getCode().endsWith("_NOT_FOUND") ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
+        HttpStatus status = "IDEMPOTENCY_SCOPE_CONFLICT".equals(exception.getCode()) ? HttpStatus.CONFLICT
+                : exception.getCode().endsWith("_NOT_FOUND") ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST;
         return ResponseEntity.status(status)
                 .body(new ApiResponse<>(exception.getCode(), exception.getMessage(), null, null));
     }

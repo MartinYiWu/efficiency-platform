@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.aiep.aihub.application.management.AiRagDebugService;
+import com.aiep.aihub.application.memory.MemoryActorProvider;
+import com.aiep.aihub.application.operation.OperationActor;
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentDefinitionPO;
 import com.aiep.aihub.repository.management.AiManagementPOs.AgentVersionPO;
@@ -42,7 +44,11 @@ class AiRagDebugControllerTest {
     private final AiManagementMappers repository = mock(AiManagementMappers.class);
     private final AiInvokeFacade ai = mock(AiInvokeFacade.class);
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    private final AiRagDebugService service = new AiRagDebugService(repository, ai, jdbc, new ObjectMapper());
+    private final MemoryActorProvider actors = new MemoryActorProvider() {
+        public OperationActor current() { return new OperationActor("synthetic-tenant", "synthetic-user"); }
+        public OperationActor revalidate(OperationActor actor) { return actor; }
+    };
+    private final AiRagDebugService service = new AiRagDebugService(repository, ai, jdbc, new ObjectMapper(), actors);
     private MockMvc mvc;
 
     @BeforeEach
@@ -121,12 +127,52 @@ class AiRagDebugControllerTest {
 
     @Test
     void corruptStoredResultRemainsAnInternalFailure() {
-        when(jdbc.query(eq("SELECT response_json FROM ai_rag_debug_run WHERE id=?"),
-                org.mockito.ArgumentMatchers.<ResultSetExtractor<String>>any(), eq("corrupt-run")))
+        when(jdbc.query(org.mockito.ArgumentMatchers.contains("memory_context.scope.tenant_id"),
+                org.mockito.ArgumentMatchers.<ResultSetExtractor<String>>any(), eq("corrupt-run"), eq("synthetic-tenant"), eq("synthetic-user")))
                 .thenReturn("{invalid-json");
 
         assertThatThrownBy(() -> service.get("corrupt-run"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("AI_RAG_DEBUG_RESULT_INVALID");
+    }
+
+    @Test
+    void forwardsAuthenticatedTaskOnlyScopeInsteadOfDevelopmentIdentity() throws Exception {
+        when(repository.isIndexReleaseReady("index-retired")).thenReturn(true);
+        var json = new ObjectMapper();
+        var response = json.readValue("{\"contract_version\":\"customer-service-rag-debug-view/1\",\"debug_run_id\":\"debug-run\",\"status\":\"SUCCEEDED\"}", com.aiep.platformai.api.dto.CustomerServiceDebugView.class);
+        when(ai.debugCustomerServiceRag(org.mockito.ArgumentMatchers.any())).thenReturn(response);
+        service.execute(json.readValue(REQUEST, AiRagDebugService.Request.class));
+        var captured = org.mockito.ArgumentCaptor.forClass(com.aiep.platformai.api.dto.CustomerServiceDebugRequest.class);
+        org.mockito.Mockito.verify(ai).debugCustomerServiceRag(captured.capture());
+        var tree = json.valueToTree(captured.getValue());
+        org.junit.jupiter.api.Assertions.assertEquals("synthetic-tenant", tree.path("tenant_id").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("synthetic-user", tree.at("/memory_context/scope/user_id").asText());
+        org.junit.jupiter.api.Assertions.assertEquals("TASK_ONLY", tree.at("/memory_context/scope/session_kind").asText());
+        org.junit.jupiter.api.Assertions.assertTrue(tree.at("/memory_context/scope/session_id").isNull());
+    }
+
+    @Test
+    void storedDebugLookupUsesExactAuthenticatedTenantAndUser() {
+        assertThatThrownBy(() -> service.get("owned-run")).hasMessageContaining("RAG 调试记录不存在");
+        org.mockito.Mockito.verify(jdbc).query(org.mockito.ArgumentMatchers.argThat(sql ->
+                sql.contains("memory_context.scope.tenant_id") && sql.contains("memory_context.scope.user_id") && sql.contains("AS BINARY")),
+                org.mockito.ArgumentMatchers.<ResultSetExtractor<String>>any(), eq("owned-run"), eq("synthetic-tenant"), eq("synthetic-user"));
+    }
+
+    @Test
+    void originalSessionRevokedDuringDebugCannotPersistOrReturnOutput() throws Exception {
+        when(repository.isIndexReleaseReady("index-retired")).thenReturn(true);
+        var json = new ObjectMapper();
+        var response = json.readValue("{\"debug_run_id\":\"debug-run\",\"status\":\"SUCCEEDED\"}", com.aiep.platformai.api.dto.CustomerServiceDebugView.class);
+        when(ai.debugCustomerServiceRag(org.mockito.ArgumentMatchers.any())).thenReturn(response);
+        var provider = mock(MemoryActorProvider.class);
+        var actor = new OperationActor("synthetic-tenant", "synthetic-user", "original-session");
+        when(provider.current()).thenReturn(actor);
+        when(provider.revalidate(actor)).thenThrow(new IllegalStateException("original session revoked"));
+        var scoped = new AiRagDebugService(repository, ai, jdbc, json, provider);
+        assertThatThrownBy(() -> scoped.execute(json.readValue(REQUEST, AiRagDebugService.Request.class)))
+                .hasMessage("original session revoked");
+        verifyNoInteractions(jdbc);
     }
 }

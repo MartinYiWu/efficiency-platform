@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrAuditArchiveMapper">
+ <insert id="archive">INSERT INTO ai_hr_audit_archive(id,tenant_id,action,actor_id,subject_ref,department_id,occurred_at,archived_at) SELECT a.id,a.tenant_id,a.action,a.actor_id,a.subject_ref,a.department_id,a.occurred_at,#{now} FROM ai_hr_audit a WHERE a.occurred_at&lt;=#{before} AND NOT EXISTS (SELECT 1 FROM ai_hr_audit_archive c WHERE c.id=a.id AND c.tenant_id=a.tenant_id)</insert>
+ <delete id="removeArchivedHot">DELETE FROM ai_hr_audit WHERE occurred_at&lt;=#{before} AND EXISTS (SELECT 1 FROM ai_hr_audit_archive c WHERE c.id=ai_hr_audit.id AND c.tenant_id=ai_hr_audit.tenant_id)</delete>
+ <delete id="expireCold">DELETE FROM ai_hr_audit_archive WHERE occurred_at&lt;=#{before}</delete>
+</mapper>

@@ -1,5 +1,5 @@
-export { OperationProgress } from './OperationProgress';
-export { StreamingAssistantContent } from './StreamingAssistantContent';
+export { default as OperationProgress } from './OperationProgress.vue';
+export { default as StreamingAssistantContent } from './StreamingAssistantContent.vue';
 export { useOperationChat } from './useOperationChat';
 export type { OperationChatMessage, OperationChatState } from './messageReducer';
 export type { UseOperationChatOptions } from './useOperationChat';

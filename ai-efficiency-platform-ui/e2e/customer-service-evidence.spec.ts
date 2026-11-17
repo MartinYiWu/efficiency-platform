@@ -360,11 +360,11 @@ for (const width of [1440, 1024, 390]) {
       if (url.includes('agents/a'))
         await expect(page.getByText('绑定索引落后于知识库当前发布索引')).toBeVisible();
       if (url.includes('rag-debug')) {
-        await page.getByRole('combobox').nth(0).click();
+        await page.locator('.ant-select-selector').nth(0).click();
         await page.getByText('证据客服', { exact: true }).last().click();
-        await page.getByRole('combobox').nth(1).click();
+        await page.locator('.ant-select-selector').nth(1).click();
         await page.getByText('TEST · rel', { exact: true }).click();
-        await page.getByRole('combobox').nth(3).click();
+        await page.locator('.ant-select-selector').nth(3).click();
         await page.getByText('evidence-policy@1', { exact: true }).click();
         await page.getByPlaceholder('知识库 ID').fill('kb');
         await page.getByPlaceholder('索引 Release ID').fill('index');
@@ -395,12 +395,14 @@ for (const width of [1440, 1024, 390]) {
         await expect(page.getByText(/原文偏移.*\[起,止\)/)).toContainText('[20, 24)');
       }
       await expect
-        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+        .poll(() =>
+          page.evaluate(() => globalThis.document.documentElement.scrollWidth <= innerWidth),
+        )
         .toBe(true);
     }
     await page.goto('/ai-assistants/customer-service/chat');
     if (width < 768) {
-      await page.getByRole('button', { name: /^history 历史会话$/ }).click();
+      await page.getByRole('button', { name: '历史会话', exact: true }).click();
       await page
         .getByRole('dialog', { name: '历史会话' })
         .getByRole('button', { name: '历史会话', exact: true })
@@ -420,7 +422,9 @@ for (const width of [1440, 1024, 390]) {
     await expect(page.getByRole('dialog')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect(page.getByRole('log')).not.toContainText(/Rerank|Prompt|BUDGET_EXCLUDED/);
     await expect
-      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .poll(() =>
+        page.evaluate(() => globalThis.document.documentElement.scrollWidth <= innerWidth),
+      )
       .toBe(true);
   });
 }

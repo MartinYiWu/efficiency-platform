@@ -2,6 +2,8 @@ package com.aiep.aihub.application.management;
 
 import com.aiep.aihub.repository.management.AiManagementMappers;
 import com.aiep.aihub.repository.management.AiReleasePO;
+import com.aiep.aihub.application.memory.MemoryActorProvider;
+import com.aiep.aihub.application.memory.ConversationScopeResolver;
 import com.aiep.platformai.api.AiInvokeFacade;
 import com.aiep.platformai.api.dto.CustomerServiceDebugRequest;
 import com.aiep.platformai.api.dto.CustomerServiceDebugView;
@@ -18,12 +20,24 @@ public class AiRagDebugService {
     private final AiInvokeFacade ai;
     private final JdbcTemplate jdbc;
     private final ObjectMapper objectMapper;
+    private final MemoryActorProvider actors;
+    private final ConversationScopeResolver scopes = new ConversationScopeResolver();
 
     public AiRagDebugService(AiManagementMappers repository, AiInvokeFacade ai, JdbcTemplate jdbc, ObjectMapper objectMapper) {
-        this.repository = repository; this.ai = ai; this.jdbc = jdbc; this.objectMapper = objectMapper;
+        this(repository, ai, jdbc, objectMapper, new MemoryActorProvider() {
+            public com.aiep.aihub.application.operation.OperationActor current() { throw new IllegalStateException("MEMORY_IDENTITY_REQUIRED"); }
+            public com.aiep.aihub.application.operation.OperationActor revalidate(com.aiep.aihub.application.operation.OperationActor actor) { throw new IllegalStateException("MEMORY_IDENTITY_REQUIRED"); }
+        });
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public AiRagDebugService(AiManagementMappers repository, AiInvokeFacade ai, JdbcTemplate jdbc,
+            ObjectMapper objectMapper, MemoryActorProvider actors) {
+        this.repository = repository; this.ai = ai; this.jdbc = jdbc; this.objectMapper = objectMapper; this.actors = actors;
     }
 
     public CustomerServiceDebugView execute(Request request) {
+        var actor = actors.current();
         var agent = repository.findAgentByKey(request.agentKey());
         var version = repository.findAgentVersion(request.agentVersionId());
         var rag = repository.findRagPolicy(request.ragPolicyVersionId());
@@ -39,19 +53,25 @@ public class AiRagDebugService {
                 || request.knowledgeBindings().stream().anyMatch(item -> !repository.isIndexReleaseReady(item.indexReleaseId())))
             throw new AiManagementException("AI_RAG_DEBUG_INDEX_NOT_READY", "调试知识索引未就绪，请选择已发布且可用的索引");
         CustomerServiceDebugRequest agentRequest = new CustomerServiceDebugRequest(
-                "customer-service-rag-debug/1", request.agentKey(), "dev", request.question(), release.id(), request.agentVersionId(),
+                "customer-service-rag-debug/1", request.agentKey(), actor.tenantId(), request.question(), release.id(), request.agentVersionId(),
                 request.ragPolicyVersionId(), request.knowledgeBindings().stream()
-                        .map(item -> new CustomerServiceDebugRequest.KnowledgeBinding(item.knowledgeBaseId(), item.indexReleaseId())).toList());
+                        .map(item -> new CustomerServiceDebugRequest.KnowledgeBinding(item.knowledgeBaseId(), item.indexReleaseId())).toList(),
+                scopes.envelope(scopes.taskOnly(actor, "customer-service")));
         CustomerServiceDebugView response = ai.debugCustomerServiceRag(agentRequest);
+        actors.revalidate(actor);
         jdbc.update("INSERT INTO ai_rag_debug_run (id,agent_key,agent_version_id,rag_policy_version_id,question,request_json,response_json,status,created_by,created_at) "
-                        + "VALUES (?,?,?,?,?,CAST(? AS JSON),CAST(? AS JSON),?,'1',NOW(6))",
+                        + "VALUES (?,?,?,?,?,CAST(? AS JSON),CAST(? AS JSON),?,?,NOW(6))",
                 response.debugRunId(), request.agentKey(), request.agentVersionId(), request.ragPolicyVersionId(), request.question(),
-                json(agentRequest), json(response), response.status());
+                json(agentRequest), json(response), response.status(), actor.userId());
         return response;
     }
 
     public CustomerServiceDebugView get(String id) {
-        String value = jdbc.query("SELECT response_json FROM ai_rag_debug_run WHERE id=?", rs -> rs.next() ? rs.getString(1) : null, id);
+        var actor = actors.current();
+        String value = jdbc.query("SELECT response_json FROM ai_rag_debug_run WHERE id=? "
+                + "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.memory_context.scope.tenant_id')) AS BINARY)=CAST(? AS BINARY) "
+                + "AND CAST(JSON_UNQUOTE(JSON_EXTRACT(request_json,'$.memory_context.scope.user_id')) AS BINARY)=CAST(? AS BINARY)",
+                rs -> rs.next() ? rs.getString(1) : null, id, actor.tenantId(), actor.userId());
         if (value == null) throw new AiManagementException("AI_RAG_DEBUG_RUN_NOT_FOUND", "RAG 调试记录不存在");
         try { return objectMapper.readValue(value, CustomerServiceDebugView.class); }
         catch (JsonProcessingException error) { throw new IllegalStateException("AI_RAG_DEBUG_RESULT_INVALID", error); }

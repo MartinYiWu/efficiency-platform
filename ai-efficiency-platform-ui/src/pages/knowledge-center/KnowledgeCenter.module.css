@@ -1,32 +1,38 @@
 .page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
   min-width: 0;
 }
 .header {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 24px;
+  gap: 12px;
   min-width: 0;
 }
 .header > div:first-child {
   min-width: 0;
 }
+.page .header h2,
 .header :global(h2.ant-typography) {
-  margin: 0 0 8px;
-  color: var(--ui-text);
-  font-size: 28px;
-  line-height: 1.35;
+  margin: 0;
+  color: var(--v1-text);
+  font-size: 22px;
+  line-height: normal;
   overflow-wrap: anywhere;
+}
+.header p {
+  margin: 4px 0 0;
+  color: var(--v1-text-muted);
 }
 .section {
   min-width: 0;
-  padding: 24px;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  padding: 16px;
+  background: var(--v1-bg-card);
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
+  box-shadow: var(--v1-shadow-card);
 }
 .sectionHeading {
   display: flex;
@@ -34,14 +40,14 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 20px;
-  color: var(--ui-muted);
+  margin-bottom: 14px;
+  color: var(--v1-text-muted);
   overflow-wrap: anywhere;
 }
 .sectionHeading :global(h3.ant-typography) {
   margin: 0;
-  color: var(--ui-text);
-  font-size: 20px;
+  color: var(--v1-text);
+  font-size: 16px;
 }
 .sectionHeading > div > :global(.ant-typography-secondary) {
   display: block;
@@ -50,7 +56,7 @@
 .filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
 }
 .search {
@@ -65,17 +71,18 @@
 .catalogFilters,
 .catalogResults {
   min-width: 0;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  background: var(--v1-bg-card);
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
+  box-shadow: var(--v1-shadow-card);
 }
 .catalogFilters {
-  padding: 20px 12px;
+  padding: 16px;
 }
 .catalogFilters > strong {
   display: block;
   padding: 0 12px 16px;
-  color: var(--ui-text);
+  color: var(--v1-text);
   font-size: 16px;
 }
 .filterItem {
@@ -84,10 +91,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px;
-  color: var(--ui-muted);
+  color: var(--v1-text-muted);
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--v1-radius);
   font: inherit;
   font-size: 14px;
   text-align: left;
@@ -95,26 +102,26 @@
 }
 .filterItem:hover,
 .filterActive {
-  color: var(--ui-primary);
-  background: var(--ui-canvas);
+  color: var(--v1-primary);
+  background: var(--v1-bg-page);
 }
 .filterActive {
   font-weight: 600;
 }
 .filterItem:focus-visible {
-  outline: 2px solid var(--ui-primary);
+  outline: 2px solid var(--v1-primary);
   outline-offset: -2px;
 }
 .catalogResults {
   overflow: hidden;
-  padding: 20px 20px 4px;
+  padding: 16px 16px 0;
 }
 .catalogResults .filters {
   justify-content: space-between;
-  padding-bottom: 20px;
+  padding-bottom: 16px;
 }
 .resultCount {
-  color: var(--ui-muted);
+  color: var(--v1-text-muted);
   font-size: 13px;
 }
 .baseName {
@@ -132,7 +139,7 @@
 }
 .baseName strong {
   overflow: hidden;
-  color: var(--ui-text);
+  color: var(--v1-text);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -140,7 +147,7 @@
 .baseName small {
   overflow: hidden;
   margin-top: 4px;
-  color: var(--ui-muted);
+  color: var(--v1-text-muted);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -151,36 +158,27 @@
   height: 32px;
   flex: none;
   place-items: center;
-  color: var(--ui-primary);
-  background: var(--ui-canvas);
-  border-radius: 8px;
-  font-size: 20px;
+  color: var(--v1-primary);
+  background: var(--v1-bg-page);
+  border-radius: var(--v1-radius);
+  font-size: 22px;
 }
 .clickableRow {
   cursor: pointer;
 }
 .clickableRow:hover .baseName strong {
-  color: var(--ui-primary);
-}
-.page :global(.ant-table-thead > tr > th) {
-  color: var(--ui-muted);
-  background: var(--ui-surface-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-.page :global(.ant-table-tbody > tr > td) {
-  padding-block: 16px;
+  color: var(--v1-primary);
 }
 .split {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  gap: 24px;
+  gap: 16px;
   min-width: 0;
 }
 .directory {
   min-width: 0;
   padding-right: 20px;
-  border-right: 1px solid var(--ui-border);
+  border-right: 1px solid var(--v1-border);
 }
 .directoryHeading {
   display: flex;
@@ -214,23 +212,23 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 20px;
-  padding: 24px;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  gap: 12px;
+  padding: 16px 18px;
+  background: var(--v1-bg-card);
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
 }
 .versionUploadBar > div:first-child {
   min-width: 0;
   flex: 1 1 260px;
 }
 .versionUploadBar strong {
-  color: var(--ui-text);
+  color: var(--v1-text);
   font-size: 16px;
 }
 .versionUploadBar p {
   margin: 8px 0 0;
-  color: var(--ui-muted);
+  color: var(--v1-text-muted);
   font-size: 13px;
 }
 .versionItem {
@@ -247,7 +245,7 @@
   .directory {
     padding: 0 0 20px;
     border-right: 0;
-    border-bottom: 1px solid var(--ui-border);
+    border-bottom: 1px solid var(--v1-border);
   }
   .catalogLayout {
     grid-template-columns: 190px minmax(0, 1fr);
@@ -260,7 +258,7 @@
     gap: 16px;
   }
   .header :global(h2.ant-typography) {
-    font-size: 24px;
+    font-size: 22px;
   }
   .section,
   .versionUploadBar {

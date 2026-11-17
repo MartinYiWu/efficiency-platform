@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrWorkbenchMapper">
+ <sql id="departments"><foreach collection="departments" item="d" open="(" separator="," close=")">#{d}</foreach></sql>
+ <sql id="candidateScope">tenant_id=#{tenant} AND department_id IN <include refid="departments"/> AND status='ACTIVE' AND expires_at&gt;#{now}<if test="!candidateIds.contains(&quot;*&quot;)"> AND id IN <foreach collection="candidateIds" item="cid" open="(" separator="," close=")">#{cid}</foreach></if></sql>
+ <sql id="positionScope">tenant_id=#{tenant} AND department_id IN <include refid="departments"/><if test="!positionIds.contains(&quot;*&quot;)"> AND id IN <foreach collection="positionIds" item="pid" open="(" separator="," close=")">#{pid}</foreach></if></sql>
+ <sql id="resultScope">r.tenant_id=#{tenant} AND r.status='CURRENT' AND r.candidate_id IN (SELECT id FROM ai_hr_candidate WHERE <include refid="candidateScope"/>) AND EXISTS(SELECT 1 FROM ai_hr_position WHERE <include refid="positionScope"/> AND id=r.position_id AND config_version=r.config_version)</sql>
+ <select id="scopedCounts" resultType="com.aiep.aihub.repository.hr.HrWorkbenchMapper$Counts">SELECT
+ (SELECT COUNT(*) FROM ai_hr_candidate WHERE <include refid="candidateScope"/>) AS candidates,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.business_status='SCORED') AS scored,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.business_status='FILTERED') AS filtered,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.business_status='REVIEW_REQUIRED') AS review_required,
+ (SELECT COUNT(*) FROM ai_hr_position WHERE <include refid="positionScope"/> AND status='DRAFT') AS draft_positions,
+ (SELECT COUNT(*) FROM ai_hr_batch_item WHERE tenant_id=#{tenant} AND status='NEEDS_REVIEW' AND candidate_id IN (SELECT id FROM ai_hr_candidate WHERE <include refid="candidateScope"/>)) AS pending_review
+ </select>
+ <select id="scopedPositions" resultType="com.aiep.aihub.api.hr.HrWorkbenchContracts$PositionProgress">SELECT p.id,p.name,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.position_id=p.id) AS matched,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.position_id=p.id AND r.business_status='FILTERED') AS filtered,
+ (SELECT COUNT(*) FROM ai_hr_matching_result r WHERE <include refid="resultScope"/> AND r.position_id=p.id AND r.business_status='REVIEW_REQUIRED') AS review_required
+ FROM ai_hr_position p WHERE <include refid="positionScope"/> ORDER BY p.name,p.id LIMIT 20</select>
+ <select id="acquired" resultType="long">SELECT COUNT(*) FROM ai_hr_candidate WHERE <include refid="candidateScope"/> AND acquired_at&gt;=#{start} AND acquired_at&lt;#{end}</select>
+</mapper>
+

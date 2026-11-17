@@ -1,5 +1,7 @@
 # Agent 侧 SQL 变更包规范
 
+RF02 增量候选：[MySQL 当前指纹与密文 journal](bootstrap/memory_context_refresh_v1/00-变更说明.md)、[PG 等待栅栏与候选回执](bootstrap/memory_thread_refresh_v1/00-变更说明.md)。各含独立五资产，不修改已审 scrub/capability 包；未执行共享 DDL，需按具体哈希独立审查后另行授权。
+
 本目录只管理 `efficiency-platform-agent` 纯 Agent 侧数据库变更。它不定义、修改或代管 Java 侧表结构；Agent 数据必须使用独立命名空间，禁止与 Java 表混写。
 
 详细规则见[数据库与 SQL 规范](../docs/standards/05-数据库与SQL规范.md)，评审材料使用[SQL 变更说明模板](../docs/templates/SQL变更说明模板.md)。本文件描述的是未来变更的落地协议，不代表当前存在待执行脚本，也不授权执行任何 DDL 或数据写入。

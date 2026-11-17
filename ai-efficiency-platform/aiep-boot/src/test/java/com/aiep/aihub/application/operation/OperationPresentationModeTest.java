@@ -97,7 +97,10 @@ class OperationPresentationModeTest {
                 runMapper,
                 artifactMapper,
                 aiInvokeFacade,
-                objectMapper);
+                objectMapper, new com.aiep.aihub.application.memory.MemoryActorProvider() {
+                    public OperationActor current() { return new OperationActor("dev", "1"); }
+                    public OperationActor revalidate(OperationActor actor) { return actor; }
+                });
         Map<String, Object> deliverable = Map.of(
                 "deliverable_kind", "ranked_digest",
                 "platform", "research",
@@ -121,6 +124,9 @@ class OperationPresentationModeTest {
         ArgumentCaptor<OperationAgentMessageRequest> requestCaptor =
                 ArgumentCaptor.forClass(OperationAgentMessageRequest.class);
         verify(aiInvokeFacade).submitOperationMessage(eq("conversation-1"), requestCaptor.capture());
+        assertEquals("DISABLED", requestCaptor.getValue().memoryContext().memoryMode());
+        assertEquals("operations", requestCaptor.getValue().memoryContext().scope().topLevelAgentId());
+        assertEquals("conversation-1", requestCaptor.getValue().memoryContext().scope().sessionId());
         assertEquals(1, requestCaptor.getValue().artifacts().size());
         assertEquals("ranked_digest", requestCaptor.getValue().artifacts().getFirst().artifactType());
         assertEquals("# AI 热点汇总\n\n1. 第一条热点",

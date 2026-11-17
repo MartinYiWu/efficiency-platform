@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...core.paid_budget import PaidBudgetError
+from ..paid_http import paid_error_code
+
 
 class RerankProviderError(RuntimeError):
     code = "RERANK_PROVIDER_FAILED"
@@ -31,6 +34,9 @@ class DashScopeRerankProvider:
                 for item in response.results
             )
         except Exception as error:
+            code = paid_error_code(error)
+            if code is not None:
+                raise PaidBudgetError(code, "重排已被付费预算保护阻止") from None
             raise RerankProviderError("重排服务调用失败") from error
 
 

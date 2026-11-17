@@ -1,0 +1,16 @@
+[
+  {
+    "key": "mixed",
+    "runId": "59322052-b757-4213-8972-ec733373a1de",
+    "messageCount": 2,
+    "citationCount": 6,
+    "identicalReadback": true
+  },
+  {
+    "key": "general",
+    "runId": "16b294da-d4c6-4cae-8009-ee36d0774a45",
+    "messageCount": 2,
+    "citationCount": 0,
+    "identicalReadback": true
+  }
+]

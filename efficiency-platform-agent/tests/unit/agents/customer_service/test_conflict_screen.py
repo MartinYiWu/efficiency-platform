@@ -56,7 +56,7 @@ async def test_cross_document_conflict_contract(verdict, invalid, blocked):
         parents, question="问题", gateway=Gateway(), members=members, stage_bound=True
     )
     assert result.blocked is blocked
-    assert calls == ["conflict_screen"] * (2 if invalid else 1)
+    assert calls == ["conflict_screen"]
     if invalid:
         assert result.errors == ("CONFLICT_QUOTE_INVALID",)
 

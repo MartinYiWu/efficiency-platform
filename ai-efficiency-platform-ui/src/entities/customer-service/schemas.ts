@@ -116,7 +116,11 @@ export const pageSchema = <T extends z.ZodType>(item: T) =>
     .object({ items: z.array(item), page: z.number(), pageSize: z.number(), total: z.number() })
     .strict();
 const progressPayload = z
-  .object({ stage: z.string(), phase: z.enum(['STARTED', 'COMPLETED']).optional(), summary: z.string() })
+  .object({
+    stage: z.string(),
+    phase: z.enum(['STARTED', 'COMPLETED']).optional(),
+    summary: z.string(),
+  })
   .strict();
 export const publicProgressSchema = z
   .object({

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrTalentSemanticMapper">
+ <sql id="columns">id,tenant_id,actor_id,status,input_json,result_json,idempotency_key,request_hash,created_at,updated_at</sql>
+ <insert id="insert">INSERT INTO ai_hr_semantic_search_job(id,tenant_id,actor_id,status,input_json,result_json,idempotency_key,request_hash,created_at,updated_at) VALUES(#{id},#{tenantId},#{actorId},#{status},#{inputJson},#{resultJson},#{idempotencyKey},#{requestHash},#{createdAt},#{updatedAt})</insert>
+ <select id="find" resultType="com.aiep.aihub.repository.hr.HrTalentSemanticMapper$Row">SELECT <include refid="columns"/> FROM ai_hr_semantic_search_job WHERE tenant_id=#{tenant} AND id=#{id}</select>
+ <select id="replay" resultType="com.aiep.aihub.repository.hr.HrTalentSemanticMapper$Row">SELECT <include refid="columns"/> FROM ai_hr_semantic_search_job WHERE tenant_id=#{tenant} AND actor_id=#{actor} AND idempotency_key=#{key}</select>
+ <update id="update">UPDATE ai_hr_semantic_search_job SET status=#{status},input_json=#{input},result_json=#{result},updated_at=#{now} WHERE tenant_id=#{tenant} AND id=#{id} AND status=#{expected}</update>
+ <update id="recover">UPDATE ai_hr_semantic_search_job SET status='FAILED',updated_at=CURRENT_TIMESTAMP WHERE status IN ('PREFLIGHT','RUNNING')</update>
+<insert id="source">INSERT INTO ai_hr_semantic_search_source(tenant_id,job_id,candidate_id) VALUES(#{tenant},#{job},#{candidate})</insert><delete id="deleteJobsForSource">DELETE FROM ai_hr_semantic_search_job WHERE tenant_id=#{tenant} AND id IN (SELECT job_id FROM ai_hr_semantic_search_source WHERE tenant_id=#{tenant} AND candidate_id=#{candidate})</delete><delete id="deleteSourceRefs">DELETE FROM ai_hr_semantic_search_source WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete></mapper>
+

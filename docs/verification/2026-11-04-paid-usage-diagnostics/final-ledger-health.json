@@ -1,0 +1,20 @@
+{
+  "ledger_unchanged": true,
+  "all_authorizations_stopped": true,
+  "http_attempts": 21,
+  "accounted_cny": 3.106252,
+  "inflight": 0,
+  "new_paid_calls": 0,
+  "health": [
+    {
+      "origin": "http://127.0.0.1:8080",
+      "http": 200,
+      "status": "UP"
+    },
+    {
+      "origin": "http://127.0.0.1:8090",
+      "http": 200,
+      "status": "ok"
+    }
+  ]
+}

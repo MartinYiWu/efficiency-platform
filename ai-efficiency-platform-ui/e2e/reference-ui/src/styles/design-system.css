@@ -1,0 +1,495 @@
+/**
+ * AI 效能平台 - 设计系统
+ * 基于 UI UX Pro Max 数据库优化
+ * 风格：Soft UI Evolution + AI Native UI + Glassmorphism
+ */
+
+/* ==================== Design Tokens ==================== */
+:root {
+  /* === AI Purple 主色系 (来自 UI Pro Max: AI/Chatbot Platform) === */
+  --ai-purple-50: #FAF5FF;
+  --ai-purple-100: #F3E8FF;
+  --ai-purple-200: #E9D5FF;
+  --ai-purple-300: #D8B4FE;
+  --ai-purple-400: #C084FC;
+  --ai-purple-500: #A855F7;
+  --ai-purple-600: #9333EA;
+  --ai-purple-700: #7C3AED;
+  --ai-purple-800: #6B21A8;
+  --ai-purple-900: #581C87;
+
+  /* === 辅助色 - 青色 CTA === */
+  --ai-cyan-50: #ECFEFF;
+  --ai-cyan-100: #CFFAFE;
+  --ai-cyan-200: #A5F3FC;
+  --ai-cyan-300: #67E8F9;
+  --ai-cyan-400: #22D3EE;
+  --ai-cyan-500: #06B6D4;
+  --ai-cyan-600: #0891B2;
+
+  /* === 语义色 === */
+  --color-success: #10B981;
+  --color-success-bg: #D1FAE5;
+  --color-warning: #F59E0B;
+  --color-warning-bg: #FEF3C7;
+  --color-error: #EF4444;
+  --color-error-bg: #FEE2E2;
+  --color-info: #3B82F6;
+  --color-info-bg: #DBEAFE;
+
+  /* === 中性色 === */
+  --gray-50: #F9FAFB;
+  --gray-100: #F3F4F6;
+  --gray-200: #E5E7EB;
+  --gray-300: #D1D5DB;
+  --gray-400: #9CA3AF;
+  --gray-500: #6B7280;
+  --gray-600: #4B5563;
+  --gray-700: #374151;
+  --gray-800: #1F2937;
+  --gray-900: #111827;
+
+  /* === 主题变量 (Light Mode) === */
+  --primary-color: var(--ai-purple-600);
+  --primary-hover: var(--ai-purple-700);
+  --primary-active: var(--ai-purple-800);
+  --primary-bg: var(--ai-purple-50);
+  --primary-border: var(--ai-purple-200);
+
+  --cta-color: var(--ai-cyan-500);
+  --cta-hover: var(--ai-cyan-600);
+
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-600);
+  --text-tertiary: var(--gray-400);
+  --text-inverse: #FFFFFF;
+
+  --bg-primary: #FFFFFF;
+  --bg-secondary: var(--gray-50);
+  --bg-tertiary: var(--gray-100);
+  --bg-elevated: #FFFFFF;
+
+  --border-primary: var(--gray-200);
+  --border-secondary: var(--gray-100);
+
+  /* === 阴影系统 (Soft UI Evolution) === */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  --shadow-inner: inset 0 2px 4px 0 rgb(0 0 0 / 0.05);
+  
+  /* AI 紫色光晕阴影 */
+  --shadow-glow: 0 0 20px -5px var(--ai-purple-400);
+  --shadow-glow-lg: 0 0 40px -10px var(--ai-purple-400);
+
+  /* === 圆角系统 === */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* === 间距系统 === */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* === 动画时长 (UI Pro Max: 200-300ms) === */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+  --easing-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-in: cubic-bezier(0.4, 0, 1, 1);
+  --easing-out: cubic-bezier(0, 0, 0.2, 1);
+  --easing-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* === 布局 === */
+  --layout-header-height: 64px;
+  --layout-sider-width: 260px;
+  --layout-sider-collapsed-width: 80px;
+  --layout-content-max-width: 1400px;
+
+  /* === Glassmorphism === */
+  --glass-bg: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.3);
+  --glass-blur: 12px;
+}
+
+/* === Dark Mode === */
+[data-theme="dark"] {
+  --primary-color: var(--ai-purple-500);
+  --primary-hover: var(--ai-purple-400);
+  --primary-active: var(--ai-purple-600);
+  --primary-bg: rgba(124, 58, 237, 0.15);
+  --primary-border: rgba(124, 58, 237, 0.3);
+
+  --text-primary: var(--gray-100);
+  --text-secondary: var(--gray-400);
+  --text-tertiary: var(--gray-500);
+
+  --bg-primary: var(--gray-900);
+  --bg-secondary: var(--gray-800);
+  --bg-tertiary: var(--gray-700);
+  --bg-elevated: var(--gray-800);
+
+  --border-primary: var(--gray-700);
+  --border-secondary: var(--gray-800);
+
+  --glass-bg: rgba(31, 41, 55, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.1);
+}
+
+/* ==================== 基础样式重置 ==================== */
+
+/* 覆盖 Ant Design 主色 */
+.ant-btn-primary {
+  background: linear-gradient(135deg, var(--ai-purple-600) 0%, var(--ai-purple-700) 100%) !important;
+  border-color: var(--ai-purple-600) !important;
+  box-shadow: var(--shadow-sm), 0 2px 8px -2px var(--ai-purple-400) !important;
+  transition: all var(--duration-normal) var(--easing-default) !important;
+}
+
+.ant-btn-primary:hover {
+  background: linear-gradient(135deg, var(--ai-purple-500) 0%, var(--ai-purple-600) 100%) !important;
+  border-color: var(--ai-purple-500) !important;
+  box-shadow: var(--shadow-md), 0 4px 12px -2px var(--ai-purple-400) !important;
+  transform: translateY(-1px);
+}
+
+.ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+/* 链接色 */
+a {
+  color: var(--primary-color);
+  transition: color var(--duration-fast) var(--easing-default);
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+/* ==================== 组件样式增强 ==================== */
+
+/* 卡片样式 - Glassmorphism + Soft UI */
+.ant-card {
+  border-radius: var(--radius-xl) !important;
+  background: rgba(255, 255, 255, 0.75) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(0, 0, 0, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  transition: all var(--duration-normal) var(--easing-default) !important;
+  overflow: hidden;
+}
+
+.ant-card:hover {
+  background: rgba(255, 255, 255, 0.85) !important;
+  box-shadow: 
+    0 4px 12px rgba(0, 0, 0, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9) !important;
+  transform: translateY(-2px);
+}
+
+.ant-card-head {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+  padding: var(--space-4) var(--space-6) !important;
+  background: rgba(255, 255, 255, 0.4) !important;
+}
+
+.ant-card-head-title {
+  font-weight: 600 !important;
+  font-size: 15px !important;
+  color: var(--text-primary) !important;
+}
+
+.ant-card-body {
+  padding: var(--space-6) !important;
+}
+
+/* 侧边栏美化 */
+.ant-layout-sider {
+  background: linear-gradient(180deg, var(--gray-900) 0%, #1a1a2e 100%) !important;
+}
+
+.ant-menu-dark {
+  background: transparent !important;
+}
+
+.ant-menu-dark .ant-menu-item-selected {
+  background: linear-gradient(90deg, var(--ai-purple-600) 0%, transparent 100%) !important;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0 !important;
+  margin-right: var(--space-3);
+}
+
+.ant-menu-dark .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* 标签样式 */
+.ant-tag {
+  border-radius: var(--radius-md) !important;
+  font-weight: 500 !important;
+  border: none !important;
+  padding: 2px 10px !important;
+}
+
+/* 输入框样式 */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-picker {
+  border-radius: var(--radius-lg) !important;
+  border-color: var(--border-primary) !important;
+  transition: all var(--duration-fast) var(--easing-default) !important;
+}
+
+.ant-input:focus,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-select-focused .ant-select-selector,
+.ant-picker-focused {
+  border-color: var(--primary-color) !important;
+  box-shadow: 0 0 0 3px var(--primary-bg) !important;
+}
+
+/* 表格样式 - Glassmorphism */
+.ant-table {
+  border-radius: var(--radius-xl) !important;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7) !important;
+  backdrop-filter: blur(8px) !important;
+  -webkit-backdrop-filter: blur(8px) !important;
+}
+
+.ant-table-container {
+  background: transparent !important;
+}
+
+.ant-table-thead > tr > th {
+  background: rgba(249, 250, 251, 0.8) !important;
+  font-weight: 600 !important;
+  color: var(--text-secondary) !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+}
+
+.ant-table-tbody > tr > td {
+  background: transparent !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03) !important;
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: rgba(139, 92, 246, 0.04) !important;
+}
+
+/* Modal 美化 */
+.ant-modal-content {
+  border-radius: var(--radius-2xl) !important;
+  overflow: hidden;
+}
+
+.ant-modal-header {
+  border-bottom: 1px solid var(--border-secondary) !important;
+}
+
+/* 消息提示 */
+.ant-message-notice-content {
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-lg) !important;
+}
+
+/* ==================== 动画效果 ==================== */
+
+/* 淡入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn var(--duration-slow) var(--easing-out) forwards;
+}
+
+/* 脉冲动画 - AI 特效 */
+@keyframes pulse-ai {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(124, 58, 237, 0);
+  }
+}
+
+.animate-pulse-ai {
+  animation: pulse-ai 2s ease-in-out infinite;
+}
+
+/* 流光效果 */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary) 25%,
+    var(--bg-secondary) 50%,
+    var(--bg-tertiary) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* 浮动动画 */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+/* ==================== 工具类 ==================== */
+
+/* Glassmorphism 容器 */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+}
+
+/* AI 渐变背景 */
+.bg-ai-gradient {
+  background: linear-gradient(135deg, var(--ai-purple-600) 0%, #4F46E5 50%, var(--ai-cyan-500) 100%);
+}
+
+.bg-ai-gradient-soft {
+  background: linear-gradient(135deg, var(--ai-purple-50) 0%, #EEF2FF 50%, var(--ai-cyan-50) 100%);
+}
+
+/* AI 文字渐变 */
+.text-ai-gradient {
+  background: linear-gradient(135deg, var(--ai-purple-600) 0%, var(--ai-cyan-500) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 卡片悬浮效果 */
+.card-hover {
+  transition: all var(--duration-normal) var(--easing-default);
+  cursor: pointer;
+}
+
+.card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* AI 光晕效果 */
+.glow-ai {
+  box-shadow: var(--shadow-glow);
+}
+
+.glow-ai-lg {
+  box-shadow: var(--shadow-glow-lg);
+}
+
+/* 骨架屏 */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--gray-200) 25%,
+    var(--gray-100) 50%,
+    var(--gray-200) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-md);
+}
+
+/* 渐变边框 */
+.border-gradient {
+  position: relative;
+  background: var(--bg-primary);
+  border-radius: var(--radius-xl);
+}
+
+.border-gradient::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(135deg, var(--ai-purple-400), var(--ai-cyan-400));
+  border-radius: inherit;
+  z-index: -1;
+}
+
+/* 状态点 */
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.status-dot-success {
+  background-color: var(--color-success);
+  box-shadow: 0 0 8px var(--color-success);
+}
+
+.status-dot-warning {
+  background-color: var(--color-warning);
+  box-shadow: 0 0 8px var(--color-warning);
+}
+
+.status-dot-error {
+  background-color: var(--color-error);
+  box-shadow: 0 0 8px var(--color-error);
+}
+
+/* ==================== Prefers Reduced Motion ==================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+

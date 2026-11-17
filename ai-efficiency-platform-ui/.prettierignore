@@ -1,7 +1,13 @@
-.superpowers/
-node_modules/
-dist/
-coverage/
-playwright-report/
-playwright-report-agent/
-test-results/
+node_modules
+dist
+coverage
+pnpm-lock.yaml
+playwright-report
+test-results
+test-results-*
+.local-acceptance
+*.log
+
+# Keep the imported reference design source byte-for-byte auditable.
+src/app/styles/reference/*.css
+e2e/reference-ui/**/*.css

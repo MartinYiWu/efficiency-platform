@@ -76,10 +76,10 @@ def _assistant_content(
 class OperationRuntimeGraphBuilder:
     """只构建图程序，不创建 Harness 或运行第二条生命周期。"""
 
-    def __init__(self, agent: OperationAgent, submission_resolver: SubmissionResolver):
+    def __init__(self, agent: OperationAgent, submission_resolver: SubmissionResolver, *, checkpointer=None):
         self.agent = agent
         self.submission_resolver = submission_resolver
-        self.checkpointer = InMemorySaver()
+        self.checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
 
     def build(self):
         """模型输出和领域对象只留在节点局部变量，检查点仅含 JSON。"""

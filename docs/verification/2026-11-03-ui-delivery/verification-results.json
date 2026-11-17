@@ -1,0 +1,45 @@
+{
+  "date": "2026-11-03",
+  "unitComponent": {
+    "files": 41,
+    "passed": 206,
+    "failed": 0
+  },
+  "coveragePercent": {
+    "Statements": 74.7,
+    "Branches": 66.23,
+    "Functions": 63.32,
+    "Lines": 76.78
+  },
+  "defaultBrowser": {
+    "passed": 56,
+    "failed": 0,
+    "includesNewStatefulJourneys": 11,
+    "includesResponsivePageChecks": 132,
+    "includesThemePropertyChecks": 878
+  },
+  "productionBuildBrowser": {
+    "passed": 3,
+    "failed": 0
+  },
+  "unpackedBuildBrowser": {
+    "passed": 3,
+    "failed": 0
+  },
+  "rollbackPhases": 3,
+  "releaseId": "vue-20261103-6455b4f6106a",
+  "archive": "D:\\软件目录\\efficiency-platform\\.local-acceptance\\ui-delivery-20261103\\vue-20261103-6455b4f6106a\\vue-20261103-6455b4f6106a.zip",
+  "archiveSha256": "7476317a3b3ae506812b164343f6891fedd06cb7426091f59f3dfa26c560c127",
+  "payloadFiles": 105,
+  "workingTreeDirty": true,
+  "paidExternalCalls": 0,
+  "actualBusinessBackendValidated": false,
+  "actualNginxValidated": false,
+  "onlineDeploymentPerformed": false,
+  "lastTypecheck": "passed",
+  "postTypeCleanupTargetedTests": {
+    "files": 1,
+    "passed": 9,
+    "failed": 0
+  }
+}

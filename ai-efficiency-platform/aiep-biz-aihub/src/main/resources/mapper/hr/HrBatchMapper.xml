@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrBatchMapper">
+ <select id="candidateItem" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$ItemRow">SELECT id,tenant_id,batch_id,filename,encrypted_content,content_hash,status,stage,candidate_id,error_code,progress FROM ai_hr_batch_item WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} ORDER BY id DESC LIMIT 1</select>
+ <sql id="batchColumns">id,tenant_id,department_id,user_id,position_id,mode,policy_id,maximum_items,status,version,created_at,idempotency_key,request_hash</sql>
+ <sql id="itemColumns">id,tenant_id,batch_id,filename,encrypted_content,content_hash,status,stage,candidate_id,error_code,progress</sql>
+ <select id="latestPolicy" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$PolicyRow">SELECT id,tenant_id,payload,version,created_at FROM ai_hr_policy_version WHERE tenant_id=#{tenant} ORDER BY version DESC LIMIT 1</select>
+ <select id="policy" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$PolicyRow">SELECT id,tenant_id,payload,version,created_at FROM ai_hr_policy_version WHERE tenant_id=#{tenant} AND id=#{id}</select>
+ <insert id="insertPolicy">INSERT INTO ai_hr_policy_version(id,tenant_id,payload,version,created_at) VALUES(#{id},#{tenantId},#{payload},#{version},#{createdAt})</insert>
+ <select id="batch" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$BatchRow">SELECT <include refid="batchColumns"/> FROM ai_hr_batch WHERE tenant_id=#{tenant} AND id=#{id}</select>
+ <select id="lockBatch" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$BatchRow">SELECT <include refid="batchColumns"/> FROM ai_hr_batch WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <select id="candidateBatch" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$BatchRow">SELECT b.id,b.tenant_id,b.department_id,b.user_id,b.position_id,b.mode,b.policy_id,b.maximum_items,b.status,b.version,b.created_at,b.idempotency_key,b.request_hash FROM ai_hr_batch b JOIN ai_hr_batch_item i ON i.batch_id=b.id AND i.tenant_id=b.tenant_id WHERE b.tenant_id=#{tenant} AND i.candidate_id=#{candidate} ORDER BY b.created_at DESC LIMIT 1</select>
+ <select id="idempotency" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$BatchRow">SELECT <include refid="batchColumns"/> FROM ai_hr_batch WHERE tenant_id=#{tenant} AND idempotency_key=#{key}</select>
+ <insert id="insertBatch">INSERT INTO ai_hr_batch(<include refid="batchColumns"/>) VALUES(#{id},#{tenantId},#{departmentId},#{userId},#{positionId},#{mode},#{policyId},#{maximumItems},#{status},#{version},#{createdAt},#{idempotencyKey},#{requestHash})</insert>
+ <select id="items" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$ItemRow">SELECT <include refid="itemColumns"/> FROM ai_hr_batch_item WHERE tenant_id=#{tenant} AND batch_id=#{id} ORDER BY id</select>
+ <select id="item" resultType="com.aiep.aihub.repository.hr.HrBatchMapper$ItemRow">SELECT <include refid="itemColumns"/> FROM ai_hr_batch_item WHERE tenant_id=#{tenant} AND id=#{id}</select>
+ <insert id="addItem">INSERT INTO ai_hr_batch_item(<include refid="itemColumns"/>) VALUES(#{id},#{tenantId},#{batchId},#{filename},#{encryptedContent},#{contentHash},#{status},#{stage},#{candidateId},#{errorCode},#{progress})</insert>
+ <update id="advance">UPDATE ai_hr_batch SET status=#{to},version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND version=#{expected} AND status=#{from}</update>
+ <update id="itemState">UPDATE ai_hr_batch_item SET status=#{to},stage=#{stage},candidate_id=COALESCE(#{candidate},candidate_id),error_code=#{error},progress=#{progress}<if test="to == 'COMPLETED' or to == 'FAILED' or to == 'CANCELLED'">,encrypted_content=NULL</if> WHERE tenant_id=#{tenant} AND id=#{id} AND status=#{from}</update>
+ <update id="finish">UPDATE ai_hr_batch SET status='COMPLETED',version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND status='RUNNING'</update>
+ <update id="cancel">UPDATE ai_hr_batch SET status='CANCELLED',version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND status IN ('DRAFT','RUNNING')</update>
+ <update id="pendingCancel">UPDATE ai_hr_batch SET status='CANCEL_PENDING',version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND status='CANCELLED'</update>
+ <update id="block">UPDATE ai_hr_batch SET status='BLOCKED',version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND status='RUNNING'</update>
+</mapper>

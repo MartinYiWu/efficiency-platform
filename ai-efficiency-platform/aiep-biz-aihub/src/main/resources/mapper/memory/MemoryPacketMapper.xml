@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryPacketMapper">
+  <select id="findUserMessageHash" resultType="string">
+    SELECT SHA2(CAST(<choose><when test="domain == 'customer-service'">m.content_markdown</when><otherwise>m.content</otherwise></choose> AS BINARY),256)
+    <choose>
+      <when test="domain == 'operations'">FROM ai_operation_message m JOIN ai_operation_conversation c ON c.id=m.conversation_id</when>
+      <when test="domain == 'customer-service'">FROM ai_customer_service_message m JOIN ai_customer_service_conversation c ON c.id=m.conversation_id</when>
+      <otherwise>FROM ai_operation_message m JOIN ai_operation_conversation c ON 1=0</otherwise>
+    </choose>
+    WHERE CAST(m.tenant_id AS BINARY)=#{tenant} AND CAST(c.tenant_id AS BINARY)=#{tenant}
+      AND CAST(c.user_id AS BINARY)=#{user} AND CAST(c.id AS BINARY)=#{session}
+      AND CAST(m.id AS BINARY)=#{message} AND m.role IN ('user','USER')
+  </select>
+  <insert id="insertInputSource">
+    INSERT INTO ai_memory_source(tenant_id,id,source_type,source_object_ref,source_version,trust_level,retention_deadline)
+    VALUES(#{tenant},#{source},'CURRENT_USER_MESSAGE',#{message},#{version},'JAVA_AUTHORIZED',#{expires})
+  </insert>
+  <select id="findPacket" resultType="com.aiep.aihub.repository.memory.MemoryPacketMapper$PacketRow">
+    SELECT tenant_id,execution_id,packet_id,packet_revision,user_id,task_id,scope_json,policy_json,grants_json,
+      references_json,dependencies_json,request_digest,packet_digest,semantic_digest,semantic_input_hash,parent_authorization_ref,
+      execution_revision,grant_epoch,source_epoch,deletion_epoch,original_deadline,issued_at,expires_at
+    FROM ai_memory_packet WHERE tenant_id=#{tenant} AND execution_id=#{execution}
+  </select>
+  <insert id="insertPacket">
+    INSERT INTO ai_memory_packet(tenant_id,execution_id,packet_id,packet_revision,user_id,task_id,scope_json,policy_json,grants_json,
+      references_json,dependencies_json,request_digest,packet_digest,semantic_digest,semantic_input_hash,parent_authorization_ref,
+      execution_revision,grant_epoch,source_epoch,deletion_epoch,original_deadline,issued_at,expires_at)
+    VALUES(#{row.tenantId},#{row.executionId},#{row.packetId},#{row.packetRevision},#{row.userId},#{row.taskId},#{row.scopeJson},#{row.policyJson},#{row.grantsJson},
+      #{row.referencesJson},#{row.dependenciesJson},#{row.requestDigest},#{row.packetDigest},#{row.semanticDigest},#{row.semanticInputHash},#{row.parentAuthorizationRef},
+      #{row.executionRevision},#{row.grantEpoch},#{row.sourceEpoch},#{row.deletionEpoch},#{row.originalDeadline},#{row.issuedAt},#{row.expiresAt})
+  </insert>
+  <select id="findSource" resultType="com.aiep.aihub.repository.memory.MemoryPacketMapper$SourceState">
+    SELECT s.source_type,s.id,s.source_version,s.grant_epoch,s.source_epoch,s.deletion_epoch,s.retention_deadline,
+      <include refid="com.aiep.aihub.repository.memory.MemoryMapper.sourceRestoreBlocked"/> AS blocked
+    FROM ai_memory_source s WHERE s.tenant_id=#{tenant} AND s.id=#{id} FOR UPDATE
+  </select>
+  <select id="findDependencies" resultType="com.aiep.platformai.api.dto.MemoryContextPacket$Dependency">
+    SELECT s.source_type,CONVERT(d.source_id USING utf8mb4) AS source_id,CONVERT(s.source_version USING utf8mb4) AS source_version,
+      d.grant_epoch,d.source_epoch,d.deletion_epoch
+    FROM ai_memory_dependency d JOIN ai_memory_source s ON s.tenant_id=d.tenant_id AND s.id=d.source_id
+    WHERE d.tenant_id=#{tenant} AND d.target_type=#{type} AND d.target_id=#{target} AND d.target_version=#{version}
+    ORDER BY s.source_type,d.source_id,s.source_version,d.grant_epoch,d.source_epoch,d.deletion_epoch
+  </select>
+  <insert id="insertDependency">
+    INSERT INTO ai_memory_dependency(tenant_id,source_id,target_type,target_id,target_version,execution_id,grant_epoch,source_epoch,deletion_epoch)
+    VALUES(#{tenant},#{source},#{type},#{target},#{version},#{execution,jdbcType=VARBINARY},#{grantEpoch},#{sourceEpoch},#{deletionEpoch})
+  </insert>
+</mapper>

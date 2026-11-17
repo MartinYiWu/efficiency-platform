@@ -14,3 +14,5 @@
 | [seed/](seed/README.md) | 开发、测试环境初始化数据 | 否 |
 
 禁止在 `aiep-boot/src/main/resources/db/migration/` 与本目录同时维护相同迁移脚本。启用 Flyway 时，通过构建资源配置纳入唯一权威目录。
+
+- [V1.2.18 记忆授权刷新变更说明](记忆授权刷新变更说明.md)：原登录锚及 append-only 候选，独立送审候选；未执行共享迁移，须按具体哈希审查及授权。

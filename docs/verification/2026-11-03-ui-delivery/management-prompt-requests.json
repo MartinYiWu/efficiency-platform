@@ -1,0 +1,128 @@
+{
+  "writes": [
+    {
+      "method": "POST",
+      "path": "/api/aihub/prompts/p/versions",
+      "body": {
+        "semanticVersion": "draft-fe582cf3-7ce1-4fdc-aa10-318ccb5201e4",
+        "changeSummary": "后台编辑草稿"
+      }
+    },
+    {
+      "method": "PUT",
+      "path": "/api/aihub/prompts/versions/pv/content",
+      "body": {
+        "messages": [
+          {
+            "ordinal": 1,
+            "role": "SYSTEM",
+            "messageKey": "system",
+            "contentTemplate": "SYSTEM 原始 {{question}}",
+            "trustedInstruction": true
+          },
+          {
+            "ordinal": 2,
+            "role": "USER",
+            "messageKey": "user",
+            "contentTemplate": "USER 已编辑 {{question}}",
+            "trustedInstruction": false
+          },
+          {
+            "ordinal": 3,
+            "role": "ASSISTANT",
+            "messageKey": "assistant",
+            "contentTemplate": "ASSISTANT 原始 {{question}}",
+            "trustedInstruction": false
+          }
+        ],
+        "variables": [
+          {
+            "messageKey": "user",
+            "variableName": "question",
+            "valueType": "STRING",
+            "valueSource": "INPUT",
+            "required": true,
+            "sensitive": false,
+            "maxLength": 1000,
+            "allowUntrustedContent": true
+          }
+        ]
+      }
+    }
+  ],
+  "persisted": {
+    "definition": {
+      "id": "p",
+      "promptKey": "answer",
+      "scope": "AGENT",
+      "ownerAgentDefinitionId": "a",
+      "name": "离线回答模板",
+      "description": null,
+      "stageKey": "answer",
+      "status": "ACTIVE",
+      "createdBy": "offline",
+      "createdAt": "2026-11-03T00:00:00Z",
+      "updatedBy": "offline",
+      "updatedAt": "2026-11-03T00:00:00Z"
+    },
+    "version": {
+      "id": "pv",
+      "promptDefinitionId": "p",
+      "semanticVersion": "draft",
+      "status": "DRAFT",
+      "checksum": null,
+      "changeSummary": null,
+      "createdBy": "offline",
+      "createdAt": "2026-11-03T00:00:00Z",
+      "publishedAt": null
+    },
+    "messages": [
+      {
+        "id": "m0",
+        "promptVersionId": "pv",
+        "ordinal": 1,
+        "role": "SYSTEM",
+        "messageKey": "system",
+        "contentTemplate": "SYSTEM 原始 {{question}}",
+        "contentFormat": "TEXT",
+        "trustedInstruction": true,
+        "checksum": "offline"
+      },
+      {
+        "id": "m1",
+        "promptVersionId": "pv",
+        "ordinal": 2,
+        "role": "USER",
+        "messageKey": "user",
+        "contentTemplate": "USER 已编辑 {{question}}",
+        "contentFormat": "TEXT",
+        "trustedInstruction": false,
+        "checksum": "offline"
+      },
+      {
+        "id": "m2",
+        "promptVersionId": "pv",
+        "ordinal": 3,
+        "role": "ASSISTANT",
+        "messageKey": "assistant",
+        "contentTemplate": "ASSISTANT 原始 {{question}}",
+        "contentFormat": "TEXT",
+        "trustedInstruction": false,
+        "checksum": "offline"
+      }
+    ],
+    "variables": [
+      {
+        "id": "var",
+        "promptMessageTemplateId": "m1",
+        "variableName": "question",
+        "valueType": "STRING",
+        "valueSource": "INPUT",
+        "required": true,
+        "sensitive": false,
+        "maxLength": 1000,
+        "allowUntrustedContent": true
+      }
+    ]
+  }
+}

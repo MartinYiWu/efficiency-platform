@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from efficiency_platform_agent.contracts.memory import SourceDependencyModel
+from efficiency_platform_agent.contracts.memory_context import (
+    MemoryContextEnvelope,
+    MemoryContextInput,
+)
 
 RunDisplayStatus = Literal[
     "queued",
@@ -33,8 +39,19 @@ class ConversationArtifactV1(BaseModel):
     body_markdown: str = Field(min_length=1, max_length=100_000)
 
 
+class AuthorizedHistoryMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, hide_input_in_errors=True)
+    message_id: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=128)
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=12000, repr=False)
+    safety_dependencies: tuple[SourceDependencyModel, ...] = Field(min_length=1)
+
+
 class ConversationMessageV1(BaseModel):
     """用户向运营助手提交的一轮自然语言消息。"""
+
+    memory_context: MemoryContextInput = Field(default_factory=MemoryContextEnvelope)
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -52,6 +69,29 @@ class ConversationMessageV1(BaseModel):
         description="文件输入保留字段，本轮必须为空。",
     )
     artifacts: tuple[ConversationArtifactV1, ...] = Field(default=(), max_length=8)
+    history: tuple[AuthorizedHistoryMessage, ...] = Field(
+        default=(), max_length=8, repr=False
+    )
+
+    @model_validator(mode="after")
+    def validate_authorized_history(self):
+        if self.history:
+            memory = self.memory_context.to_core()
+            if (
+                memory is None
+                or memory.packet.scope.session_kind != "CONVERSATION"
+                or sum(len(item.content) for item in self.history) > 12000
+            ):
+                raise ValueError("MEMORY_HISTORY_AUTHORIZATION_REQUIRED")
+            allowed = set(memory.input_dependencies)
+            if any(
+                not {dep.to_core() for dep in item.safety_dependencies}.issubset(
+                    allowed
+                )
+                for item in self.history
+            ):
+                raise ValueError("MEMORY_HISTORY_SOURCE_DENIED")
+        return self
 
 
 class ConversationSubmitViewV1(BaseModel):

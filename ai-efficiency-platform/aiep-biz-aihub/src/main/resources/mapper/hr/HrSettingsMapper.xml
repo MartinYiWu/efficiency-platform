@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrSettingsMapper">
+ <select id="find" resultType="com.aiep.aihub.repository.hr.HrSettingsMapper$Row">SELECT tenant_id,kind,id,department_id,payload,version FROM ai_hr_configuration_document WHERE tenant_id=#{tenant} AND kind=#{kind} AND id=#{id}</select>
+ <select id="list" resultType="com.aiep.aihub.repository.hr.HrSettingsMapper$Row">SELECT tenant_id,kind,id,department_id,payload,version FROM ai_hr_configuration_document WHERE tenant_id=#{tenant} AND kind=#{kind} AND department_id IN <foreach collection="departments" item="d" open="(" separator="," close=")">#{d}</foreach> ORDER BY id LIMIT 10000</select>
+ <insert id="insert">INSERT INTO ai_hr_configuration_document(tenant_id,kind,id,department_id,payload,version) VALUES(#{tenantId},#{kind},#{id},#{departmentId},#{payload},#{version})</insert>
+ <update id="update">UPDATE ai_hr_configuration_document SET payload=#{row.payload},version=#{row.version} WHERE tenant_id=#{row.tenantId} AND kind=#{row.kind} AND id=#{row.id} AND department_id=#{row.departmentId} AND version=#{expected}</update>
+ <insert id="append">INSERT INTO ai_hr_configuration_version(id,tenant_id,kind,object_id,payload,version,created_at) VALUES(#{row.id},#{tenant},#{kind},#{objectId},#{row.payload},#{row.version},#{row.at})</insert>
+ <select id="versions" resultType="com.aiep.aihub.repository.hr.HrSettingsMapper$VersionRow">SELECT id,payload,version,created_at AS at FROM ai_hr_configuration_version WHERE tenant_id=#{tenant} AND kind=#{kind} AND object_id=#{id} ORDER BY version DESC</select>
+ <insert id="audit">INSERT INTO ai_hr_configuration_audit(id,tenant_id,department_id,kind,object_id,action,actor_id,version,created_at) VALUES(#{row.id},#{tenant},#{row.departmentId},#{row.kind},#{row.objectId},#{row.action},#{row.actorId},#{row.version},#{row.at})</insert>
+ <select id="audits" resultType="com.aiep.aihub.repository.hr.HrSettingsMapper$AuditRow">SELECT id,department_id,kind,object_id,action,actor_id,version,created_at AS at FROM ai_hr_configuration_audit WHERE tenant_id=#{tenant} AND department_id IN <foreach collection="departments" item="d" open="(" separator="," close=")">#{d}</foreach> ORDER BY created_at DESC,id LIMIT 500</select>
+ <select id="candidateIds" resultType="string">SELECT id FROM ai_hr_candidate WHERE tenant_id=#{tenant} AND department_id=#{department} AND status='ACTIVE' AND expires_at &gt; #{now} ORDER BY id LIMIT 10000</select>
+</mapper>

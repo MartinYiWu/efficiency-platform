@@ -1,0 +1,11 @@
+{
+  "realFrontendBrowser": true,
+  "historyReadOnly": true,
+  "messagesBeforeRefresh": 2,
+  "messagesAfterRefresh": 2,
+  "sourceButtons": 6,
+  "blockedMutationsOrExternalRequests": [],
+  "pageErrors": [],
+  "passed": true,
+  "rawContentRecorded": false
+}

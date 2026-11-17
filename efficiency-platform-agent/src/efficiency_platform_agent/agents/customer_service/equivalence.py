@@ -11,6 +11,8 @@ from uuid import UUID
 
 from pydantic import Field, ValidationError
 
+from efficiency_platform_agent.core.paid_budget import PaidBudgetError
+
 from .intent import StructuredStageGateway
 from .model_gateway import StructuredModelError
 from .state import Evidence, EvidenceContractError, ParentEvidence, StrictModel
@@ -178,7 +180,9 @@ async def verify_equivalence(
             except ValidationError:
                 reason = "EQUIVALENCE_CONTRACT_INVALID"
             # 可选等价阶段失败时保留原证据，只冻结错误类型，不输出异常正文。
-            except Exception as error:  # noqa: BLE001
+            except Exception as error:
+                if isinstance(error, PaidBudgetError):
+                    raise
                 reason = getattr(error, "code", type(error).__name__)
         decisions.append(
             EquivalenceDecision(

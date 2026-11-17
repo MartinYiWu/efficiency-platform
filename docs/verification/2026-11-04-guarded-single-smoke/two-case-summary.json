@@ -1,0 +1,759 @@
+{
+  "budgetId": "mixed-general-once-1793763994618",
+  "maximumCases": 2,
+  "cases": [
+    {
+      "key": "mixed",
+      "expectedMode": "MIXED",
+      "questionSha256": "7550af035050cdcc8a578b858e00fd9d33b8efe9c4c09d4800e7140dc9f12a02",
+      "startedMs": 1793764283860,
+      "before": 0,
+      "conversationId": "76992464-c053-4feb-b034-0fd48a917176",
+      "createHttp": 200,
+      "runId": "59322052-b757-4213-8972-ec733373a1de",
+      "submitHttp": 200,
+      "streamHttp": 200,
+      "terminalCode": null,
+      "modeFromEvent": "MIXED",
+      "terminal": "run.completed",
+      "runStatus": "SUCCEEDED",
+      "failureCode": null,
+      "answerMode": "MIXED",
+      "answerCharacters": 617,
+      "answerSha256": "49e729646bb8509d0e80c9814fc4364870da005ef5f77850c3bf9148468c73ed",
+      "citations": 6,
+      "events": [
+        "run.progress",
+        "run.started",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "citation.ready",
+        "citation.ready",
+        "citation.ready",
+        "citation.ready",
+        "citation.ready",
+        "citation.ready",
+        "run.progress",
+        "run.completed"
+      ],
+      "stages": [
+        "accepted",
+        "intent",
+        "conversation_title",
+        "retrieval",
+        "verification",
+        "answer",
+        "retrieval_snapshot"
+      ],
+      "elapsedMs": 37257,
+      "callsAfter": 18,
+      "refreshPersistedSame": true,
+      "passed": true,
+      "companyAndGeneralLabelsPresent": true,
+      "usageProven": true
+    },
+    {
+      "key": "general",
+      "expectedMode": "GENERAL_ADVICE",
+      "questionSha256": "7dd3e59701af7000171ac4234f987bcd863aa95c25daa74daf1cd7120262909c",
+      "startedMs": 1793764321153,
+      "before": 18,
+      "conversationId": "9200d4fc-254e-40c8-a35b-5003d5577744",
+      "createHttp": 200,
+      "runId": "16b294da-d4c6-4cae-8009-ee36d0774a45",
+      "submitHttp": 200,
+      "streamHttp": 200,
+      "terminalCode": null,
+      "modeFromEvent": "GENERAL_ADVICE",
+      "terminal": "run.completed",
+      "runStatus": "SUCCEEDED",
+      "failureCode": null,
+      "answerMode": "GENERAL_ADVICE",
+      "answerCharacters": 498,
+      "answerSha256": "a2941fcad6fab7c577f9b10522f3f01ddc361ca74567cc1ee2c2a5468b0b84ff",
+      "citations": 0,
+      "events": [
+        "run.progress",
+        "run.started",
+        "run.progress",
+        "run.progress",
+        "run.progress",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "message.delta",
+        "run.completed"
+      ],
+      "stages": [
+        "accepted",
+        "intent",
+        "conversation_title",
+        "answer"
+      ],
+      "elapsedMs": 5185,
+      "callsAfter": 20,
+      "refreshPersistedSame": true,
+      "passed": true,
+      "usageProven": true
+    }
+  ],
+  "browserVerified": false,
+  "businessOrigin": "http://127.0.0.1:8080",
+  "spendCeilingIsNotTarget": true,
+  "stopCommandExit": 0,
+  "ledger": {
+    "budget_id": "mixed-general-once-1793763994618",
+    "calls": 20,
+    "cost_microunits": 114378,
+    "run_calls": 20,
+    "run_cost_microunits": 114378,
+    "inflight": 0,
+    "stopped": "operator_stop",
+    "429_responses": 0,
+    "limits": {
+      "budget_id": "mixed-general-once-1793763994618",
+      "max_calls": 60,
+      "max_cost_microunits": 20000000,
+      "deadline_epoch_ms": 1793765794618,
+      "max_run_calls": 30,
+      "max_run_cost_microunits": 10000000,
+      "max_run_duration_ms": 600000,
+      "max_inflight": 1,
+      "max_429_responses": 3,
+      "max_input_tokens": 3932160,
+      "max_output_tokens": 245760,
+      "max_reasoning_tokens": 245760,
+      "max_run_input_tokens": 1966080,
+      "max_run_output_tokens": 122880,
+      "max_run_reasoning_tokens": 122880
+    },
+    "remaining_calls": 40,
+    "remaining_cost_microunits": 19885622,
+    "deadline_epoch_ms": 1793765794618,
+    "prices": [
+      {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "max_request_bytes": 65536,
+        "max_output_tokens": 4096,
+        "max_cost_microunits_per_attempt": 200000,
+        "pricing_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing; checked 2026-11-04; peak CNY/1M; legacy deepseek-v4-flash billed as Flash",
+        "pricing_version": "official-20261104-peak-cny",
+        "max_input_tokens": 65536,
+        "input_microunits_per_million": 2000000,
+        "cached_input_microunits_per_million": 40000,
+        "output_microunits_per_million": 8000000
+      },
+      {
+        "provider": "embedding",
+        "model": "text-embedding-v4",
+        "max_request_bytes": 65536,
+        "max_output_tokens": 0,
+        "max_cost_microunits_per_attempt": 50000,
+        "pricing_source": "https://help.aliyun.com/zh/model-studio/model-pricing; checked 2026-11-04; Beijing text input CNY/1M",
+        "pricing_version": "official-20261104-beijing-cny",
+        "max_input_tokens": 65536,
+        "input_microunits_per_million": 500000,
+        "cached_input_microunits_per_million": 500000,
+        "output_microunits_per_million": 0
+      },
+      {
+        "provider": "rerank",
+        "model": "qwen3-rerank",
+        "max_request_bytes": 65536,
+        "max_output_tokens": 0,
+        "max_cost_microunits_per_attempt": 50000,
+        "pricing_source": "https://help.aliyun.com/zh/model-studio/model-pricing; checked 2026-11-04; Beijing text input CNY/1M",
+        "pricing_version": "official-20261104-beijing-cny",
+        "max_input_tokens": 65536,
+        "input_microunits_per_million": 500000,
+        "cached_input_microunits_per_million": 500000,
+        "output_microunits_per_million": 0
+      }
+    ],
+    "accounting": {
+      "actual_tokens": {
+        "input_tokens": 51394,
+        "output_tokens": 6185,
+        "reasoning_tokens": 1940
+      },
+      "held_tokens": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "effective_tokens": {
+        "input_tokens": 51394,
+        "output_tokens": 6185,
+        "reasoning_tokens": 1940
+      },
+      "actual_cost_microunits": 114378,
+      "held_cost_microunits": 0,
+      "unknown_attempts": 0,
+      "cost_overflow": false
+    },
+    "scopes": [
+      {
+        "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+        "calls": 18,
+        "cost_microunits": 106888,
+        "stopped": 0,
+        "accounting": {
+          "actual_tokens": {
+            "input_tokens": 47766,
+            "output_tokens": 5654,
+            "reasoning_tokens": 1860
+          },
+          "held_tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "effective_tokens": {
+            "input_tokens": 47766,
+            "output_tokens": 5654,
+            "reasoning_tokens": 1860
+          },
+          "actual_cost_microunits": 106888,
+          "held_cost_microunits": 0,
+          "unknown_attempts": 0,
+          "cost_overflow": false
+        }
+      },
+      {
+        "scope_id": "http-ccc64c12c5104193852002d79d15443d",
+        "calls": 2,
+        "cost_microunits": 7490,
+        "stopped": 0,
+        "accounting": {
+          "actual_tokens": {
+            "input_tokens": 3628,
+            "output_tokens": 531,
+            "reasoning_tokens": 80
+          },
+          "held_tokens": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "reasoning_tokens": 0
+          },
+          "effective_tokens": {
+            "input_tokens": 3628,
+            "output_tokens": 531,
+            "reasoning_tokens": 80
+          },
+          "actual_cost_microunits": 7490,
+          "held_cost_microunits": 0,
+          "unknown_attempts": 0,
+          "cost_overflow": false
+        }
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "reservation_id": "7bf475ad56454406abb20034710bdd5b",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 13011,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 1024,
+        "input_tokens": 1656,
+        "output_tokens": 271,
+        "reasoning_tokens": 142
+      },
+      "reported_cost_microunits": 3473,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "8aff619eff17463facb9df8f3f374487",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "embedding",
+      "model": "text-embedding-v4",
+      "reserved_tokens": {
+        "input_tokens": 5079,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 50000,
+      "reported_usage": {
+        "cached_tokens": 0,
+        "input_tokens": 32,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 16,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-beijing-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "a280af723c324a759ceda73fbd346c77",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "rerank",
+      "model": "qwen3-rerank",
+      "reserved_tokens": {
+        "input_tokens": 41318,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 50000,
+      "reported_usage": {
+        "cached_tokens": 0,
+        "input_tokens": 4482,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 2241,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-beijing-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "5fe81cf5fc254ef895e1d5878d26b504",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "rerank",
+      "model": "qwen3-rerank",
+      "reserved_tokens": {
+        "input_tokens": 41523,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 50000,
+      "reported_usage": {
+        "cached_tokens": 0,
+        "input_tokens": 4522,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 2261,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-beijing-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "d5104c90d120489c98719f1ff6518a56",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "rerank",
+      "model": "qwen3-rerank",
+      "reserved_tokens": {
+        "input_tokens": 41359,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 50000,
+      "reported_usage": {
+        "cached_tokens": 0,
+        "input_tokens": 4522,
+        "output_tokens": 0,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 2261,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-beijing-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "f3b15173cb654e248e4d49881426231d",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11114,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 256,
+        "input_tokens": 1448,
+        "output_tokens": 281,
+        "reasoning_tokens": 76
+      },
+      "reported_cost_microunits": 4643,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "d0173677211e45b2888bdf5c831e2bd1",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11401,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1528,
+        "output_tokens": 386,
+        "reasoning_tokens": 149
+      },
+      "reported_cost_microunits": 5392,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "48b6b3d74b194708aa96a870ee247640",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11295,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1499,
+        "output_tokens": 306,
+        "reasoning_tokens": 50
+      },
+      "reported_cost_microunits": 4694,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "12bacb02e7ad4e43802cb093d2c4458e",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11491,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1561,
+        "output_tokens": 233,
+        "reasoning_tokens": 70
+      },
+      "reported_cost_microunits": 4234,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "9d526edcea134fadaa5e960daa689a5f",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11231,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1476,
+        "output_tokens": 421,
+        "reasoning_tokens": 238
+      },
+      "reported_cost_microunits": 5568,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "14aefe73c0644fecbdce8605bc00e80e",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11462,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1538,
+        "output_tokens": 272,
+        "reasoning_tokens": 46
+      },
+      "reported_cost_microunits": 4500,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "caf2e7941228470fac9c2cca4688988d",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11785,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1614,
+        "output_tokens": 421,
+        "reasoning_tokens": 251
+      },
+      "reported_cost_microunits": 5844,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "a8fcd88f930e4232b27ea75cb711b04d",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11034,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1441,
+        "output_tokens": 589,
+        "reasoning_tokens": 340
+      },
+      "reported_cost_microunits": 6842,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "ca4e3310ffd042f49b9143b5b85aea81",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 10989,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1426,
+        "output_tokens": 418,
+        "reasoning_tokens": 187
+      },
+      "reported_cost_microunits": 5444,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "aad8407111144777b2bc315e57de16d2",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11587,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1565,
+        "output_tokens": 487,
+        "reasoning_tokens": 242
+      },
+      "reported_cost_microunits": 6274,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "4b37a024b1e644f79d748dd676cb73e7",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 11443,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 384,
+        "input_tokens": 1530,
+        "output_tokens": 340,
+        "reasoning_tokens": 69
+      },
+      "reported_cost_microunits": 5028,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "02584386d95c4214a936042b94f2cddb",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 32143,
+        "output_tokens": 4096,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 1152,
+        "input_tokens": 7876,
+        "output_tokens": 557,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 17951,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "c1725e5a5d6d41b684875d1b48c3a11e",
+      "scope_id": "http-5d52cf2c03fa45449ef02160e4276b96",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 32877,
+        "output_tokens": 4096,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 640,
+        "input_tokens": 8050,
+        "output_tokens": 672,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 20222,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "ceae3b63b8e84bce89d861f6bde2718d",
+      "scope_id": "http-ccc64c12c5104193852002d79d15443d",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 12929,
+        "output_tokens": 4096,
+        "reasoning_tokens": 4096
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 1024,
+        "input_tokens": 1638,
+        "output_tokens": 162,
+        "reasoning_tokens": 80
+      },
+      "reported_cost_microunits": 2565,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    },
+    {
+      "reservation_id": "05e5fe66e0114ed9947921b3f180360b",
+      "scope_id": "http-ccc64c12c5104193852002d79d15443d",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "reserved_tokens": {
+        "input_tokens": 15071,
+        "output_tokens": 4096,
+        "reasoning_tokens": 0
+      },
+      "reserved_cost_microunits": 200000,
+      "reported_usage": {
+        "cached_tokens": 1024,
+        "input_tokens": 1990,
+        "output_tokens": 369,
+        "reasoning_tokens": 0
+      },
+      "reported_cost_microunits": 4925,
+      "cost_overflow": false,
+      "pricing_version": "official-20261104-peak-cny",
+      "state": "settled",
+      "status": 200,
+      "active": false
+    }
+  ],
+  "passed": true
+}

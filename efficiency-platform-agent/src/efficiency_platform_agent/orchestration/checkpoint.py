@@ -5,6 +5,10 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
+from efficiency_platform_agent.core.checkpoint_erasure import (
+    CheckpointResidue,
+    ThreadErasurePlan,
+)
 from efficiency_platform_agent.core.run import JsonObject
 
 from .contracts import CheckpointView
@@ -17,6 +21,8 @@ class CheckpointRecord:
 
 
 class InMemoryCheckpointStore:
+    backend_id = "owned-memory"
+
     def __init__(self) -> None:
         self._records: dict[tuple[str, str, str], CheckpointRecord] = {}
 
@@ -43,3 +49,24 @@ class InMemoryCheckpointStore:
         self, run_id: str, checkpoint_ns: str, tenant_id: str = ""
     ) -> CheckpointRecord | None:
         return self._records.get((tenant_id, run_id, checkpoint_ns))
+
+    async def delete_thread(
+        self,
+        thread_id: str,
+        tenant_id: str,
+        *,
+        authorization: ThreadErasurePlan | None = None,
+    ) -> None:
+        keys = tuple(key for key in self._records if key[:2] == (tenant_id, thread_id))
+        for key in keys:
+            del self._records[key]
+
+    async def remaining(
+        self,
+        thread_id: str,
+        tenant_id: str,
+        *,
+        authorization: ThreadErasurePlan | None = None,
+    ) -> CheckpointResidue:
+        count = sum(key[:2] == (tenant_id, thread_id) for key in self._records)
+        return CheckpointResidue(count, 0, 0)

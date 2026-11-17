@@ -76,6 +76,12 @@ class CustomerServiceApplicationServiceTest {
 
         ArgumentCaptor<CustomerServiceRunRequest> request = ArgumentCaptor.forClass(CustomerServiceRunRequest.class);
         verify(ai).submitCustomerServiceMessage(eq("conversation-1"), request.capture());
+        assertThat(request.getValue().memoryContext().memoryMode()).isEqualTo("DISABLED");
+        assertThat(request.getValue().memoryContext().scope().topLevelAgentId()).isEqualTo("customer-service");
+        assertThat(request.getValue().memoryContext().scope().tenantId()).isEqualTo("dev");
+        assertThat(request.getValue().memoryContext().scope().userId()).isEqualTo("1");
+        assertThat(request.getValue().memoryContext().scope().sessionId()).isEqualTo("conversation-1");
+        assertThat(request.getValue().memoryContext().packet()).isNull();
         assertThat(request.getValue().agentReleaseId()).isEqualTo("release-1");
         assertThat(request.getValue().history()).hasSize(1);
         assertThat(request.getValue().history().stream().mapToInt(item -> item.content().length()).sum()).isLessThanOrEqualTo(12000);
@@ -212,7 +218,14 @@ class CustomerServiceApplicationServiceTest {
         when(ai.streamCustomerServiceRunEvents("agent-run-1", 0))
                 .thenThrow(new IllegalStateException("AGENT_RESTARTED_RUN_NOT_FOUND"));
         var controller = new com.aiep.aihub.web.customer.CustomerServiceController(service,
-                new CustomerServiceEventProjector(repository, new ObjectMapper().findAndRegisterModules()));
+                new CustomerServiceEventProjector(repository, new ObjectMapper().findAndRegisterModules()), new com.aiep.aihub.web.memory.MemoryActorResolver(credential -> java.util.Optional.of(
+                    new com.aiep.identity.api.IdentityFacade.Subject("dev", "1", java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.List.of(), "test-session")), false, "", "") {
+                    @Override public com.aiep.aihub.application.operation.OperationActor current() {
+                        var request = new org.springframework.mock.web.MockHttpServletRequest();
+                        request.addHeader("Authorization", "Bearer test-session");
+                        return resolve(request);
+                    }
+                });
         org.assertj.core.api.Assertions.assertThatCode(() -> controller.events("run-1", null, 0)).doesNotThrowAnyException();
         verify(ai, never()).streamCustomerServiceRunEvents(any(), org.mockito.ArgumentMatchers.anyLong());
     }
@@ -265,7 +278,14 @@ class CustomerServiceApplicationServiceTest {
     @Test
     void controllerUsesTheGreaterResumeCursorAndRunningRunsKeepAgentStreaming() {
         var projector = mock(CustomerServiceEventProjector.class);
-        var controller = new com.aiep.aihub.web.customer.CustomerServiceController(service, projector);
+        var controller = new com.aiep.aihub.web.customer.CustomerServiceController(service, projector, new com.aiep.aihub.web.memory.MemoryActorResolver(credential -> java.util.Optional.of(
+                    new com.aiep.identity.api.IdentityFacade.Subject("dev", "1", java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.List.of(), "test-session")), false, "", "") {
+                    @Override public com.aiep.aihub.application.operation.OperationActor current() {
+                        var request = new org.springframework.mock.web.MockHttpServletRequest();
+                        request.addHeader("Authorization", "Bearer test-session");
+                        return resolve(request);
+                    }
+                });
         when(repository.findRun("run-1", "dev")).thenReturn(run("run-1", "agent-run-1", "SUCCEEDED", 8));
         when(projector.replay("run-1", "dev", 6)).thenReturn(List.of());
         controller.events("run-1", 6L, 2);

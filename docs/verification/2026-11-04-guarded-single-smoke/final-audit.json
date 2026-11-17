@@ -1,0 +1,28 @@
+{
+  "allAuthorizationsStopped": true,
+  "budgetRecords": 4,
+  "cumulativeHttpAttempts": 42,
+  "cumulativeAccountedCny": 3.22077,
+  "cumulativeSettledEstimateCny": 0.12077,
+  "historicalUnknownHeldCny": 3.1,
+  "inflight": 0,
+  "thisRoundHttpAttempts": 21,
+  "thisRoundSettledEstimateCny": 0.114518,
+  "thisRoundNewUnknown": 0,
+  "originalCapCny": 30,
+  "originalCapHttpAttempts": 90,
+  "health": [
+    {
+      "origin": "http://127.0.0.1:8080",
+      "http": 200,
+      "status": "UP"
+    },
+    {
+      "origin": "http://127.0.0.1:8090",
+      "http": 200,
+      "status": "ok"
+    }
+  ],
+  "browserVerificationCompleted": false,
+  "browserLimitation": "preview launch rejected by automatic approval: blocked by policy"
+}

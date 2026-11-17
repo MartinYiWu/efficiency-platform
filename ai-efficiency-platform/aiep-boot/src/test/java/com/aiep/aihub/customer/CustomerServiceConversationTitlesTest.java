@@ -82,7 +82,14 @@ class CustomerServiceConversationTitlesTest {
         service = new CustomerServiceApplicationService(repository, mock(AiManagementMappers.class),
                 new CustomerServicePendingRunCreator(repository), mock(AiInvokeFacade.class));
         projector = new CustomerServiceEventProjector(repository, mapper);
-        mvc = MockMvcBuilders.standaloneSetup(new CustomerServiceController(service, projector))
+        mvc = MockMvcBuilders.standaloneSetup(new CustomerServiceController(service, projector, new com.aiep.aihub.web.memory.MemoryActorResolver(credential -> java.util.Optional.of(
+                    new com.aiep.identity.api.IdentityFacade.Subject("dev", "1", java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.Set.of(), java.util.List.of(), "test-session")), false, "", "") {
+                    @Override public com.aiep.aihub.application.operation.OperationActor current() {
+                        var request = new org.springframework.mock.web.MockHttpServletRequest();
+                        request.addHeader("Authorization", "Bearer test-session");
+                        return resolve(request);
+                    }
+                }))
                 .setControllerAdvice(new CustomerServiceExceptionHandler()).build();
     }
 

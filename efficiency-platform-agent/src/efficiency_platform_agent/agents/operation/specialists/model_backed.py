@@ -48,6 +48,7 @@ from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
     project_set_v2_to_v1,
     render_copy_text,
 )
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.deliverables import (
     ActionPlanDeliverableV2,
     CitationV1,
@@ -64,6 +65,7 @@ from efficiency_platform_agent.contracts.deliverables import (
 )
 from efficiency_platform_agent.core.agent import AgentSpec
 from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.context_dispatch import allow_context_repair
 from efficiency_platform_agent.core.model import ModelDemand, ModelTier
 from efficiency_platform_agent.core.multi_agent import BudgetUsage
 from efficiency_platform_agent.core.run import (
@@ -273,7 +275,10 @@ class ModelBackedOperationSpecialist:
             "deliverable/3",
         }:
             raise ValueError("DELIVERABLE_VERSION_UNSUPPORTED")
-        if deliverable_contract_version == "deliverable/3" and scenario_executor is None:
+        if (
+            deliverable_contract_version == "deliverable/3"
+            and scenario_executor is None
+        ):
             raise ValueError("SCENARIO_EXECUTOR_REQUIRED")
         self.deliverable_contract_version = deliverable_contract_version
         self.spec = spec
@@ -295,6 +300,13 @@ class ModelBackedOperationSpecialist:
             spec.checkpoint_version,
         )
 
+    @stage_entry(
+        "operation-specialist",
+        inputs=("task.input_data", "task.target_agent"),
+        identity=("task.task_id",),
+        node_fields=("task.target_agent",),
+        subtask_field="task.task_id",
+    )
     async def run(self, task: SupervisorTask) -> RunResult:
         """按当前平台独立生成，严格拒绝未知字段和伪造引用。"""
         raw = plain(task.input_data)
@@ -473,23 +485,21 @@ class ModelBackedOperationSpecialist:
             initial_candidate: dict[str, Any] | None = None
             initial_body = ""
             hotspot_count = max(1, len(raw.get("input_deliverables", [])))
-            wechat_presentation_failure = (
-                raw["platform"] == "wechat_official_account"
-                and validation_summary
-                in {
-                    "root: Value error, WECHAT_BODY_CHINESE_LENGTH_INVALID",
-                    "root: Value error, WECHAT_HOTSPOT_STRUCTURE_INVALID",
-                }
-            )
-            if (
-                wechat_presentation_failure
-            ):
+            wechat_presentation_failure = raw[
+                "platform"
+            ] == "wechat_official_account" and validation_summary in {
+                "root: Value error, WECHAT_BODY_CHINESE_LENGTH_INVALID",
+                "root: Value error, WECHAT_HOTSPOT_STRUCTURE_INVALID",
+            }
+            if wechat_presentation_failure:
                 try:
                     candidate = json.loads(str(output))
                     content_candidate = candidate.get("content")
-                    if isinstance(candidate, dict) and isinstance(
-                        content_candidate, dict
-                    ) and isinstance(content_candidate.get("body_markdown"), str):
+                    if (
+                        isinstance(candidate, dict)
+                        and isinstance(content_candidate, dict)
+                        and isinstance(content_candidate.get("body_markdown"), str)
+                    ):
                         initial_candidate = candidate
                         initial_body = content_candidate["body_markdown"]
                 except (TypeError, ValueError, json.JSONDecodeError):
@@ -707,6 +717,7 @@ class ModelBackedOperationSpecialist:
                 ),
                 max_output_tokens=retry_max_tokens,
             )
+            await allow_context_repair()
             execution = await self.model.complete(
                 retry_demand,
                 retry_request,
@@ -750,6 +761,7 @@ class ModelBackedOperationSpecialist:
                         )
                     ),
                 )
+                await allow_context_repair()
                 execution = await self.model.complete(
                     replace(retry_demand, max_output_tokens=final_max_tokens),
                     final_request,
@@ -964,6 +976,7 @@ class ModelBackedOperationSpecialist:
                         "event=operation_wechat_full_rewrite_retry chinese_count=%s",
                         chinese_count_after_rewrite,
                     )
+                    await allow_context_repair()
                     execution = await self.model.complete(
                         terminal_demand,
                         terminal_request,

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryMapper">
+  <select id="findOperationOwner" resultType="com.aiep.aihub.repository.memory.MemoryMapper$SourceOwnerPO">
+    SELECT tenant_id,user_id,id AS session_id FROM ai_operation_conversation
+    WHERE id=#{session} AND CAST(tenant_id AS BINARY)=#{tenant}
+      AND CAST(user_id AS BINARY)=#{user} AND CAST(id AS BINARY)=#{session} AND status IN ('ACTIVE','ARCHIVED')
+  </select>
+  <select id="findCustomerServiceOwner" resultType="com.aiep.aihub.repository.memory.MemoryMapper$SourceOwnerPO">
+    SELECT tenant_id,user_id,id AS session_id FROM ai_customer_service_conversation
+    WHERE id=#{session} AND CAST(tenant_id AS BINARY)=#{tenant}
+      AND CAST(user_id AS BINARY)=#{user} AND CAST(id AS BINARY)=#{session} AND status IN ('ACTIVE','ARCHIVED')
+  </select>
+  <select id="findSessionBinding" resultType="com.aiep.aihub.repository.memory.MemoryMapper$SessionBindingPO">
+    SELECT tenant_id,id,user_id,domain,top_level_agent_id,session_id,session_kind,original_object_type,original_object_id
+    FROM ai_memory_session_binding WHERE tenant_id=#{tenant} AND user_id=#{user} AND session_id=#{session} FOR UPDATE
+  </select>
+  <insert id="insertSessionBinding">
+    INSERT INTO ai_memory_session_binding(tenant_id,id,user_id,domain,top_level_agent_id,session_id,session_kind,original_object_type,original_object_id)
+    VALUES(#{binding.tenantId},#{binding.id},#{binding.userId},#{binding.domain},#{binding.topLevelAgentId},#{binding.sessionId},#{binding.sessionKind},#{binding.originalObjectType},#{binding.originalObjectId})
+  </insert>
+  <insert id="insertItem">
+    INSERT INTO ai_memory_item
+      (tenant_id,id,subject_type,subject_id,owner_id,domain,origin_top_agent_id,scope_type,scope_id,purpose,field_key,lifecycle,revision,current_version_id,grant_epoch,source_epoch,deletion_epoch)
+    VALUES (#{item.tenantId},#{item.id},#{item.subjectType},#{item.subjectId},#{item.ownerId},#{item.domain},#{item.originTopAgentId},#{item.scopeType},#{item.scopeId},#{item.purpose},#{item.fieldKey},#{item.lifecycle},#{item.revision},#{item.currentVersionId},#{item.grantEpoch},#{item.sourceEpoch},#{item.deletionEpoch})
+  </insert>
+  <select id="findItemForUpdate" resultType="com.aiep.aihub.repository.memory.MemoryMapper$MemoryItemPO">
+    SELECT tenant_id,id,subject_type,subject_id,owner_id,domain,origin_top_agent_id,scope_type,scope_id,purpose,field_key,lifecycle,revision,current_version_id,grant_epoch,source_epoch,deletion_epoch
+    FROM ai_memory_item WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE
+  </select>
+  <update id="compareAndSetCurrent">
+    UPDATE ai_memory_item SET current_version_id=#{currentVersion,jdbcType=VARBINARY},lifecycle=#{lifecycle},revision=revision+1
+    WHERE tenant_id=#{tenant} AND id=#{id} AND revision=#{expectedRevision}
+  </update>
+  <insert id="insertVersion">
+    INSERT INTO ai_memory_version
+      (tenant_id,item_id,id,status,encrypted_payload,key_version,nonce,auth_tag,content_hmac,payload_schema,aad_tenant_id,aad_item_id,aad_version_id,aad_key_version,policy_id,policy_version_id,decision_id)
+    VALUES (#{version.tenantId},#{version.itemId},#{version.id},#{version.status},#{version.encryptedPayload},#{version.keyVersion},#{version.nonce},#{version.authTag},#{version.contentHmac},#{version.payloadSchema},#{version.tenantId},#{version.itemId},#{version.id},#{version.keyVersion},#{version.policyId,jdbcType=VARBINARY},#{version.policyVersionId,jdbcType=VARBINARY},#{version.decisionId,jdbcType=VARBINARY})
+  </insert>
+  <select id="findDependents" resultType="com.aiep.aihub.repository.memory.MemoryMapper$DependencyTargetPO">
+    SELECT target_type,target_id,target_version,execution_id,root_thread_ref,child_thread_ref,checkpoint_namespace
+    FROM ai_memory_dependency WHERE tenant_id=#{tenant} AND source_id=#{source}
+  </select>
+  <insert id="insertOutbox">
+    INSERT INTO ai_memory_outbox(tenant_id,event_id,aggregate_id,version_id,event_type,deletion_epoch)
+    VALUES (#{tenant},#{event},#{item},#{version},#{type},#{epoch})
+  </insert>
+  <insert id="advanceTombstone">
+    INSERT INTO ai_memory_tombstone(tenant_id,target_type,target_id,deletion_epoch,grant_epoch,source_epoch)
+    VALUES (#{tenant},#{type},#{target},#{deletionEpoch},#{grantEpoch},#{sourceEpoch})
+    ON DUPLICATE KEY UPDATE deletion_epoch=GREATEST(deletion_epoch,VALUES(deletion_epoch)),grant_epoch=GREATEST(grant_epoch,VALUES(grant_epoch)),source_epoch=GREATEST(source_epoch,VALUES(source_epoch))
+  </insert>
+  <sql id="preferenceItemColumns">tenant_id,id,subject_type,subject_id,owner_id,domain,origin_top_agent_id,scope_type,scope_id,purpose,field_key,lifecycle,revision,current_version_id,grant_epoch,source_epoch,deletion_epoch</sql>
+  <sql id="privatePreferenceWhere">tenant_id=#{tenant} AND subject_type='USER' AND subject_id=#{user} AND owner_id=#{user} AND domain=#{domain} AND origin_top_agent_id=#{domain} AND scope_type='USER_PRIVATE' AND purpose='assistant_response'</sql>
+  <select id="findPublishedPolicy" resultType="com.aiep.aihub.repository.memory.MemoryMapper$PolicyPO">
+    SELECT p.id,v.version_id,v.policy_json,v.content_hmac,v.schema_version FROM ai_memory_policy p JOIN ai_memory_policy_version v ON v.tenant_id=p.tenant_id AND v.policy_id=p.id AND v.version_id=p.current_version_id WHERE p.tenant_id=#{tenant} AND p.domain=#{domain} AND p.enabled=TRUE ORDER BY p.id LIMIT 2
+  </select>
+  <select id="findPreferenceItem" resultType="com.aiep.aihub.repository.memory.MemoryMapper$MemoryItemPO">
+    SELECT <include refid="preferenceItemColumns"/> FROM ai_memory_item WHERE <include refid="privatePreferenceWhere"/> AND field_key=#{field}
+  </select>
+  <select id="findPolicyVersion" resultType="com.aiep.aihub.repository.memory.MemoryMapper$PolicyPO">
+    SELECT policy_id AS id,version_id,policy_json,content_hmac,schema_version FROM ai_memory_policy_version
+    WHERE tenant_id=#{tenant} AND policy_id=#{policy} AND version_id=#{version}
+  </select>
+  <select id="listVersionPolicies" resultType="com.aiep.aihub.repository.memory.MemoryMapper$VersionPolicyPO">
+    SELECT v.item_id,v.id AS version_id,v.policy_id,v.policy_version_id,p.policy_json,p.schema_version
+    FROM ai_memory_version v JOIN ai_memory_policy_version p ON p.tenant_id=v.tenant_id AND p.policy_id=v.policy_id AND p.version_id=v.policy_version_id
+    WHERE v.tenant_id=#{tenant} AND
+    <choose><when test="versions != null and !versions.isEmpty()">
+      (v.item_id,v.id) IN <foreach collection="versions" item="entry" open="(" separator="," close=")">(#{entry.itemId},#{entry.versionId})</foreach>
+    </when><otherwise>1=0</otherwise></choose>
+  </select>
+  <select id="listPreferenceItems" resultType="com.aiep.aihub.repository.memory.MemoryMapper$MemoryItemPO">
+    SELECT <include refid="preferenceItemColumns"/> FROM ai_memory_item WHERE <include refid="privatePreferenceWhere"/> AND lifecycle='LIVE' AND current_version_id IS NOT NULL AND field_key IN ('response.language','response.detail_level','response.format') ORDER BY field_key
+  </select>
+  <sql id="versionColumns">v.tenant_id,v.item_id,v.id,v.status,v.encrypted_payload,v.key_version,v.nonce,v.auth_tag,v.content_hmac,v.policy_id,v.policy_version_id,v.decision_id,v.supersedes_version_id,v.expires_at,d.resulting_revision AS revision,v.grant_epoch,v.source_epoch,v.deletion_epoch</sql>
+  <!-- 删除清单先恢复时仍按各自锚点比较epoch；只有显式新grant可以越过旧item删除清单。 -->
+  <sql id="itemRestoreBlocked">
+    (i.lifecycle&lt;&gt;'LIVE' OR EXISTS(SELECT 1 FROM ai_memory_tombstone t
+      WHERE t.tenant_id=i.tenant_id AND t.target_type='MEMORY_ITEM' AND t.target_id=i.id
+        AND (i.grant_epoch&lt;=t.grant_epoch OR i.source_epoch&lt;t.source_epoch OR i.deletion_epoch&lt;t.deletion_epoch))
+    OR EXISTS(SELECT 1 FROM ai_memory_suppression sup WHERE sup.tenant_id=i.tenant_id
+      AND sup.subject_type=i.subject_type AND sup.subject_id=i.subject_id AND sup.domain=i.domain
+      AND sup.scope_type=i.scope_type AND sup.scope_id=i.scope_id AND sup.purpose=i.purpose
+      AND sup.field_key=i.field_key AND sup.suppression_kind='FIELD' AND sup.active=TRUE))
+  </sql>
+  <sql id="sourceRestoreBlocked">
+    (EXISTS(SELECT 1 FROM ai_memory_tombstone t WHERE t.tenant_id=s.tenant_id AND t.target_type='SOURCE' AND t.target_id=s.id
+      AND (s.grant_epoch&lt;=t.grant_epoch OR s.source_epoch&lt;t.source_epoch OR s.deletion_epoch&lt;t.deletion_epoch))
+    OR EXISTS(SELECT 1 FROM ai_memory_suppression sup WHERE sup.tenant_id=s.tenant_id AND sup.source_id=s.id
+      AND sup.source_version=s.source_version AND sup.suppression_kind='SOURCE' AND sup.active=TRUE)
+    OR (s.source_type='USER_PREFERENCE_DECISION' AND NOT EXISTS(
+      SELECT 1 FROM ai_memory_decision owner_decision JOIN ai_memory_version owner_version
+        ON owner_version.tenant_id=owner_decision.tenant_id AND owner_version.item_id=owner_decision.item_id
+        AND owner_version.id=owner_decision.target_version_id AND owner_version.decision_id=owner_decision.id
+      JOIN ai_memory_item i ON i.tenant_id=owner_version.tenant_id AND i.id=owner_version.item_id
+      WHERE owner_decision.tenant_id=s.tenant_id AND owner_decision.id=s.source_object_ref
+        AND owner_decision.actor_kind='USER' AND owner_decision.actor_id=i.owner_id
+        AND owner_version.id=s.source_version AND owner_version.status IN ('ACTIVE','SUPERSEDED')
+        AND owner_version.expires_at&gt;UTC_TIMESTAMP(6)
+        AND owner_version.grant_epoch=i.grant_epoch AND owner_version.source_epoch=i.source_epoch AND owner_version.deletion_epoch=i.deletion_epoch
+        AND NOT <include refid="com.aiep.aihub.repository.memory.MemoryMapper.itemRestoreBlocked"/>)))
+  </sql>
+  <sql id="safePreferenceVersion">
+    AND NOT <include refid="com.aiep.aihub.repository.memory.MemoryMapper.itemRestoreBlocked"/>
+    AND v.grant_epoch=i.grant_epoch AND v.source_epoch=i.source_epoch AND v.deletion_epoch=i.deletion_epoch
+    AND EXISTS(SELECT 1 FROM ai_memory_dependency dep WHERE dep.tenant_id=v.tenant_id
+      AND dep.target_type='MEMORY_VERSION' AND dep.target_id=v.item_id AND dep.target_version=v.id)
+    AND NOT EXISTS(SELECT 1 FROM ai_memory_dependency dep LEFT JOIN ai_memory_source s
+      ON s.tenant_id=dep.tenant_id AND s.id=dep.source_id
+      WHERE dep.tenant_id=v.tenant_id AND dep.target_type='MEMORY_VERSION' AND dep.target_id=v.item_id AND dep.target_version=v.id
+        AND (s.id IS NULL OR s.source_type&lt;&gt;'USER_PREFERENCE_DECISION' OR s.source_object_ref&lt;&gt;v.decision_id OR s.source_version&lt;&gt;v.id
+          OR s.retention_deadline IS NULL OR s.retention_deadline&lt;=UTC_TIMESTAMP(6)
+          OR s.grant_epoch&lt;&gt;dep.grant_epoch OR s.source_epoch&lt;&gt;dep.source_epoch OR s.deletion_epoch&lt;&gt;dep.deletion_epoch
+          OR <include refid="com.aiep.aihub.repository.memory.MemoryMapper.sourceRestoreBlocked"/>))
+  </sql>
+  <select id="findPreferenceVersion" resultType="com.aiep.aihub.repository.memory.MemoryMapper$VersionRow">
+    SELECT <include refid="versionColumns"/> FROM ai_memory_version v JOIN ai_memory_decision d ON d.tenant_id=v.tenant_id AND d.id=v.decision_id
+      JOIN ai_memory_item i ON i.tenant_id=v.tenant_id AND i.id=v.item_id
+    WHERE v.tenant_id=#{tenant} AND v.item_id=#{item} AND v.id=#{version} <include refid="safePreferenceVersion"/>
+  </select>
+  <select id="listPreferenceVersions" resultType="com.aiep.aihub.repository.memory.MemoryMapper$VersionRow">
+    SELECT <include refid="versionColumns"/> FROM ai_memory_version v JOIN ai_memory_decision d ON d.tenant_id=v.tenant_id AND d.id=v.decision_id
+      JOIN ai_memory_item i ON i.tenant_id=v.tenant_id AND i.id=v.item_id
+    WHERE v.tenant_id=#{tenant} AND v.item_id=#{item} <include refid="safePreferenceVersion"/> ORDER BY d.resulting_revision DESC
+  </select>
+  <select id="findPreferenceDecision" resultType="com.aiep.aihub.repository.memory.MemoryMapper$DecisionPO">
+    SELECT tenant_id,id,item_id,target_version_id,actor_id,decision_type,request_id,expected_revision,resulting_revision FROM ai_memory_decision WHERE tenant_id=#{tenant} AND request_id=#{request}
+  </select>
+  <insert id="insertPreferenceDecision">INSERT INTO ai_memory_decision(tenant_id,id,item_id,target_version_id,actor_id,decision_type,request_id,expected_revision,resulting_revision) VALUES(#{decision.tenantId},#{decision.id},#{decision.itemId},#{decision.targetVersionId},#{decision.actorId},#{decision.decisionType},#{decision.requestId},#{decision.expectedRevision},#{decision.resultingRevision})</insert>
+  <insert id="insertPreferenceVersion">INSERT INTO ai_memory_version(tenant_id,item_id,id,status,encrypted_payload,key_version,nonce,auth_tag,content_hmac,aad_tenant_id,aad_item_id,aad_version_id,aad_key_version,policy_id,policy_version_id,decision_id,supersedes_version_id,valid_from,expires_at,grant_epoch,source_epoch,deletion_epoch)
+    VALUES(#{version.tenantId},#{version.itemId},#{version.id},#{version.status},#{version.encryptedPayload},#{version.keyVersion},#{version.nonce},#{version.authTag},#{version.contentHmac},#{version.tenantId},#{version.itemId},#{version.id},#{version.keyVersion},#{version.policyId},#{version.policyVersionId},#{version.decisionId},#{version.supersedesVersionId,jdbcType=VARBINARY},UTC_TIMESTAMP(6),#{version.expiresAt},#{version.grantEpoch},#{version.sourceEpoch},#{version.deletionEpoch})</insert>
+  <update id="clearPreferenceCurrent">UPDATE ai_memory_item SET current_version_id=NULL WHERE tenant_id=#{tenant} AND id=#{item} AND revision=#{revision} AND current_version_id=#{version} AND lifecycle='LIVE'</update>
+  <update id="retirePreferenceVersion">UPDATE ai_memory_version SET status='SUPERSEDED' WHERE tenant_id=#{tenant} AND item_id=#{item} AND id=#{version} AND status='ACTIVE'</update>
+  <insert id="insertPreferenceSource">INSERT INTO ai_memory_source(tenant_id,id,source_type,source_object_ref,source_version,trust_level,retention_deadline) VALUES(#{tenant},#{source},'USER_PREFERENCE_DECISION',#{decision},#{version},'USER_CONFIRMED',#{expires})</insert>
+  <insert id="insertPreferenceDependency">INSERT INTO ai_memory_dependency(tenant_id,source_id,target_type,target_id,target_version,source_epoch) VALUES(#{tenant},#{source},'MEMORY_VERSION',#{item},#{version},1)</insert>
+  <select id="countPreferenceSuppression" resultType="int">SELECT COUNT(*) FROM ai_memory_suppression WHERE tenant_id=#{tenant} AND subject_type='USER' AND subject_id=#{user} AND domain=#{domain} AND scope_type='USER_PRIVATE' AND scope_id=#{scope} AND purpose='assistant_response' AND field_key=#{field} AND suppression_kind='FIELD' AND active=TRUE</select>
+</mapper>

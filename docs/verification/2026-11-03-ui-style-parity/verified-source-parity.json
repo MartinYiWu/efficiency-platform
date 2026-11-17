@@ -1,0 +1,18 @@
+{
+  "design-system.css": {
+    "sha256": "e3209b857717791e7a2b13345a0ce39e57fd61a731aa7bbfa9359d35a14f2ec8",
+    "oldProductionGoldenIdentical": true
+  },
+  "v1-tokens.css": {
+    "sha256": "bf051041f26197113910a9783241d79fe911ea505d98b74c6d073bad0f3b203a",
+    "oldProductionGoldenIdentical": true
+  },
+  "v1-layout.css": {
+    "sha256": "9e3a0b49e202a2f4477769449305403751ff57949d58881f0f79c801cee0720a",
+    "oldProductionGoldenIdentical": true
+  },
+  "v1-components.css": {
+    "sha256": "16af443856d108da8aca8991d9aae24129c4a15c3a32386a2d21342b04bb550b",
+    "oldProductionGoldenIdentical": true
+  }
+}

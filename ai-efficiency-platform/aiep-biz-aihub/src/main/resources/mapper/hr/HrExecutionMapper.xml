@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrExecutionMapper">
+ <update id="confirmationState">UPDATE ai_hr_source_authorization SET continuation_state=#{state} WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} AND continuation_state IN ('WAITING','SKIPPED','CONFIRMED','AUTO_CONTINUED','BLOCKED_BUDGET','BLOCKED_PERMISSION','BLOCKED_SYSTEM')</update>
+ <select id="dueWaiting" resultType="com.aiep.aihub.repository.hr.HrExecutionMapper$Waiting">SELECT s.tenant_id,s.candidate_id,b.user_id,b.id AS batch_id,c.version FROM ai_hr_source_authorization s JOIN ai_hr_candidate c ON c.tenant_id=s.tenant_id AND c.id=s.candidate_id JOIN ai_hr_batch_item i ON i.tenant_id=s.tenant_id AND i.candidate_id=s.candidate_id JOIN ai_hr_batch b ON b.tenant_id=i.tenant_id AND b.id=i.batch_id WHERE s.continuation_state='WAITING' AND s.wait_until&lt;=#{now} AND c.status='ACTIVE' AND c.expires_at&gt;#{now} ORDER BY s.wait_until LIMIT 100</select>
+ <update id="waitingState">UPDATE ai_hr_source_authorization SET continuation_state=#{state} WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} AND continuation_state='AUTO_CONTINUED'</update>
+ <insert id="originalGrant">INSERT INTO ai_hr_original_grant(id,tenant_id,candidate_id,user_id,expires_at,status) VALUES(#{id},#{tenant},#{candidate},#{user},#{expires},'ACTIVE')</insert>
+ <select id="findOriginalGrant" resultType="com.aiep.aihub.repository.hr.HrExecutionMapper$OriginalGrant">SELECT candidate_id,user_id,expires_at FROM ai_hr_original_grant WHERE tenant_id=#{tenant} AND id=#{id} AND status='ACTIVE'</select>
+ <update id="consumeOriginalGrant">UPDATE ai_hr_original_grant SET status='CONSUMED' WHERE tenant_id=#{tenant} AND id=#{id} AND status='ACTIVE' AND expires_at&gt;#{now}</update>
+ <insert id="insertLimits">INSERT INTO ai_hr_batch_limits(tenant_id,batch_id,limits_json) VALUES(#{tenant},#{batch},#{payload})</insert>
+ <select id="getLimits" resultType="string">SELECT limits_json FROM ai_hr_batch_limits WHERE tenant_id=#{tenant} AND batch_id=#{batch}</select>
+ <insert id="insertContext">INSERT IGNORE INTO ai_hr_context_version(tenant_id,position_id,context_version,payload,snapshot_hash,created_by,created_at) VALUES(#{tenant},#{position},#{version},#{payload},#{hash},#{actor},#{now})</insert>
+ <select id="getContext" resultType="string">SELECT payload FROM ai_hr_context_version WHERE tenant_id=#{tenant} AND position_id=#{position} AND context_version=#{version}</select>
+ <insert id="source">INSERT INTO ai_hr_source_authorization(tenant_id,candidate_id,policy_id,purposes,identity_json,extraction_json,file_id,wait_until,continuation_state) VALUES(#{tenantId},#{candidateId},#{policyId},#{purposes},#{identityJson},#{extractionJson},#{fileId},#{waitUntil},#{continuationState})</insert>
+ <select id="sourceByCandidate" resultType="com.aiep.aihub.repository.hr.HrExecutionMapper$SourceRow">SELECT tenant_id,candidate_id,policy_id,purposes,identity_json,extraction_json,file_id,wait_until,continuation_state FROM ai_hr_source_authorization WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</select>
+ <insert id="feedback">INSERT INTO ai_hr_feedback(id,tenant_id,result_id,rating,reason_json,actor_id,created_at) VALUES(#{id},#{tenantId},#{resultId},#{rating},#{reasonJson},#{actorId},#{createdAt})</insert>
+ <select id="feedbacks" resultType="com.aiep.aihub.repository.hr.HrExecutionMapper$FeedbackRow">SELECT id,tenant_id,result_id,rating,reason_json,actor_id,created_at FROM ai_hr_feedback WHERE tenant_id=#{tenant} AND result_id=#{result} ORDER BY created_at DESC,id DESC</select>
+ <insert id="recordEvent">INSERT IGNORE INTO ai_hr_run_event(tenant_id,run_id,sequence,status,result_id,failure_code,created_at) VALUES(#{tenantId},#{runId},#{sequence},#{status},#{resultId},#{failureCode},#{createdAt})</insert>
+ <select id="events" resultType="com.aiep.aihub.repository.hr.HrExecutionMapper$EventRow">SELECT tenant_id,run_id,sequence,status,result_id,failure_code,created_at FROM ai_hr_run_event WHERE tenant_id=#{tenant} AND run_id=#{run} AND sequence&gt;#{after} ORDER BY sequence</select>
+ <update id="recoverRuns">UPDATE ai_hr_matching_run SET status='BLOCKED',failure_code='HR_RECOVERY_INFLIGHT_UNKNOWN' WHERE status IN ('PENDING','RUNNING','CANCEL_PENDING') AND created_at&lt;#{before}</update>
+ <update id="recoverBatches">UPDATE ai_hr_batch SET status='BLOCKED',version=version+1 WHERE status IN ('RUNNING','CANCEL_PENDING') AND created_at&lt;#{before}</update>
+ <update id="recoverItems">UPDATE ai_hr_batch_item i JOIN ai_hr_batch b ON b.id=i.batch_id AND b.tenant_id=i.tenant_id SET i.status='FAILED',i.stage='RECOVERY_UNKNOWN',i.error_code='HR_RECOVERY_INFLIGHT_UNKNOWN' WHERE b.status='BLOCKED' AND b.created_at&lt;#{before} AND i.status IN ('PENDING','RUNNING','CANCEL_PENDING')</update>
+ <update id="continueDue">UPDATE ai_hr_source_authorization SET continuation_state='AUTO_CONTINUED' WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} AND continuation_state='WAITING' AND wait_until&lt;=#{now}</update>
+ <delete id="deleteSource">DELETE FROM ai_hr_source_authorization WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+</mapper>
+

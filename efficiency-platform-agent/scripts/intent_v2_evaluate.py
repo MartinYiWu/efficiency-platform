@@ -10,11 +10,8 @@ import argparse
 import asyncio
 import json
 import sys
-from datetime import UTC, datetime
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Literal, cast
-from uuid import uuid4
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PROJECT_ROOT / "src"
@@ -31,7 +28,6 @@ from efficiency_platform_agent.evaluation.intent_v2 import (  # type: ignore[imp
 )
 from efficiency_platform_agent.evaluation.live_intent_v2 import (  # type: ignore[import-untyped]
     LiveIntentEvaluationError,
-    LiveIntentEvaluationRunner,
 )
 from scripts.research_v2_acceptance import validate_live_authorization
 
@@ -47,103 +43,8 @@ async def execute_live_evaluation(
     approved_budget_microunits: int,
     run_count: int = 3,
 ) -> dict[str, Any]:
-    """通过项目统一 ModelRuntime 执行独立真实评测并立即回放评分。"""
-
-    if run_count < 3:
-        raise ValueError("THREE_INDEPENDENT_RUNS_REQUIRED")
-    from openai import AsyncOpenAI
-
-    from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
-    from efficiency_platform_agent.configuration.integration import (
-        S7IntegrationSettings,
-    )
-    from efficiency_platform_agent.core.model import ModelCandidate, ModelTier
-    from efficiency_platform_agent.providers.llm.deepseek import DeepSeekModelProvider
-    from efficiency_platform_agent.providers.llm.registry import ModelProviderRegistry
-    from efficiency_platform_agent.routing.model_router import ModelPolicyRouter
-
-    settings = S7IntegrationSettings.from_env_file(env_file)
-
-    def required(name: str) -> str:
-        value = getattr(settings, name)
-        if value is None or not value.get_secret_value().strip():
-            raise ValueError(f"LIVE_MODEL_CONFIGURATION_MISSING:{name}")
-        return value.get_secret_value()
-
-    base_url = required("deepseek_base_url")
-    api_key = required("deepseek_api_key")
-    model_id = required("deepseek_balanced_model")
-    dataset_version, cases = _split_cases(dataset_root, split)
-    per_run_budget = max(1, approved_budget_microunits // run_count)
-    client = AsyncOpenAI(api_key=api_key, base_url=base_url, max_retries=0)
-    # DeepSeek 走 OpenAI-compatible chat.completions；显式隐藏 SDK 的 Responses
-    # 入口，避免适配器误选厂商未提供的 /responses 路由。
-    provider_client = SimpleNamespace(chat=client.chat, close=client.close)
-    provider = DeepSeekModelProvider(provider_client, model_id, timeout_ms=120_000)
-    registry = ModelProviderRegistry()
-    provider_id = "deepseek_live_intent_evaluation"
-    registry.register(provider_id, provider)
-    candidate = ModelCandidate(
-        "deepseek-live-intent-evaluation",
-        provider_id,
-        model_id,
-        ModelTier.BALANCED,
-        True,
-        False,
-        64_000,
-        True,
-        False,
-    )
-    runner = LiveIntentEvaluationRunner(
-        ModelRuntime(ModelPolicyRouter((candidate,)), registry)
-    )
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    paths: list[Path] = []
-    executions: list[dict[str, object]] = []
-    try:
-        for index in range(run_count):
-            run_id = f"live-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:12]}"
-            completed = await runner.run(
-                cases=cases,
-                run_id=run_id,
-                dataset_version=dataset_version,
-                split=split,
-                model_id=model_id,
-                approved_budget_microunits=per_run_budget,
-            )
-            path = artifact_dir / f"{run_id}.json"
-            path.write_text(
-                json.dumps(completed.artifact, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            paths.append(path)
-            usage = cast(dict[str, int], completed.artifact["usage"])
-            executions.append(
-                {
-                    "run_id": run_id,
-                    "model_calls": usage["model_calls"],
-                    "failed_model_calls": usage["failed_model_calls"],
-                    "input_tokens": completed.input_tokens,
-                    "output_tokens": completed.output_tokens,
-                    "cost_microunits": usage["cost_microunits"],
-                    "latency_ms": completed.latency_ms,
-                    "external_io": completed.external_io,
-                }
-            )
-    finally:
-        await provider.close()
-    report = evaluate_replay(
-        dataset_root=dataset_root,
-        split=split,
-        prediction_files=tuple(paths),
-    )
-    return {
-        **report,
-        "execution_mode": "live",
-        "external_io": True,
-        "executions": executions,
-        "prediction_artifacts": [str(path) for path in paths],
-    }
+    """旧入口禁用；真实付费请求须切换到受保护的 Java/Agent 入口。"""
+    raise RuntimeError("PAID_LEGACY_ENTRY_DISABLED: use protected Java/Agent entry")
 
 
 def _split_cases(

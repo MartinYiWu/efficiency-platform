@@ -31,6 +31,12 @@ from efficiency_platform_agent.core.budget_lease import (
     LeaseConflictError,
     Reservation,
 )
+from efficiency_platform_agent.core.context_projection import (
+    ProjectionPolicy,
+    ToolProjection,
+    projection_token_upper_bound,
+    tool_query_ref,
+)
 from efficiency_platform_agent.core.ports import Tool
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
@@ -41,7 +47,10 @@ from efficiency_platform_agent.core.run import (
     ToolRequest,
     ToolResult,
 )
-from efficiency_platform_agent.tools.runtime.contracts import ToolInvocationRecord
+from efficiency_platform_agent.tools.runtime.contracts import (
+    ProjectedToolResult,
+    ToolInvocationRecord,
+)
 from efficiency_platform_agent.tools.runtime.registry import ToolRegistry
 
 
@@ -98,6 +107,81 @@ class ToolRuntime:
         self.clock = clock
         self._legacy_budget_lock = asyncio.Lock()
 
+    async def invoke_projected(
+        self,
+        request: ToolRequest,
+        context: RunContext,
+        *,
+        policy: ProjectionPolicy,
+        allowed_tools: frozenset[str],
+        granted_permissions: frozenset[str],
+        remaining_budget: RemainingBudget,
+        budget_guard: BudgetGuard | None = None,
+        budget: ExecutionBudget | None = None,
+        budget_state: BudgetState | None = None,
+        budget_context: ToolBudgetContext | None = None,
+        lease_context: ToolLeaseContext | None = None,
+    ) -> tuple[ProjectedToolResult, tuple[ToolInvocationRecord, ...]]:
+        """显式选择双视图，沿原 invoke 完成权限、预算、大小和审计治理。"""
+        scope = policy.binding.scope
+        if policy.binding.query_ref != tool_query_ref(request):
+            raise ValueError("PROJECTION_QUERY_MISMATCH")
+        if (
+            scope.conversation.tenant_id,
+            scope.conversation.user_id,
+            scope.execution_id,
+        ) != (context.tenant_id, context.user_id, context.run_id):
+            raise ValueError("PROJECTION_SCOPE_MISMATCH")
+        spec, _ = self.registry.get(request.tool_name)
+        if spec.projection_port is None:
+            raise ValueError("TOOL_PROJECTION_NOT_SUPPORTED")
+        if (
+            policy.projection_schema != spec.projection_schema
+            or policy.projection_version != spec.projection_version
+            or spec.model_visible_token_upper_bound is None
+            or policy.model_visible_token_upper_bound
+            > spec.model_visible_token_upper_bound
+        ):
+            raise ValueError("TOOL_PROJECTION_PUBLICATION_MISMATCH")
+        result, records = await self.invoke(
+            request,
+            context,
+            allowed_tools=allowed_tools,
+            granted_permissions=granted_permissions,
+            remaining_budget=remaining_budget,
+            budget_guard=budget_guard,
+            budget=budget,
+            budget_state=budget_state,
+            budget_context=budget_context,
+            lease_context=lease_context,
+        )
+        if result.error is not None:
+            return ProjectedToolResult(result, None), records
+        view = spec.projection_port.project(request, result, policy)
+        if not isinstance(view, ToolProjection) or view.binding != policy.binding:
+            raise ValueError("PROJECTION_SCOPE_MISMATCH")
+        if (
+            view.projection_schema != policy.projection_schema
+            or view.projection_version != policy.projection_version
+            or view.returned_count > policy.max_rows
+            or not set(view.safety_dependencies).issubset(
+                policy.authorized_dependencies
+            )
+            or any(
+                not {key for key, _ in row.items}.issubset(policy.allowed_fields)
+                for row in view.data
+            )
+            or view.model_visible_token_upper_bound
+            > policy.model_visible_token_upper_bound
+            or projection_token_upper_bound(view) > view.model_visible_token_upper_bound
+            or (
+                result.is_truncated
+                and (not view.truncated or view.completeness == "COMPLETE")
+            )
+        ):
+            raise ValueError("TOOL_PROJECTION_INVALID")
+        return ProjectedToolResult(result, view), records
+
     async def invoke(
         self,
         request: ToolRequest,
@@ -120,8 +204,7 @@ class ToolRuntime:
                 budget_context is not None
                 or self.budget_guard is not None
                 or any(
-                    value is not None
-                    for value in (budget_guard, budget, budget_state)
+                    value is not None for value in (budget_guard, budget, budget_state)
                 )
             ):
                 raise ValueError("BOUND_BUDGET_MUST_BE_ONLY_ACCOUNTING_PATH")
@@ -477,9 +560,13 @@ class ToolRuntime:
                 )
                 await settle_lease("unknown")
                 return self._failure(request, "BUDGET_EXHAUSTED", records)
-            if budget_context is None and lease_context is None and (
-                output_tokens > available.output_tokens
-                or cost > available.cost_microunits
+            if (
+                budget_context is None
+                and lease_context is None
+                and (
+                    output_tokens > available.output_tokens
+                    or cost > available.cost_microunits
+                )
             ):
                 records.append(
                     self._record(
@@ -614,7 +701,9 @@ class ToolRuntime:
         return None
 
     @staticmethod
-    def _success_error_code(spec: Any, request: ToolRequest, result: ToolResult) -> str | None:
+    def _success_error_code(
+        spec: Any, request: ToolRequest, result: ToolResult
+    ) -> str | None:
         """在成功租约结算前完成 Schema 与输出大小治理。"""
 
         if result.contract_version != spec.result_schema_version:

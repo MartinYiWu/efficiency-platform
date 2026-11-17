@@ -1,0 +1,79 @@
+{
+  "src/pages/hr-assistant/chat/HrChatPage.module.css": [
+    "#1677ff",
+    "#dbe3f1",
+    "#e7edf5",
+    "#fff",
+    "#ffffff"
+  ],
+  "src/pages/hr-assistant/component-states/HrComponentStatesPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/interviews/InterviewGeneratePage.module.css": [
+    "#f8fbff",
+    "#fff"
+  ],
+  "src/pages/hr-assistant/interviews/InterviewGuidePreviewPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/interviews/InterviewQuestionSetPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/matching/FilteredResumesPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/matching/MatchDetailPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/matching/MatchResultsPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/module-entry/HrModuleEntryPage.module.css": [],
+  "src/pages/hr-assistant/positions/PositionDetailPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/positions/PositionListPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/positions/PositionPreviewPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/positions/PositionTemplateLibraryPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/positions/PositionWeightsPage.module.css": [
+    "#f8fbff",
+    "#fff"
+  ],
+  "src/pages/hr-assistant/positions/PositionWizardPage.module.css": [
+    "#f8fbff",
+    "#fff"
+  ],
+  "src/pages/hr-assistant/resumes/ResumeCorrectionPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/resumes/ResumeProgressPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/resumes/ResumeUploadPage.module.css": [
+    "#dbe3f1",
+    "#f8fbff",
+    "#fff",
+    "#ffffff"
+  ],
+  "src/pages/hr-assistant/settings/AuditPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/settings/SkillSynonymPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/talent/CandidateProfilePage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/talent/TalentSearchPage.module.css": [
+    "#fff"
+  ],
+  "src/pages/hr-assistant/workbench/HrWorkbenchPage.module.css": [
+    "#fff"
+  ]
+}

@@ -109,19 +109,34 @@ export const createEvaluationDataset = (value: object) =>
 export const getEvaluationDataset = (id: string) =>
   call(`${evaluationBase}/datasets/${encodeURIComponent(id)}`, evaluationDatasetDetailSchema);
 export const createEvaluationCase = (datasetId: string, value: object) =>
-  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases`, evaluationCaseSchema, json('POST', value));
+  call(
+    `${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases`,
+    evaluationCaseSchema,
+    json('POST', value),
+  );
 export const updateEvaluationCase = (datasetId: string, caseId: string, value: object) =>
-  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`,
-    evaluationCaseSchema, json('PUT', value));
+  call(
+    `${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/${encodeURIComponent(caseId)}`,
+    evaluationCaseSchema,
+    json('PUT', value),
+  );
 export const importEvaluationCases = (datasetId: string, value: object[]) =>
-  call(`${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/import`,
-    evaluationImportResultSchema, json('POST', value));
+  call(
+    `${evaluationBase}/datasets/${encodeURIComponent(datasetId)}/cases/import`,
+    evaluationImportResultSchema,
+    json('POST', value),
+  );
 export const startEvaluationRun = (value: object) =>
   call(`${evaluationBase}/runs`, evaluationRunSchema, json('POST', value));
 export const listEvaluationRuns = (datasetId: string) =>
-  call(`${evaluationBase}/runs?datasetId=${encodeURIComponent(datasetId)}`, evaluationRunSchema.array());
+  call(
+    `${evaluationBase}/runs?datasetId=${encodeURIComponent(datasetId)}`,
+    evaluationRunSchema.array(),
+  );
 export const getEvaluationRun = (id: string) =>
   call(`${evaluationBase}/runs/${encodeURIComponent(id)}`, evaluationRunDetailSchema);
 export const compareEvaluationRuns = (baselineRunId: string, candidateRunId: string) =>
-  call(`${evaluationBase}/runs/compare?baselineRunId=${encodeURIComponent(baselineRunId)}&candidateRunId=${encodeURIComponent(candidateRunId)}`,
-    evaluationRunComparisonSchema);
+  call(
+    `${evaluationBase}/runs/compare?baselineRunId=${encodeURIComponent(baselineRunId)}&candidateRunId=${encodeURIComponent(candidateRunId)}`,
+    evaluationRunComparisonSchema,
+  );

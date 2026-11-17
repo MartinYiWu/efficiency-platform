@@ -1,15 +1,17 @@
 import { expect, test as base } from '@playwright/test';
+import { isIsolatedRequest } from './request-isolation';
 
 export { expect };
+export type { Page, Locator } from '@playwright/test';
 
 export const test = base.extend<{ apiIsolation: void }>({
   apiIsolation: [
-    async ({ context }, use) => {
+    async ({ context, baseURL }, use) => {
       const unhandled: string[] = [];
       await context.route('**/*', async (route) => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
-        if (/^\/(api|v1)(\/|$)/.test(path) || ['fetch', 'xhr'].includes(request.resourceType())) {
+        if (isIsolatedRequest(request.url(), request.resourceType(), baseURL!)) {
           unhandled.push(`${request.method()} ${path}`);
           await route.abort('blockedbyclient');
           return;

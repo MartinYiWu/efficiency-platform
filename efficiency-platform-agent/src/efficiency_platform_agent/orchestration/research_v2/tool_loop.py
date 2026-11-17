@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.research_tooling import (
     EvidencePackV1,
     ResearchReflectionV1,
@@ -155,28 +156,16 @@ class ResearchToolLoop:
                 "RESEARCH_BUDGET_EXHAUSTED", "研究工具预算不足"
             )
 
-        planned, remaining = await self._model_call(
-            request,
-            "plan",
-            {"allowed_tools": sorted(allowed_tools)},
-            remaining,
-            tools=allowed_tools,
-        )
+        planned, remaining = await self._plan(request, allowed_tools, remaining)
         calls = self._require_tool_calls(planned)
         observations, remaining = await self._invoke_calls(
             calls, request, allowed_tools, remaining, known_digests=set()
         )
         self._require_any_source(observations)
 
-        pack, remaining = await self._synthesize(
-            request, observations, remaining
-        )
-        reflected, remaining = await self._model_call(
-            request,
-            "reflect",
-            {"evidence_pack": pack.model_dump(mode="json")},
-            remaining,
-            tools=allowed_tools,
+        pack, remaining = await self._synthesize(request, observations, remaining)
+        reflected, remaining = await self._reflect(
+            request, pack, allowed_tools, remaining
         )
         if reflected.result.error is not None:
             raise ResearchToolLoopError(
@@ -198,7 +187,9 @@ class ResearchToolLoop:
             )
             observations = (*observations, *supplement)
             self._require_any_source(observations)
-            pack, _ = await self._synthesize(request, observations, remaining)
+            pack, _ = await self._synthesize(
+                request, observations, remaining, round_id=1
+            )
             return pack
         if not isinstance(message.content, str):
             raise ResearchToolLoopError(
@@ -221,11 +212,54 @@ class ResearchToolLoop:
             )
         return pack
 
+    @stage_entry("research-plan", inputs=("request", "allowed_tools"))
+    async def _plan(self, request, allowed_tools, remaining):
+        execution, remaining = await self._model_call(
+            request,
+            "plan",
+            {"allowed_tools": sorted(allowed_tools)},
+            remaining,
+            tools=allowed_tools,
+        )
+        self._require_tool_calls(execution)
+        return execution, remaining
+
+    @stage_entry("research-reflect", inputs=("request", "pack", "allowed_tools"))
+    async def _reflect(self, request, pack, allowed_tools, remaining):
+        execution, remaining = await self._model_call(
+            request,
+            "reflect",
+            {"evidence_pack": pack.model_dump(mode="json")},
+            remaining,
+            tools=allowed_tools,
+        )
+        message = execution.result.message
+        if execution.result.error is not None or message is None:
+            raise ResearchToolLoopError(
+                "RESEARCH_MODEL_UNAVAILABLE", "研究反思模型不可用"
+            )
+        if message.tool_calls:
+            self._require_tool_calls(execution)
+        elif isinstance(message.content, str):
+            ResearchReflectionV1.model_validate_json(message.content)
+        else:
+            raise ResearchToolLoopError(
+                "RESEARCH_REFLECTION_INVALID", "研究反思结构无效"
+            )
+        return execution, remaining
+
+    @stage_entry(
+        "research-synthesize",
+        inputs=("request", "observations"),
+        identity=("round_id",),
+    )
     async def _synthesize(
         self,
         request: ResearchRequestV2,
         observations: tuple[_Observation, ...],
         remaining: RemainingBudget,
+        *,
+        round_id: int = 0,
     ) -> tuple[EvidencePackV1, RemainingBudget]:
         execution, remaining = await self._model_call(
             request,
@@ -384,7 +418,9 @@ class ResearchToolLoop:
         return tuple(observations), remaining
 
     @staticmethod
-    def _require_tool_calls(execution: ModelExecutionResult) -> tuple[ProviderToolCall, ...]:
+    def _require_tool_calls(
+        execution: ModelExecutionResult,
+    ) -> tuple[ProviderToolCall, ...]:
         if execution.result.error is not None:
             raise ResearchToolLoopError(
                 "RESEARCH_MODEL_UNAVAILABLE", "研究规划模型不可用"

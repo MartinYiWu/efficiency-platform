@@ -1,0 +1,1 @@
+DROP TABLE ai_hr_interview_generation;

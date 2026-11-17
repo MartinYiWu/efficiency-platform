@@ -1,0 +1,6 @@
+-- 只读预检，不连接或修改业务表。目标必须是明确授权的Agent自有隔离库。
+SELECT DATABASE() AS current_database,VERSION() AS mysql_version;
+SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_context_stage';
+-- 若表已存在，停止，不覆盖、不清空。核对现存列和索引后另行裁决。
+SELECT COLUMN_NAME,COLUMN_TYPE,COLLATION_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_context_stage' ORDER BY ORDINAL_POSITION;
+SELECT INDEX_NAME,SEQ_IN_INDEX,COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='agent_context_stage' ORDER BY INDEX_NAME,SEQ_IN_INDEX;

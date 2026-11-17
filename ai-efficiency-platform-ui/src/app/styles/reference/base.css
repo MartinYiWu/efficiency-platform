@@ -1,0 +1,193 @@
+/* 导入设计系统 - 必须在 @tailwind 之前 */
+
+
+
+
+
+
+
+
+
+/* ==================== 全局基础样式 ==================== */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji';
+  font-size: 14px;
+  color: var(--v1-text);
+  background: var(--v1-bg-page);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+/* ==================== NProgress 进度条 ==================== */
+
+#nprogress .bar {
+  background: linear-gradient(90deg, var(--ai-purple-500), var(--ai-cyan-500)) !important;
+  height: 3px !important;
+}
+
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--ai-purple-500), 0 0 5px var(--ai-cyan-500) !important;
+}
+
+#nprogress .spinner-icon {
+  border-top-color: var(--ai-purple-500) !important;
+  border-left-color: var(--ai-purple-500) !important;
+}
+
+/* ==================== 滚动条美化 ==================== */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 3px;
+  transition: background var(--duration-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-400);
+}
+
+/* Dark mode scrollbar */
+[data-theme="dark"] ::-webkit-scrollbar-track {
+  background: var(--gray-800);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: var(--gray-600);
+}
+
+[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-500);
+}
+
+/* ==================== 文字工具类 ==================== */
+
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-ellipsis-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.text-ellipsis-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ==================== 布局工具类 ==================== */
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ==================== 页面切换动画 ==================== */
+
+.fade-enter-active {
+  transition: opacity 0.15s ease-out;
+}
+
+.fade-leave-active {
+  transition: opacity 0.1s ease-in;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 避免布局抖动 */
+.fade-enter-active,
+.fade-leave-active {
+  will-change: opacity;
+}
+
+.slide-fade-enter-active {
+  transition: all 0.25s ease-out;
+}
+
+.slide-fade-leave-active {
+  transition: all 0.15s ease-in;
+}
+
+.slide-fade-enter-from,
+.slide-fade-leave-to {
+  transform: translateX(10px);
+  opacity: 0;
+}
+
+/* ==================== 内容区域样式 ==================== */
+
+.page-container {
+  padding: var(--space-6);
+  max-width: var(--layout-content-max-width);
+  margin: 0 auto;
+}
+
+.page-header {
+  margin-bottom: var(--space-6);
+}
+
+.page-header-title {
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-2) 0;
+}
+
+.page-header-description {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* ==================== 选择文本样式 ==================== */
+
+::selection {
+  background-color: var(--ai-purple-200);
+  color: var(--ai-purple-900);
+}
+
+[data-theme="dark"] ::selection {
+  background-color: var(--ai-purple-700);
+  color: white;
+}

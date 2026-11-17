@@ -1,51 +1,63 @@
-# AI 效能平台前端
+# AI 效能平台 Vue 前端
 
-基于 React 的单体 SPA 工程。开发前请先阅读 [协作约束](AGENTS.md) 与 [前端开发规范与约束](docs/前端开发规范与约束.md)；架构设计见 [前端架构设计](docs/superpowers/specs/2026-09-01-前端架构设计.md)，初始化实施过程见 [实施计划](docs/superpowers/plans/2026-09-01-前端项目初始化实施计划.md)。
+Vue SPA 前端。Vue3.5、Router4、Pinia3、Ant Design Vue4、TypeScript、Vite6。原 React 工程保留为迁移回退副本；参考工程只读。正式切换记录见仓库根目录 docs/verification/2026-11-03-vue-migration/。
 
-## 环境要求
+协作与实现约束见 [AGENTS.md](AGENTS.md)、[完整规范](docs/前端开发规范与约束.md) 和 [架构设计](docs/superpowers/specs/2026-11-03-Vue前端架构.md)。依赖实际版本以package.json/pnpm-lock为准。
 
-- Node.js 20.18+（或 22+）
-- pnpm 10+
+## 环境与启动
 
-## 启动
+Node20.18（低于21）或22+，pnpm10。
 
 ```powershell
+Set-Location D:\软件目录\efficiency-platform\ai-efficiency-platform-ui
 pnpm install
-Copy-Item .env.example .env.local
 pnpm dev
 ```
 
-`VITE_API_BASE_URL` 是浏览器请求后端的基础地址。前端环境文件不能保存密钥。
+Vite代理通过`VITE_API_PROXY_TARGET`配置，默认`http://127.0.0.1:8080`。运营API支持`VITE_API_BASE_URL`；不要在浏览器变量写后端密钥。离线验收必须Mock/fixture并阻断未拦截API；直接打开开发页连接真实后端不属于离线验证。
 
-## 当前入口与导航
+## 当前业务契约
 
-根路径 `/` 统一进入 `/ai-assistants/hr/workbench`。平台只保留 `HrAssistantShell` 一套白色树形导航：工作空间、AI 助手、AI 人事助手的业务页面以及管理项均在同一侧栏中呈现。桌面端默认展示完整名称，可手动横向收合；窄屏改用抽屉导航。
+- 客服：`/api/customer-service/*`，消息、引用、反馈、结构化进度与SSE。
+- 运营：`/api/operations/*`，URL会话恢复、流、交付物与制品操作。
+- 知识：`/api/knowledge/*`，知识库、目录、文档/版本、上传/导入与处理。
+- AI管理：`/api/aihub/*`，Agent、Prompt、策略、调试、评测、回放和反馈列表。
+- 人事维持现有本地演示能力，本次迁移不表示真实人事服务接通。
 
-旧的深色 Signal Board 首页、独立 AppShell、仪表盘 ViewModel 与其图表代码已移除，避免同一应用出现两套侧栏和两个首页入口。
+不得替换为参考工程旧`/v1`服务或旧认证。
 
-## 常用命令
+## 命令
 
-| 命令                 | 用途                         |
-| -------------------- | ---------------------------- |
-| `pnpm dev`           | 启动本地开发服务             |
-| `pnpm lint`          | 执行 ESLint                  |
-| `pnpm format`        | 检查代码格式                 |
-| `pnpm typecheck`     | 执行 TypeScript 严格类型检查 |
-| `pnpm test`          | 执行 Vitest 单元和组件测试   |
-| `pnpm test:coverage` | 输出单元测试覆盖率           |
-| `pnpm build`         | 构建生产静态资源             |
-| `pnpm test:e2e`      | 执行 Chromium 浏览器烟测     |
+| 命令                 | 用途                     |
+| -------------------- | ------------------------ |
+| `pnpm dev`           | Vite开发服务器           |
+| `pnpm format`        | Prettier检查             |
+| `pnpm lint`          | ESLint                   |
+| `pnpm typecheck`     | 全业务vue-tsc严格检查    |
+| `pnpm test`          | Vitest离线单元/组件测试  |
+| `pnpm test:coverage` | 覆盖率门禁               |
+| `pnpm build`         | 类型检查和生产构建       |
+| `pnpm test:e2e`      | Playwright离线浏览器验收 |
 
-## 目录规则
+定向示例：`pnpm exec vitest run src/pages/ai-center`。先定向检查，最终合并验收再运行全部门禁。通过状态以本次实际命令输出为准，验证结果以迁移验收记录为准。
 
-业务代码只允许按 `pages → widgets → features → entities → shared` 单向依赖。`shared` 不得引用业务层；页面不得直接调用 Axios；服务端数据只进入 TanStack Query，浏览器本地状态才可进入 Zustand。
+## 安全与交付
 
-## 依赖规则
+真实生成、Embedding、rerank需用户明确授权预算，且必须经项目统一付费守卫/固定SQLite总账；禁止裸curl/SDK或另开账本。默认测试只使用Mock，不自动续期预算或真实回归。
 
-Ant Design 是唯一基础 UI 库，React Router 是唯一路由库，TanStack Query 是唯一服务端状态方案。新增依赖前必须说明现有依赖无法满足的原因、包体积、许可证、维护状态与移除成本；禁止额外引入 UI 库、状态库、Moment、Lodash、jQuery、Tailwind 或未评审的富文本/拖拽/聊天组件库。
+业务结构保持`pages → widgets → features → entities → shared`；app仅装配。Markdown统一安全渲染，UI沿用旧版v1风格并在1440/1024/390px验收。没有React兼容层或iframe。
 
-## 浏览器验收隔离
+正式承接原入口时需完成全量功能/路由/离线测试/视觉验收并保留可恢复副本。后续清理回退副本需用户明确指示。
 
-`pnpm test:e2e` 仅运行 fixture 套件，阻断未拦截的 API/fetch/XHR 并使测试失败；独立启动 5190，代理指向不可用端口，不复用现有服务。fixture 不代表真实业务验收。
+## 生产交付验收
 
-真实 Java → Agent 用例显式运行 `pnpm exec playwright test --config playwright.real.config.ts`，连接已启动的 5173；可用 `PLAYWRIGHT_REAL_BASE_URL` 指定地址。该用例会创建真实会话，不能作为默认门禁运行。Fake Agent 套件仍使用 `playwright.agent.config.ts`。
+部署配置、实际dist预览、同源API/SSE/下载代理及回退步骤见[部署与回退](docs/部署与回退.md)。
+
+```powershell
+pnpm build
+pnpm test:e2e:release
+# 默认无API上游，业务请求返回明确503，适合只检查生产静态页面。
+pnpm preview:release
+```
+
+生产预览只监听127.0.0.1，默认5193。默认E2E隔离所有外源请求和未Mock API；真实后端与付费模型仍需单独验收授权。发布使用共享追加式hash资源目录，不能仅切换current而丢失旧页面懒加载资源。最新业务事务与交付证据见仓库根 `docs/verification/2026-11-03-ui-delivery/`。

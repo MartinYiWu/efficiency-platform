@@ -1,5 +1,7 @@
 package com.aiep.aihub.application.customer;
 
+import com.aiep.aihub.application.operation.OperationActor;
+import com.aiep.aihub.application.memory.ConversationScopeResolver;
 import com.aiep.aihub.application.customer.CustomerServicePendingRunCreator.Pending;
 import com.aiep.aihub.application.customer.CustomerServiceViews.MessageView;
 import com.aiep.aihub.application.customer.CustomerServiceViews.PageView;
@@ -39,6 +41,13 @@ public class CustomerServiceApplicationService {
     private final AiManagementMappers management;
     private final CustomerServicePendingRunCreator pendingCreator;
     private final AiInvokeFacade ai;
+    private final ConversationScopeResolver scopes = new ConversationScopeResolver();
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryPacketService memoryPackets;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryHistoryProjection memoryHistory;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryDependencyService memoryDependencies;
 
     public CustomerServiceApplicationService(CustomerServiceMappers repository, AiManagementMappers management,
             CustomerServicePendingRunCreator pendingCreator, AiInvokeFacade ai) {
@@ -99,9 +108,11 @@ public class CustomerServiceApplicationService {
         if (!"customer-service-message/1".equals(contractVersion) || message == null || message.isBlank()
                 || clientRequestId == null || clientRequestId.isBlank())
             throw new IllegalArgumentException("CUSTOMER_SERVICE_MESSAGE_INVALID");
-        getConversation(tenantId, userId, conversationId);
+        ConversationPO conversation = getConversation(tenantId, userId, conversationId);
         MessagePO existing = repository.findMessageByClientRequest(tenantId, clientRequestId);
         if (existing != null) {
+            if (!conversationId.equals(existing.conversationId()) || !message.equals(existing.content()))
+                throw new IllegalStateException("IDEMPOTENCY_SCOPE_CONFLICT");
             RunPO run = repository.findRunByUserMessage(existing.id(), tenantId);
             return new SubmitView(conversationId, run.id(), run.status(), run.agentReleaseId());
         }
@@ -111,12 +122,29 @@ public class CustomerServiceApplicationService {
         List<CustomerServiceRunRequest.HistoryMessage> history = boundedHistory(
                 repository.listCompletedHistory(conversationId, tenantId, 12));
         Pending pending = pendingCreator.create(conversationId, tenantId, message, clientRequestId, release.id());
+        if (!conversationId.equals(pending.run().conversationId()) || !tenantId.equals(pending.run().tenantId()))
+            throw new IllegalStateException("IDEMPOTENCY_SCOPE_CONFLICT");
         if (!pending.created())
             return new SubmitView(conversationId, pending.run().id(), pending.run().status(), pending.run().agentReleaseId());
         try {
+            var memoryScope = scopes.conversation(new OperationActor(tenantId,userId), "customer-service", conversationId,
+                    conversation.tenantId(), conversation.userId(), "customer-service");
+            var request = new CustomerServiceRunRequest("customer-service-run/1", pending.run().id(), conversationId,
+                    tenantId, userId, release.id(), message, history, scopes.envelope(memoryScope));
+            if (memoryPackets != null && memoryPackets.enabled()) {
+                var candidates = repository.listCompletedHistory(conversationId,tenantId,12).stream()
+                    .filter(item -> !item.id().equals(pending.userMessage().id()))
+                    .map(item -> com.aiep.aihub.application.memory.MemoryHistoryProjection.message(memoryScope,item.id(),item.role(),item.content())).toList();
+                var selected = memoryHistory.selectBounded(memoryScope,candidates,12,12000);
+                var closure = new java.util.ArrayList<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency>();
+                selected.forEach(item -> closure.addAll(memoryDependencies.dependencies(memoryScope,"MESSAGE",item.id(),item.version())));
+                history = selected.stream().map(item -> new CustomerServiceRunRequest.HistoryMessage(item.role(),item.content())).toList();
+                request = new CustomerServiceRunRequest("customer-service-run/1",pending.run().id(),conversationId,tenantId,userId,release.id(),message,history,scopes.envelope(memoryScope));
+                request = new CustomerServiceRunRequest("customer-service-run/1",pending.run().id(),conversationId,tenantId,userId,release.id(),message,history,
+                        memoryPackets.issueMessage(memoryScope,pending.run().id(),pending.userMessage().id(),new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(request),closure));
+            }
             CustomerServiceRunView agent = ai.submitCustomerServiceMessage(conversationId,
-                    new CustomerServiceRunRequest("customer-service-run/1", pending.run().id(), conversationId,
-                            tenantId, userId, release.id(), message, history));
+                    request);
             repository.bindAgentRun(pending.run().id(), agent.runId(), agent.status().name());
             return new SubmitView(conversationId, pending.run().id(), agent.status().name(), release.id());
         } catch (RuntimeException error) {
@@ -131,6 +159,28 @@ public class CustomerServiceApplicationService {
         RunPO value = repository.findRun(runId, tenantId);
         if (value == null) throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_FOUND");
         return value;
+    }
+
+    public RunPO getRun(String tenantId, String userId, String runId) {
+        RunPO run = getRun(tenantId, runId);
+        getConversation(tenantId, userId, run.conversationId());
+        return run;
+    }
+
+    public Flux<CustomerServiceRunEvent> stream(String tenantId, String userId, String runId, long afterSequence) {
+        getRun(tenantId, userId, runId);
+        return stream(tenantId, runId, afterSequence);
+    }
+
+    public RunPO cancel(String tenantId, String userId, String runId) {
+        getRun(tenantId, userId, runId);
+        return cancel(tenantId, runId);
+    }
+
+    public CitationPO citation(String tenantId, String userId, String citationId) {
+        CitationPO citation = citation(tenantId, citationId);
+        getRun(tenantId, userId, citation.runId());
+        return citation;
     }
 
     @Transactional(readOnly = true)
@@ -175,6 +225,7 @@ public class CustomerServiceApplicationService {
         MessagePO message = repository.findMessage(messageId, tenantId);
         if (message == null || !"ASSISTANT".equals(message.role()) || !"COMPLETED".equals(message.status()))
             throw new IllegalArgumentException("CUSTOMER_SERVICE_FEEDBACK_MESSAGE_INVALID");
+        getConversation(tenantId, userId, message.conversationId());
         RunPO run = repository.findRun(message.runId(), tenantId);
         Instant now = Instant.now();
         FeedbackPO current = repository.findFeedback(tenantId, userId, messageId);

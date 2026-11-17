@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pydantic import BaseModel, ValidationError
 
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.deliverables import (
     ArticleDraftV1,
     BrandPlanV1,
@@ -24,6 +25,7 @@ from efficiency_platform_agent.contracts.deliverables import (
 )
 from efficiency_platform_agent.contracts.operation_intent import OperationScenario
 from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.context_dispatch import allow_context_repair
 from efficiency_platform_agent.core.model import (
     ModelDemand,
     ModelExecutionResult,
@@ -113,6 +115,19 @@ class ScenarioModelExecutor:
             )
         ).deliverable
 
+    @stage_entry(
+        "operation-scenario",
+        inputs=(
+            "scenario",
+            "stage",
+            "platform",
+            "user_request",
+            "input_artifact_ids",
+            "evidence",
+        ),
+        identity=("scenario", "stage", "platform"),
+        node_fields=("scenario", "stage"),
+    )
     async def generate_with_usage(
         self,
         *,
@@ -168,6 +183,7 @@ class ScenarioModelExecutor:
                 previous_output=previous,
                 validation_errors=first_errors,
             )
+            await allow_context_repair()
             repaired_execution = await self._complete(
                 repair, self._remaining(executions=executions)
             )
@@ -262,7 +278,10 @@ class ScenarioModelExecutor:
                                     "json_schema",
                                     JsonObject(
                                         (
-                                            ("name", prompt.output_contract.contract_key),
+                                            (
+                                                "name",
+                                                prompt.output_contract.contract_key,
+                                            ),
                                             ("strict", True),
                                             ("schema", schema),
                                         )
@@ -348,8 +367,12 @@ def _apply_authoritative_constraints(
         raise ScenarioModelExecutionError(
             "SCENARIO_RESEARCH_CONSTRAINT_INVALID", "研究时间边界无效"
         )
-    boundary_label = "左闭右开" if boundary == "left_closed_right_open" else str(boundary)
-    suffix = f"，{original_text}" if isinstance(original_text, str) and original_text else ""
+    boundary_label = (
+        "左闭右开" if boundary == "left_closed_right_open" else str(boundary)
+    )
+    suffix = (
+        f"，{original_text}" if isinstance(original_text, str) and original_text else ""
+    )
     authoritative = f"{start} 至 {end}（{boundary_label}{suffix}）"
     if content.time_window != authoritative:
         logger.warning(

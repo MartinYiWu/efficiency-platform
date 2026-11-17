@@ -29,7 +29,7 @@ class ContextBuilder:
         budget: ExecutionBudget,
         allowed_tools: frozenset[str],
     ) -> BuiltContext:
-        """只装配用户输入，不读取其他上下文来源。"""
+        """仅按 UTF8 保守上界装配输入；最终完整请求仍须发送前计数。"""
         if not isinstance(request, RunRequest):
             raise TypeError("request 必须是 RunRequest")
         if not isinstance(run_context, RunContext):
@@ -44,7 +44,7 @@ class ContextBuilder:
         ):
             raise ContextBuildError("CONTEXT_IDENTITY_MISMATCH", "Context 身份校验失败")
 
-        estimated = (len(request.input_text) + 3) // 4
+        estimated = len(request.input_text.encode("utf-8"))
         if estimated > budget.max_input_tokens:
             raise ContextBuildError("CONTEXT_BUDGET_EXCEEDED", "Context 输入预算不足")
 

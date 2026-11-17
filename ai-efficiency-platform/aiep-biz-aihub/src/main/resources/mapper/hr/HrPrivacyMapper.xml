@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrPrivacyMapper">
+ <update id="staleInterviewSets">UPDATE ai_hr_interview_set SET status='STALE' WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} AND status='READY'</update>
+ <update id="revokeOriginalGrants">UPDATE ai_hr_original_grant SET status='REVOKED' WHERE tenant_id=#{tenant} AND candidate_id=#{candidate} AND status='ACTIVE'</update>
+ <update id="revokeInterviewExports">UPDATE ai_hr_interview_export e JOIN ai_hr_interview_set s ON s.tenant_id=e.tenant_id AND s.id=e.set_id SET e.status='REVOKED' WHERE s.tenant_id=#{tenant} AND s.candidate_id=#{candidate} AND e.status='READY'</update>
+ <delete id="deleteFeedback">DELETE f FROM ai_hr_feedback f JOIN ai_hr_matching_result r ON r.tenant_id=f.tenant_id AND r.id=f.result_id WHERE r.tenant_id=#{tenant} AND r.candidate_id=#{candidate}</delete>
+ <delete id="deleteEvents">DELETE e FROM ai_hr_run_event e JOIN ai_hr_matching_run r ON r.tenant_id=e.tenant_id AND r.id=e.run_id WHERE r.tenant_id=#{tenant} AND r.candidate_id=#{candidate}</delete>
+ <delete id="deleteResults">DELETE FROM ai_hr_matching_result WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+ <delete id="deleteSemantic">DELETE FROM ai_hr_semantic_snapshot WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+ <delete id="deleteRuns">DELETE FROM ai_hr_matching_run WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+ <delete id="deleteExports">DELETE e FROM ai_hr_interview_export e JOIN ai_hr_interview_set s ON s.tenant_id=e.tenant_id AND s.id=e.set_id WHERE s.tenant_id=#{tenant} AND s.candidate_id=#{candidate}</delete>
+ <delete id="deleteInterviewSets">DELETE FROM ai_hr_interview_set WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+ <update id="clearBatchContent">UPDATE ai_hr_batch_item SET encrypted_content=NULL WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</update>
+ <delete id="deleteSource">DELETE FROM ai_hr_source_authorization WHERE tenant_id=#{tenant} AND candidate_id=#{candidate}</delete>
+</mapper>

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from efficiency_platform_agent.core.memory import SourceDependency
 from efficiency_platform_agent.core.run import ProviderMessage
+from efficiency_platform_agent.core.run_context_binding import current_run_context
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,6 +15,7 @@ class ConversationTurn:
 
     role: str
     content: str
+    safety_dependencies: tuple[SourceDependency, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.role not in {"user", "assistant"}:
@@ -44,6 +47,15 @@ class ConversationContext:
     @property
     def turns(self) -> tuple[ConversationTurn, ...]:
         """返回不可变快照，调用方不能修改内部历史。"""
+        binding = current_run_context()
+        if binding is not None and binding.memory_context is not None:
+            allowed = set(binding.memory_context.packet.safety_dependencies)
+            return tuple(
+                turn
+                for turn in self._turns
+                if turn.safety_dependencies
+                and set(turn.safety_dependencies).issubset(allowed)
+            )
         return tuple(self._turns)
 
     @property
@@ -57,7 +69,11 @@ class ConversationContext:
             raise TypeError("turn必须是ConversationTurn")
         bounded = turn
         if len(turn.content) > self.max_characters:
-            bounded = ConversationTurn(turn.role, turn.content[-self.max_characters :])
+            bounded = ConversationTurn(
+                turn.role,
+                turn.content[-self.max_characters :],
+                turn.safety_dependencies,
+            )
         self._turns.append(bounded)
         while len(self._turns) > self.max_turns:
             self._turns.pop(0)
@@ -66,7 +82,10 @@ class ConversationContext:
 
     def provider_messages(self) -> tuple[ProviderMessage, ...]:
         """只把已裁剪的角色和可见正文转换为 Provider 消息。"""
-        return tuple(ProviderMessage(turn.role, turn.content) for turn in self._turns)
+        return tuple(ProviderMessage(turn.role, turn.content) for turn in self.turns)
+
+    def clear(self) -> None:
+        self._turns.clear()
 
 
 __all__ = ["ConversationContext", "ConversationTurn"]

@@ -1,0 +1,65 @@
+{
+  "unitAndComponent": {
+    "files": 41,
+    "passed": 206,
+    "failed": 0
+  },
+  "defaultE2E": {
+    "passed": 44,
+    "failed": 0
+  },
+  "responsiveRouteChecks": 132,
+  "themeComparison": {
+    "referenceRoot": "D:\\软件目录\\efficiency-platform\\ai-efficiency-platform-ui\\e2e\\reference-ui",
+    "defaultTargets": 28,
+    "propertiesPerTarget": 23,
+    "statePropertyComparisons": 878,
+    "modes": [
+      "default",
+      "hover",
+      "focus",
+      "disabled",
+      "modal",
+      "actual-business-dashed-button"
+    ],
+    "actualBusinessButton": {
+      "color": "rgba(0, 0, 0, 0.88)",
+      "borderTopColor": "rgb(217, 217, 217)",
+      "borderRadius": "6px",
+      "backgroundColor": "rgb(255, 255, 255)"
+    },
+    "referenceBusinessButton": {
+      "color": "rgba(0, 0, 0, 0.88)",
+      "backgroundColor": "rgb(255, 255, 255)",
+      "backgroundImage": "none",
+      "borderTopColor": "rgb(217, 217, 217)",
+      "borderTopWidth": "1px",
+      "borderTopStyle": "dashed",
+      "borderRadius": "6px",
+      "boxShadow": "rgba(0, 0, 0, 0.02) 0px 2px 0px 0px",
+      "fontFamily": "-apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, \"Noto Sans\", sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", \"Noto Color Emoji\"",
+      "fontSize": "14px",
+      "fontWeight": "400",
+      "lineHeight": "22px",
+      "paddingTop": "4px",
+      "paddingRight": "15px",
+      "paddingBottom": "4px",
+      "paddingLeft": "15px",
+      "height": "32px",
+      "opacity": "1",
+      "cursor": "pointer",
+      "outlineColor": "rgba(0, 0, 0, 0.88)",
+      "outlineStyle": "none",
+      "outlineWidth": "3px",
+      "backdropFilter": "none"
+    }
+  },
+  "coveragePercent": {
+    "Statements": "74.7",
+    "Branches": "66.23",
+    "Functions": "63.32",
+    "Lines": "76.78"
+  },
+  "previewUrl": "http://127.0.0.1:5192/",
+  "paidExternalCalls": 0
+}

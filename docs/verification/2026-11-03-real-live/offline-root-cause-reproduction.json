@@ -1,0 +1,20 @@
+{
+  "allHttpWasMockTransport": true,
+  "realProviderRequests": 0,
+  "realLedgerChanged": false,
+  "concurrency": {
+    "secondRequestCode": "BUDGET_EXHAUSTED",
+    "attemptsActuallySent": 1,
+    "maxCalls": 10,
+    "totalCostCap": 1000,
+    "maxInflight": 1,
+    "reproducedConcurrencyMislabel": true
+  },
+  "compression": {
+    "businessResponseDecoded": true,
+    "ledgerUsageState": "unknown",
+    "usageReported": false,
+    "reproducedCompressedUsageGap": true,
+    "actualLiveCauseConfirmed": false
+  }
+}

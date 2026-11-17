@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-03",
+  "defaultBackendPorts": {
+    "8080": "not listening",
+    "8081": "not listening",
+    "8000": "not listening",
+    "8001": "not listening"
+  },
+  "developmentPreview": "127.0.0.1:5192",
+  "dockerServer": "unavailable",
+  "nginxExecutable": "not available",
+  "cachedNginxImage": "unavailable",
+  "liveBusinessApiValidation": "not run",
+  "paidBudgetAuthorization": false,
+  "databaseWrites": false
+}

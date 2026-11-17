@@ -1,0 +1,20 @@
+{
+  "user_instruction": "制定计划然后按计划开始实施",
+  "prior_proposal_max_http_attempts": 1,
+  "prior_proposal_max_reserved_cny": 0.2,
+  "actual_reserved_and_authorized_cny": 0.02,
+  "worst_case_cny": 0.018432,
+  "price_verified_date": "2026-11-04",
+  "deadline_shanghai": "2026-11-04T11:53:15.717000+08:00",
+  "prior_attempts": 21,
+  "prior_accounted_cny": 3.106252,
+  "original_cumulative_cap_cny": 30,
+  "original_cumulative_cap_calls": 90,
+  "no_retries": true,
+  "no_auto_renewal": true,
+  "stop_on_unknown": true,
+  "old_authorizations_unchanged": true,
+  "plan_sha256": "8cd250249d8fcb560240772c2b7f3c487d2ed937aca817a998a57dfe06d975e0",
+  "real_mode_uses_fixed_current_user_ledger": true,
+  "supplier_account_cap_not_independently_verified": true
+}

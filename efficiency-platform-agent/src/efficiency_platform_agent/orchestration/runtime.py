@@ -20,6 +20,7 @@ from efficiency_platform_agent.core.diagnostics import (
     safe_exception_location,
 )
 from efficiency_platform_agent.core.enums import RunStatus
+from efficiency_platform_agent.core.memory_thread import MemoryThreadRegistry
 from efficiency_platform_agent.core.run import JsonObject, JsonValue
 from efficiency_platform_agent.core.runtime import (
     ExecutionFact,
@@ -35,6 +36,7 @@ from .contracts import (
     GraphProgram,
     GraphRegistration,
 )
+from .fenced_checkpoint import FencedCheckpointStore
 from .registry import GraphRegistry, validate_strategy_payload
 
 
@@ -73,10 +75,17 @@ class GraphRuntime:
         cancellation_signal=None,
         clock=None,
         diagnostic_recorder: DiagnosticRecorderPort | None = None,
+        memory_registry: MemoryThreadRegistry | None = None,
+        checkpoint_serializer=None,
     ) -> None:
         self.registry = registry
         self.checkpointer = checkpointer
         self.checkpoints = checkpoint_store or InMemoryCheckpointStore()
+        self.memory_registry = memory_registry
+        if memory_registry is not None:
+            self.checkpoints = FencedCheckpointStore(
+                self.checkpoints, memory_registry, serializer=checkpoint_serializer
+            )
         self.budget_guard = budget_guard or BudgetGuard()
         self.budget = budget
         self.cancellation = cancellation_signal or InMemoryCancellationSignal()
@@ -88,6 +97,8 @@ class GraphRuntime:
         registration = self._registration(selection)
         run_id = initial_state.get("run_id")
         tenant_id = _state_tenant_id(initial_state)
+        if self.memory_registry is not None:
+            await self.memory_registry.check_runtime(str(run_id or ""), tenant_id)
         if not isinstance(run_id, str) or not run_id:
             return await self._failure_result(
                 registration,
@@ -176,6 +187,8 @@ class GraphRuntime:
         tenant_id: str = "",
     ):
         registration = self._registration(selection)
+        if self.memory_registry is not None:
+            raise PermissionError("CONTINUATION_AUTH_UNSUPPORTED")
         record = await _resolve_awaitable(
             self.checkpoints.get(run_id, registration.checkpoint_ns, tenant_id)
         )
@@ -228,10 +241,24 @@ class GraphRuntime:
         self, selection, run_id: str, *, tenant_id: str = ""
     ) -> CheckpointView | None:
         registration = self._registration(selection)
+        if self.memory_registry is not None:
+            await self.memory_registry.check_runtime(run_id, tenant_id)
         record = await _resolve_awaitable(
             self.checkpoints.get(run_id, registration.checkpoint_ns, tenant_id)
         )
         return record.view if record else None
+
+    def scrub_memory_run(self, run_id: str) -> bool:
+        selected = [(key, program) for key, program in self._programs.items() if key[0] == run_id]
+        if any(not callable(getattr(program, "scrub_memory_body", None)) for _, program in selected):
+            return False
+        for key, program in selected:
+            scrub = getattr(program, "scrub_memory_body", None)
+            if not callable(scrub):
+                return False
+            scrub()
+            self._programs.pop(key, None)
+        return True
 
     def _registration(self, selection) -> GraphRegistration:
         if not hasattr(selection, "mode"):

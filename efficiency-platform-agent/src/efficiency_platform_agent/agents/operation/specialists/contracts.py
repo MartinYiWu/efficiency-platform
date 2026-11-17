@@ -16,6 +16,10 @@ from efficiency_platform_agent.agents.operation.contracts.profiles import (
 )
 from efficiency_platform_agent.agents.operation.contracts.task import OperationTaskSpec
 from efficiency_platform_agent.core.agent import CapabilityRequirement
+from efficiency_platform_agent.core.context_projection import (
+    SpecialistContextSlice,
+    SpecialistResultProjection,
+)
 from efficiency_platform_agent.core.multi_agent import BudgetUsage
 
 
@@ -87,4 +91,9 @@ class SpecialistExecutionResult:
             raise ValueError("失败结果必须包含缺失范围")
 
 
-__all__ = ["SpecialistExecutionInput", "SpecialistExecutionResult"]
+__all__ = [
+    "SpecialistContextSlice",
+    "SpecialistExecutionInput",
+    "SpecialistExecutionResult",
+    "SpecialistResultProjection",
+]

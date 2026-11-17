@@ -13,7 +13,6 @@ import json
 import sys
 import time
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -26,10 +25,6 @@ from efficiency_platform_agent.agents.operation.contracts.evidence import (  # t
 )
 from efficiency_platform_agent.capabilities.research.contracts import (  # type: ignore[import-untyped]  # 研究契约模块暂未发布类型标记
     ResearchRequest,
-    ResearchStatus,
-)
-from efficiency_platform_agent.capabilities.research.deepseek_web_search import (  # type: ignore[import-untyped]  # 研究适配器模块暂未发布类型标记
-    DeepSeekWebSearchProvider,
 )
 from efficiency_platform_agent.configuration.integration import (  # type: ignore[import-untyped]  # 配置模块暂未发布类型标记
     GateAction,
@@ -39,11 +34,6 @@ from efficiency_platform_agent.configuration.integration import (  # type: ignor
 )
 from efficiency_platform_agent.core.run import (  # type: ignore[import-untyped]  # 核心契约模块暂未发布类型标记
     JsonObject,
-    ProviderMessage,
-    ProviderRequest,
-)
-from efficiency_platform_agent.providers.llm.deepseek import (  # type: ignore[import-untyped]  # 适配器模块暂未发布类型标记
-    DeepSeekModelProvider,
 )
 
 _SCENARIOS: dict[str, dict[str, Any]] = {
@@ -244,148 +234,8 @@ async def run_deepseek_chat_acceptance(
     evidence_root: Path | None = None,
     now_epoch_ms: int | None = None,
 ) -> dict[str, Any]:
-    """执行一次受控 DeepSeek 最小模型验收，不保存模型响应正文。"""
-    settings = S7IntegrationSettings.from_env_file(PROJECT_ROOT / ".env")
-    gate = IntegrationGate.DEEPSEEK_CHAT
-    if not settings.gates.get(gate.value, False):
-        return _not_executed("gate_disabled")
-    missing = settings.for_gate(gate)
-    if missing:
-        return _not_executed("configuration_missing")
-    authorizations = load_authorizations(approval_file)
-    authorization = next(
-        (
-            item
-            for item in authorizations
-            if item.gate is gate and item.action is GateAction.CHARGED_ACCEPTANCE
-        ),
-        None,
-    )
-    if authorization is None:
-        return _not_executed("charged_acceptance_authorization_missing")
-    model_id = _secret_value(settings.deepseek_fast_model)
-    target_digest = _digest("deepseek-chat-endpoint-v1")
-    input_digest = _digest("s7-g1-minimal-structured-probe-v1")
-    now = now_epoch_ms if now_epoch_ms is not None else int(time.time() * 1000)
-    try:
-        authorization.validate_request(
-            run_stamp=authorization.run_stamp,
-            executor_id=authorization.executor_id,
-            gate=gate,
-            action=GateAction.CHARGED_ACCEPTANCE,
-            target_digest=target_digest,
-            input_digest=input_digest,
-            model_ids=(model_id,),
-            resource_ids=("deepseek.chat",),
-            now_epoch_ms=now,
-            required_limits={
-                "max_network_calls": 1,
-                "max_model_calls": 1,
-                "max_cost_microunits": 1_000_000,
-                "max_bytes": 1_048_576,
-            },
-            cleanup_owner=authorization.cleanup_owner,
-            cleanup_procedure_id=authorization.cleanup_procedure_id,
-        )
-    except (TypeError, ValueError):
-        return _not_executed("authorization_context_mismatch")
-
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(
-        api_key=_secret_value(settings.deepseek_api_key),
-        base_url=_secret_value(settings.deepseek_base_url),
-        timeout=30.0,
-        max_retries=0,
-    )
-    provider_client = SimpleNamespace(chat=client.chat, close=client.close)
-    provider = DeepSeekModelProvider(provider_client, model_id, timeout_ms=30_000)
-    request = ProviderRequest(
-        "s7-g1/1",
-        (ProviderMessage("user", '仅返回 JSON 对象：{"ok":true}'),),
-        JsonObject(
-            (
-                ("response_format", JsonObject((("type", "json_object"),))),
-                ("temperature", 0),
-            )
-        ),
-        30_000,
-    )
-    started = time.perf_counter()
-    network_calls = 1
-    model_calls = 1
-    try:
-        response = await provider.complete(request)
-        usage = response.usage
-        output_valid = False
-        if response.message is not None and isinstance(response.message.content, str):
-            try:
-                parsed = json.loads(response.message.content)
-                output_valid = isinstance(parsed, dict) and parsed.get("ok") is True
-            except json.JSONDecodeError:
-                output_valid = False
-        if response.error is not None:
-            result: dict[str, Any] = {
-                "status": "FAILED",
-                "reason": "model_request_failed",
-                "error_code": response.error.code,
-                "external_io": True,
-                "selected_real_gates": [gate.value],
-                "network_calls": network_calls,
-                "model_calls": model_calls,
-                "cost_microunits": usage.cost_microunits,
-                "cost_observed": usage.cost_microunits > 0,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-            }
-        elif not output_valid:
-            result = {
-                "status": "FAILED",
-                "reason": "structured_output_invalid",
-                "external_io": True,
-                "selected_real_gates": [gate.value],
-                "network_calls": network_calls,
-                "model_calls": model_calls,
-                "cost_microunits": usage.cost_microunits,
-                "cost_observed": usage.cost_microunits > 0,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-            }
-        else:
-            result = {
-                "status": "SUCCEEDED",
-                "external_io": True,
-                "selected_real_gates": [gate.value],
-                "network_calls": network_calls,
-                "model_calls": model_calls,
-                "cost_microunits": usage.cost_microunits,
-                "cost_observed": usage.cost_microunits > 0,
-                "input_tokens": usage.input_tokens,
-                "output_tokens": usage.output_tokens,
-            }
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:  # noqa: BLE001, 对外只返回稳定错误类别
-        result = {
-            "status": "FAILED",
-            "reason": "model_acceptance_failed",
-            "error_type": type(error).__name__,
-            "external_io": True,
-            "selected_real_gates": [gate.value],
-            "network_calls": network_calls,
-            "model_calls": model_calls,
-            "cost_microunits": 0,
-            "cost_observed": False,
-        }
-    finally:
-        await provider.close()
-    result["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
-    if evidence_root is not None:
-        evidence_root.mkdir(parents=True, exist_ok=True)
-        (evidence_root / "g1-deepseek-chat-acceptance.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    return result
+    """旧入口禁用；真实付费请求须切换到受保护的 Java/Agent 入口。"""
+    raise RuntimeError("PAID_LEGACY_ENTRY_DISABLED: use protected Java/Agent entry")
 
 
 def _web_search_request() -> ResearchRequest:
@@ -409,111 +259,8 @@ async def probe_deepseek_web_search(
     evidence_root: Path | None = None,
     now_epoch_ms: int | None = None,
 ) -> dict[str, Any]:
-    """执行一次服务端 web_search 最小探测，不打开任何来源 URL。"""
-    settings = S7IntegrationSettings.from_env_file(PROJECT_ROOT / ".env")
-    gate = IntegrationGate.DEEPSEEK_WEB_SEARCH
-    if not settings.gates.get(gate.value, False):
-        return _not_executed("gate_disabled")
-    missing = settings.for_gate(gate)
-    if missing:
-        return _not_executed("configuration_missing")
-    authorizations = load_authorizations(approval_file)
-    authorization = max(
-        (
-            item
-            for item in authorizations
-            if item.gate is gate and item.action is GateAction.NETWORK_PROBE
-        ),
-        key=lambda item: item.approved_at_epoch_ms,
-        default=None,
-    )
-    if authorization is None:
-        return _not_executed("network_probe_authorization_missing")
-    target_digest = _digest("deepseek-s7-web-search-v1")
-    input_digest = _digest("s7-web-search-probe-v1")
-    now = now_epoch_ms if now_epoch_ms is not None else int(time.time() * 1000)
-    try:
-        authorization.validate_request(
-            run_stamp=authorization.run_stamp,
-            executor_id=authorization.executor_id,
-            gate=gate,
-            action=GateAction.NETWORK_PROBE,
-            target_digest=target_digest,
-            input_digest=input_digest,
-            model_ids=(_secret_value(settings.deepseek_fast_model),),
-            resource_ids=("deepseek.web_search",),
-            now_epoch_ms=now,
-            required_limits={
-                "max_network_calls": 1,
-                "max_model_calls": 1,
-                "max_search_calls": 1,
-                "max_cost_microunits": 0,
-                "max_bytes": 1_048_576,
-            },
-            cleanup_owner=authorization.cleanup_owner,
-            cleanup_procedure_id=authorization.cleanup_procedure_id,
-        )
-    except (TypeError, ValueError):
-        return _not_executed("authorization_context_mismatch")
-
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(
-        api_key=_secret_value(settings.deepseek_api_key),
-        base_url=_secret_value(settings.deepseek_base_url),
-        timeout=30.0,
-        max_retries=0,
-    )
-    provider = DeepSeekWebSearchProvider(
-        client,
-        model=_secret_value(settings.deepseek_balanced_model),
-        timeout_ms=30_000,
-    )
-    started = time.perf_counter()
-    try:
-        research = await provider.research(_web_search_request())
-        result: dict[str, Any] = {
-            "status": "SUCCEEDED"
-            if research.status is ResearchStatus.SUCCEEDED
-            else "FAILED",
-            "reason": None
-            if research.status is ResearchStatus.SUCCEEDED
-            else research.error_code,
-            "external_io": True,
-            "selected_real_gates": [gate.value],
-            "network_calls": 1,
-            "model_calls": 1,
-            "search_calls": 1,
-            "observation_count": len(research.observations),
-            "source_urls_opened": 0,
-            "cost_microunits": 0,
-            "cost_observed": False,
-        }
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:  # noqa: BLE001, 对外只返回稳定错误类别
-        result = {
-            "status": "FAILED",
-            "reason": "web_search_probe_failed",
-            "error_type": type(error).__name__,
-            "external_io": True,
-            "selected_real_gates": [gate.value],
-            "network_calls": 1,
-            "model_calls": 1,
-            "search_calls": 1,
-            "source_urls_opened": 0,
-            "cost_microunits": 0,
-            "cost_observed": False,
-        }
-    finally:
-        await client.close()
-    result["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
-    if evidence_root is not None:
-        evidence_root.mkdir(parents=True, exist_ok=True)
-        (evidence_root / "g2-deepseek-web-search-probe.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    return result
+    """旧入口禁用；真实付费请求须切换到受保护的 Java/Agent 入口。"""
+    raise RuntimeError("PAID_LEGACY_ENTRY_DISABLED: use protected Java/Agent entry")
 
 
 async def run_deepseek_web_search_acceptance(
@@ -522,112 +269,8 @@ async def run_deepseek_web_search_acceptance(
     evidence_root: Path | None = None,
     now_epoch_ms: int | None = None,
 ) -> dict[str, Any]:
-    """执行最多一次服务端搜索验收并只保存脱敏来源计数。"""
-    settings = S7IntegrationSettings.from_env_file(PROJECT_ROOT / ".env")
-    gate = IntegrationGate.DEEPSEEK_WEB_SEARCH
-    if not settings.gates.get(gate.value, False):
-        return _not_executed("gate_disabled")
-    missing = settings.for_gate(gate)
-    if missing:
-        return _not_executed("configuration_missing")
-    authorizations = load_authorizations(approval_file)
-    authorization = max(
-        (
-            item
-            for item in authorizations
-            if item.gate is gate and item.action is GateAction.CHARGED_ACCEPTANCE
-        ),
-        key=lambda item: item.approved_at_epoch_ms,
-        default=None,
-    )
-    if authorization is None:
-        return _not_executed("charged_acceptance_authorization_missing")
-    target_digest = _digest("deepseek-s7-web-search-v1")
-    input_digest = _digest("s7-web-search-acceptance-v1")
-    now = now_epoch_ms if now_epoch_ms is not None else int(time.time() * 1000)
-    try:
-        authorization.validate_request(
-            run_stamp=authorization.run_stamp,
-            executor_id=authorization.executor_id,
-            gate=gate,
-            action=GateAction.CHARGED_ACCEPTANCE,
-            target_digest=target_digest,
-            input_digest=input_digest,
-            model_ids=(_secret_value(settings.deepseek_fast_model),),
-            resource_ids=("deepseek.web_search",),
-            now_epoch_ms=now,
-            required_limits={
-                "max_network_calls": 1,
-                "max_model_calls": 1,
-                "max_search_calls": 1,
-                "max_cost_microunits": 1_000_000,
-                "max_bytes": 1_048_576,
-            },
-            cleanup_owner=authorization.cleanup_owner,
-            cleanup_procedure_id=authorization.cleanup_procedure_id,
-        )
-    except (TypeError, ValueError):
-        return _not_executed("authorization_context_mismatch")
-
-    from openai import AsyncOpenAI
-
-    client = AsyncOpenAI(
-        api_key=_secret_value(settings.deepseek_api_key),
-        base_url=_secret_value(settings.deepseek_base_url),
-        timeout=30.0,
-        max_retries=0,
-    )
-    provider = DeepSeekWebSearchProvider(
-        client,
-        model=_secret_value(settings.deepseek_balanced_model),
-        timeout_ms=30_000,
-    )
-    started = time.perf_counter()
-    try:
-        research = await provider.research(_web_search_request())
-        succeeded = research.status is ResearchStatus.SUCCEEDED and bool(
-            research.observations
-        )
-        result: dict[str, Any] = {
-            "status": "SUCCEEDED" if succeeded else "FAILED",
-            "reason": None
-            if succeeded
-            else (research.error_code or "search_insufficient"),
-            "external_io": True,
-            "selected_real_gates": [gate.value],
-            "network_calls": 1,
-            "model_calls": 1,
-            "search_calls": 1,
-            "observation_count": len(research.observations),
-            "source_urls_opened": 0,
-            "cost_microunits": 0,
-            "cost_observed": False,
-        }
-    except asyncio.CancelledError:
-        raise
-    except Exception as error:  # noqa: BLE001, 对外只返回稳定错误类别
-        result = {
-            "status": "FAILED",
-            "reason": "web_search_acceptance_failed",
-            "error_type": type(error).__name__,
-            "external_io": True,
-            "selected_real_gates": [gate.value],
-            "network_calls": 1,
-            "model_calls": 1,
-            "search_calls": 1,
-            "source_urls_opened": 0,
-            "cost_microunits": 0,
-            "cost_observed": False,
-        }
-    finally:
-        await client.close()
-    result["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
-    if evidence_root is not None:
-        evidence_root.mkdir(parents=True, exist_ok=True)
-        (evidence_root / "g2-deepseek-web-search-acceptance.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    return result
+    """旧入口禁用；真实付费请求须切换到受保护的 Java/Agent 入口。"""
+    raise RuntimeError("PAID_LEGACY_ENTRY_DISABLED: use protected Java/Agent entry")
 
 
 async def probe_redis_taskiq(

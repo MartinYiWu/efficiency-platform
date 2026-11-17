@@ -1,0 +1,19 @@
+:root {
+  --v1-primary: #2563eb;
+  --v1-primary-hover: #1d4ed8;
+  --v1-accent: #7c3aed;
+  --v1-bg-page: #f6f8fc;
+  --v1-bg-sidebar: #ffffff;
+  --v1-bg-card: #ffffff;
+  --v1-border: #e5eaf3;
+  --v1-border-soft: #eef2f7;
+  --v1-text: #111827;
+  --v1-text-secondary: #4b5563;
+  --v1-text-muted: #8a94a6;
+  --v1-success: #16a34a;
+  --v1-warning: #f59e0b;
+  --v1-danger: #ef4444;
+  --v1-radius: 8px;
+  --v1-shadow-card: 0 8px 24px rgba(15, 23, 42, 0.04);
+  --v1-topbar-height: 56px;
+}

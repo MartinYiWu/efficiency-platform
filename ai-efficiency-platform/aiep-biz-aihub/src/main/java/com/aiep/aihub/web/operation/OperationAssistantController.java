@@ -1,5 +1,7 @@
 package com.aiep.aihub.web.operation;
 
+import com.aiep.aihub.application.operation.OperationActor;
+import com.aiep.aihub.web.memory.MemoryActorResolver;
 import com.aiep.aihub.application.operation.OperationAssistantService;
 import com.aiep.aihub.application.operation.OperationViews;
 import com.aiep.platformai.api.dto.OperationAgentRunEvent;
@@ -28,8 +30,10 @@ public class OperationAssistantController {
     private static final long SSE_TIMEOUT_MILLIS = 10 * 60 * 1000L;
 
     private final OperationAssistantService service;
+    private final MemoryActorResolver actors;
 
-    public OperationAssistantController(OperationAssistantService service) {
+    public OperationAssistantController(OperationAssistantService service, MemoryActorResolver actors) {
+        this.actors = actors;
         this.service = service;
     }
 
@@ -69,11 +73,12 @@ public class OperationAssistantController {
     public SseEmitter streamEvents(
             @PathVariable String runId,
             @RequestParam(defaultValue = "0") long afterSequence) {
+        var actor = actors.current();
         SseEmitter emitter = new SseEmitter(SSE_TIMEOUT_MILLIS);
         Disposable subscription = service.streamRunEvents(runId, afterSequence)
                 .publishOn(Schedulers.boundedElastic())
                 .subscribe(
-                        event -> sendEvent(emitter, runId, event),
+                        event -> sendEvent(emitter, runId, event, actor),
                         emitter::completeWithError,
                         emitter::complete);
         emitter.onCompletion(subscription::dispose);
@@ -118,9 +123,9 @@ public class OperationAssistantController {
                 .body(artifact.bodyMarkdown().getBytes(StandardCharsets.UTF_8));
     }
 
-    private void sendEvent(SseEmitter emitter, String runId, OperationAgentRunEvent event) {
+    private void sendEvent(SseEmitter emitter, String runId, OperationAgentRunEvent event, OperationActor actor) {
         try {
-            service.projectEvent(runId, event);
+            service.projectEvent(runId, event, actor);
             OperationAgentRunEvent publicEvent = new OperationAgentRunEvent(
                     event.contractVersion(), event.event(), runId, event.sequence(), event.payload());
             emitter.send(SseEmitter.event()
@@ -129,7 +134,7 @@ public class OperationAssistantController {
                     .data(publicEvent, MediaType.APPLICATION_JSON));
         } catch (Exception exception) {
             try {
-                service.failEventProjection(runId, event, exception);
+                service.failEventProjection(runId, event, exception, actor);
             } catch (RuntimeException persistenceException) {
                 exception.addSuppressed(persistenceException);
             }

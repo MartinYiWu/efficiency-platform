@@ -1,0 +1,12 @@
+{
+  "checkedFiles": 28,
+  "changedFiles": [],
+  "allChangesToExistingFrontendFiles": [
+    "src/features/customer-service-chat/conversationTitles.test.test.ts",
+    "src/features/knowledge/KnowledgeUploadDrawer.vue",
+    "src/features/knowledge/ProcessingTaskDrawer.vue",
+    "src/pages/knowledge-center/KnowledgeBaseListPage.vue",
+    "package.json",
+    "playwright.config.ts"
+  ]
+}

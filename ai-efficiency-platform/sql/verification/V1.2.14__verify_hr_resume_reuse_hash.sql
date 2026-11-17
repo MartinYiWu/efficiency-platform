@@ -1,0 +1,2 @@
+SELECT column_name,column_type,is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='ai_hr_source_authorization' AND column_name='content_hash';
+SELECT index_name,non_unique,column_name,seq_in_index FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='ai_hr_source_authorization' AND index_name='idx_hr_source_content_hash' ORDER BY seq_in_index;

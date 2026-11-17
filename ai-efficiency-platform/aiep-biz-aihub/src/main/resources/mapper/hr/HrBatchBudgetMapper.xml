@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrBatchBudgetMapper">
+<select id="find" resultType="com.aiep.aihub.repository.hr.HrBatchBudgetMapper$Row">SELECT tenant_id,batch_id,department_id,payload FROM ai_hr_batch_budget WHERE tenant_id=#{tenant} AND batch_id=#{batch}</select>
+<insert id="insert">INSERT INTO ai_hr_batch_budget(tenant_id,batch_id,department_id,payload) VALUES(#{tenantId},#{batchId},#{departmentId},#{payload})</insert>
+</mapper>

@@ -17,6 +17,15 @@ import reactor.core.publisher.Flux;
 
 /** Internal transport seam. Its HTTP implementation is intentionally deferred. */
 public interface AgentClient {
+    default com.aiep.platformai.api.dto.MemoryResumeReceipt resumeMemoryExecution(String tenantId,String executionId,com.aiep.platformai.api.dto.MemoryResumeRequest request) {
+        throw new UnsupportedOperationException("MEMORY_RESUME_TRANSPORT_REQUIRED");
+    }
+    default com.aiep.platformai.api.dto.MemoryCleanupReceipt cleanupMemoryExecution(String tenantId,String executionId,com.aiep.platformai.api.dto.MemoryCleanupRequest request) {
+        throw new UnsupportedOperationException("MEMORY_CLEANUP_TRANSPORT_REQUIRED");
+    }
+    default com.aiep.platformai.api.dto.MemoryRuntimeManifest queryMemoryManifest(String tenantId,String executionId) {
+        throw new UnsupportedOperationException("MEMORY_MANIFEST_TRANSPORT_REQUIRED");
+    }
     AiTextResponse generateText(AiTextRequest request);
     void streamChat(AiStreamRequest request, AiStreamObserver observer);
     AiTextResponse executeSkill(AiSkillExecuteRequest request);

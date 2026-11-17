@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrSpecialMarksMapper">
+ <select id="distinct" resultType="boolean">SELECT COUNT(1)&gt;0 FROM ai_hr_distinct_confirmation WHERE tenant_id=#{tenant} AND left_candidate_id=#{left} AND right_candidate_id=#{right} AND left_fact_version=#{leftVersion} AND right_fact_version=#{rightVersion}</select>
+ <insert id="confirm">INSERT INTO ai_hr_distinct_confirmation(tenant_id,left_candidate_id,right_candidate_id,left_fact_version,right_fact_version,actor_id,reason_json,created_at) VALUES(#{pair.tenant},#{pair.left},#{pair.right},#{pair.leftVersion},#{pair.rightVersion},#{actor},#{reason},#{now}) ON DUPLICATE KEY UPDATE actor_id=actor_id</insert>
+<delete id="deleteForSource">DELETE FROM ai_hr_distinct_confirmation WHERE tenant_id=#{tenant} AND (left_candidate_id=#{candidate} OR right_candidate_id=#{candidate})</delete></mapper>
+

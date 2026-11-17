@@ -1,0 +1,29 @@
+{
+  "unitAndComponent": {
+    "files": 41,
+    "passed": 206,
+    "failed": 0
+  },
+  "coveragePercent": {
+    "Statements": "74.72",
+    "Branches": "66.3",
+    "Functions": "63.3",
+    "Lines": "76.79"
+  },
+  "defaultE2E": {
+    "passed": 43,
+    "failed": 0,
+    "includesPageWidthChecks": 132
+  },
+  "visualScreenshots": 27,
+  "pageComponents": 44,
+  "routeRecords": 47,
+  "paidExternalCalls": 0,
+  "validationMode": "offline fixtures and mocked HTTP",
+  "postCutoverSmoke": {
+    "passed": 3,
+    "failed": 0
+  },
+  "formalPath": "D:\\软件目录\\efficiency-platform\\ai-efficiency-platform-ui",
+  "previewUrl": "http://127.0.0.1:5192/"
+}

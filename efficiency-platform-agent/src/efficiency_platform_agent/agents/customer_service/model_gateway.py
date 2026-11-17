@@ -5,11 +5,20 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
+from hashlib import sha256
 from time import perf_counter
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from efficiency_platform_agent.context.stages import stage_entry
+from efficiency_platform_agent.core.context_dispatch import allow_context_repair
+from efficiency_platform_agent.core.execution_control import (
+    MAX_OPERATION_ATTEMPTS,
+    RunControl,
+    current_run_control,
+)
+from efficiency_platform_agent.core.paid_budget import PaidBudgetError
 from efficiency_platform_agent.core.ports import ModelProvider, StreamingModelProvider
 from efficiency_platform_agent.core.run import (
     JsonObject,
@@ -22,11 +31,20 @@ from .chunking import count_tokens
 from .release_bundle import CustomerServiceReleaseBundle, ModelPolicy, PromptMessage
 
 T = TypeVar("T", bound=BaseModel)
+RECOVERABLE_CODES = frozenset(
+    {
+        "MODEL_INPUT_BUDGET_EXCEEDED",
+        "MODEL_RESPONSE_INVALID",
+        "PROVIDER_RESPONSE_TRUNCATED",
+        "PROVIDER_RESPONSE_INVALID",
+        "PROVIDER_SCHEMA_INVALID",
+    }
+)
 
 
 def _log_validation_error(
     stage_key: str, error: ValueError, output_type: type[BaseModel]
-) -> None:
+) -> str:
     schema = output_type.model_json_schema()
     field_names = set(schema.get("properties", {}))
     for definition in schema.get("$defs", {}).values():
@@ -54,6 +72,7 @@ def _log_validation_error(
         stage_key,
         fields,
     )
+    return json.dumps(fields, ensure_ascii=False)
 
 
 def _freeze(value: object) -> JsonValue:
@@ -166,6 +185,7 @@ class ReleaseStructuredModelGateway:
         self.provider = provider
         self.bundle = bundle
         self.model_policy = bundle.model_policy
+        self._control = current_run_control() or RunControl()
 
     def with_model_policy(self, policy: ModelPolicy) -> ReleaseStructuredModelGateway:
         if policy not in (
@@ -175,7 +195,27 @@ class ReleaseStructuredModelGateway:
             raise StructuredModelError("MODEL_POLICY_NOT_BOUND", "模型策略未绑定")
         gateway = ReleaseStructuredModelGateway(self.provider, self.bundle)
         gateway.model_policy = policy
+        gateway._control = self._control
         return gateway
+
+    def _operation_key(
+        self, stage_key: str, input_value: object, output_type: type[BaseModel]
+    ) -> str:
+        value = {
+            "stage": stage_key,
+            "input": input_value,
+            "policy": self.model_policy.model_dump(mode="json"),
+            "schema": output_type.model_json_schema(),
+            "output_type": (output_type.__module__, output_type.__qualname__),
+            "prompts": [
+                item.model_dump(mode="json") for item in self.bundle.prompt_bindings
+            ],
+        }
+        return sha256(
+            json.dumps(
+                value, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
 
     def input_tokens(
         self, stage_key: str, input_value: object, output_type: type[BaseModel]
@@ -192,7 +232,27 @@ class ReleaseStructuredModelGateway:
             )
         )
 
+    @stage_entry(
+        "customer-service",
+        inputs=("stage_key", "input_value"),
+        identity=("stage_key",),
+        node_fields=("stage_key",),
+    )
     async def complete(
+        self,
+        stage_key: str,
+        input_value: object,
+        output_type: type[T],
+    ) -> T:
+        control = current_run_control() or self._control
+        result = await control.execute(
+            self._operation_key(stage_key, input_value, output_type),
+            lambda: self._complete(stage_key, input_value, output_type),
+            recoverable_codes=RECOVERABLE_CODES,
+        )
+        return result.model_copy(deep=True)
+
+    async def _complete(
         self,
         stage_key: str,
         input_value: object,
@@ -223,7 +283,9 @@ class ReleaseStructuredModelGateway:
             )
             + _stage_thinking_option(stage_key)
         )
-        for attempt in range(policy.max_retries + 1):
+        max_attempts = min(policy.max_retries + 1, MAX_OPERATION_ATTEMPTS)
+        feedback = ""
+        for attempt in range(max_attempts):
             attempt_messages = messages
             if attempt:
                 attempt_messages += (
@@ -232,6 +294,8 @@ class ReleaseStructuredModelGateway:
                         content=(
                             "前一次输出未通过 JSON Schema 校验。重新生成完整 JSON 对象，"
                             "严格遵守字段名、必填项、类型、枚举和额外字段限制。"
+                            + "校验位置与类型："
+                            + feedback
                         ),
                     ),
                 )
@@ -244,10 +308,14 @@ class ReleaseStructuredModelGateway:
                 )
             )
             if result.error is not None:
+                if result.error.category == "budget":
+                    raise PaidBudgetError(result.error.code, result.error.safe_message)
                 if (
                     result.error.code == "PROVIDER_SCHEMA_INVALID"
-                    and attempt < policy.max_retries
+                    and attempt + 1 < max_attempts
                 ):
+                    feedback = "PROVIDER_SCHEMA_INVALID"
+                    await allow_context_repair()
                     continue
                 raise StructuredModelError(result.error.code, result.error.safe_message)
             if result.message is None or not isinstance(result.message.content, str):
@@ -264,15 +332,45 @@ class ReleaseStructuredModelGateway:
                 )
                 return value
             except ValueError as error:
-                _log_validation_error(stage_key, error, output_type)
-                if attempt < policy.max_retries:
+                feedback = _log_validation_error(stage_key, error, output_type)
+                if attempt + 1 < max_attempts:
+                    await allow_context_repair()
                     continue
                 raise StructuredModelError(
                     "MODEL_RESPONSE_INVALID", "模型返回不符合契约"
                 ) from error
         raise AssertionError("结构化模型重试循环未返回")
 
+    @stage_entry(
+        "customer-service",
+        inputs=("stage_key", "input_value"),
+        identity=("stage_key",),
+        node_fields=("stage_key",),
+    )
     async def stream_complete(
+        self,
+        stage_key: str,
+        input_value: object,
+        output_type: type[T],
+        on_content: Callable[[str], None],
+    ) -> T:
+        if not isinstance(self.provider, StreamingModelProvider):
+            return await self.complete(stage_key, input_value, output_type)
+        control = current_run_control() or self._control
+        key = self._operation_key(stage_key, input_value, output_type)
+        shared = key in control.results or key in control.pending
+        result = await control.execute(
+            key,
+            lambda: self._stream_complete(
+                stage_key, input_value, output_type, on_content
+            ),
+            recoverable_codes=RECOVERABLE_CODES,
+        )
+        if shared:
+            on_content(result.model_dump_json())
+        return result.model_copy(deep=True)
+
+    async def _stream_complete(
         self,
         stage_key: str,
         input_value: object,
@@ -312,6 +410,8 @@ class ReleaseStructuredModelGateway:
         finished = False
         async for chunk in self.provider.stream(request):
             if chunk.error is not None:
+                if chunk.error.category == "budget":
+                    raise PaidBudgetError(chunk.error.code, chunk.error.safe_message)
                 raise StructuredModelError(chunk.error.code, chunk.error.safe_message)
             if chunk.delta:
                 parts.append(chunk.delta)

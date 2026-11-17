@@ -1,6 +1,8 @@
 """正式本地实时组合根必须独立于测试模式与生产持久化门。"""
 
+from datetime import UTC, datetime
 from importlib import import_module, util
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -9,6 +11,8 @@ from efficiency_platform_agent.configuration.research import ResearchPipelineSet
 from efficiency_platform_agent.harness.local_real_factory import (
     build_local_agent_application,
 )
+from tests.unit.capabilities.research_v2.test_source_admission import descriptor
+from tests.unit.capabilities.research_v2.test_source_registry import brief, context
 from tests.unit.harness.test_local_real_factory import synthetic_settings
 
 
@@ -32,8 +36,27 @@ def module():
     return import_module(name)
 
 
-async def test_formal_factory_assembles_disabled_sources_without_bypass():
-    module()
+@pytest.fixture
+def local_source_descriptor():
+    return descriptor().model_copy(
+        update={
+            "source_id": "google_blog_rss",
+            "config_version": "local-live-sources/1",
+            "publisher_id": "google",
+            "allowed_hosts": ("blog.google",),
+            "history_mode": "unknown",
+        }
+    )
+
+
+async def test_formal_factory_assembles_disabled_sources_without_bypass(
+    monkeypatch, local_source_descriptor
+):
+    factory = module()
+    disabled = local_source_descriptor.model_copy(update={"enabled": False})
+    monkeypatch.setattr(
+        factory, "load_local_source_descriptors", lambda path: (disabled,)
+    )
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(lambda request: pytest.fail("装配不可发起网络"))
     ) as client:
@@ -50,7 +73,50 @@ async def test_formal_factory_assembles_disabled_sources_without_bypass():
         assert components.delegate.submissions is app.conversation.submissions
         assert app.runtime.budget.max_tool_calls == 60
         assert app.runtime.budget.timeout_ms == 240_000
+        availability = components.registry.availability(
+            context(allowed_source_ids=(disabled.source_id,)),
+            brief(source_ids=(disabled.source_id,)),
+        )
+        assert len(availability) == 1
+        assert availability[0].available is False
+        assert availability[0].reason_codes == ("SOURCE_DISABLED",)
         await app.close()
+
+
+@pytest.mark.parametrize(
+    ("as_of", "expired"),
+    [
+        (datetime(2026, 9, 17, tzinfo=UTC), False),
+        (datetime(2026, 10, 17, tzinfo=UTC), True),
+    ],
+)
+async def test_formal_factory_checks_enabled_source_admission_at_fixed_time(
+    monkeypatch, local_source_descriptor, as_of, expired
+):
+    from contextlib import nullcontext
+
+    factory = module()
+    monkeypatch.setattr(
+        factory,
+        "load_local_source_descriptors",
+        lambda path: (local_source_descriptor,),
+    )
+    monkeypatch.setattr(factory, "datetime", SimpleNamespace(now=lambda tz: as_of))
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: pytest.fail("装配不可发起网络"))
+    ) as client:
+        expectation = (
+            pytest.raises(ValueError, match="SOURCE_ADMISSION_EXPIRED")
+            if expired
+            else nullcontext()
+        )
+        with expectation:
+            app = build_local_agent_application(
+                synthetic_settings(),
+                http_client=client,
+                research_v2_settings=settings(),
+            )
+            await app.close()
 
 
 async def test_local_live_rollout_is_run_scoped_and_never_falls_back():

@@ -37,6 +37,7 @@ from ..core.run import (
     ProviderUsage,
 )
 from .json_schema import request_json_schema, validate_json_response
+from .paid_http import paid_error_code
 
 
 def _field(value: Any, name: str, default: Any = None) -> Any:
@@ -321,6 +322,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
             "messages": messages,
             **options,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -384,6 +386,25 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 "PROVIDER_AUTHENTICATION",
                                 "authentication",
                                 "DeepSeek 认证失败",
+                                False,
+                            )
+                            return
+                        if status == 402:
+                            self._record_provider_attempt(
+                                "provider_request_failed",
+                                DiagnosticLevel.ERROR,
+                                selected_model=selected_model,
+                                provider_call_id=provider_call_id,
+                                attempt=attempt_number,
+                                started_at_ns=started_at_ns,
+                                error_code="PROVIDER_PAYMENT_REQUIRED",
+                                http_status=status,
+                                retryable=False,
+                            )
+                            yield _error(
+                                "PROVIDER_PAYMENT_REQUIRED",
+                                "budget",
+                                "模型账户余额不足，付费调用已停止",
                                 False,
                             )
                             return
@@ -612,15 +633,7 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 first_sse_event_recorded = True
                             if raw == "[DONE]":
                                 terminated = True
-                                self._record_provider_attempt(
-                                    "provider_request_succeeded",
-                                    DiagnosticLevel.INFO,
-                                    selected_model=selected_model,
-                                    provider_call_id=provider_call_id,
-                                    attempt=attempt_number,
-                                    started_at_ns=started_at_ns,
-                                )
-                                return
+                                continue
                             try:
                                 event = json.loads(raw)
                             except (TypeError, ValueError):
@@ -665,7 +678,9 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                                 )
                                 first_reasoning_recorded = True
                             delta = _field(delta_object, "content", "") or ""
-                            raw_tool_calls = _field(delta_object, "tool_calls", ()) or ()
+                            raw_tool_calls = (
+                                _field(delta_object, "tool_calls", ()) or ()
+                            )
                             for raw_call in raw_tool_calls:
                                 index = int(_field(raw_call, "index", 0) or 0)
                                 current = tool_call_parts.setdefault(
@@ -883,6 +898,12 @@ class DeepSeekStreamingProvider(ModelProvider, StreamingModelProvider):
                 )
                 return
             except httpx.HTTPError as error:
+                budget_code = paid_error_code(error)
+                if budget_code is not None:
+                    yield _error(
+                        budget_code, "budget", "付费调用已被预算保护阻止", False
+                    )
+                    return
                 self._record_provider_attempt(
                     "provider_request_failed",
                     DiagnosticLevel.ERROR,

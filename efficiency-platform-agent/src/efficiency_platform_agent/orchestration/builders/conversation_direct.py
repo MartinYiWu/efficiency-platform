@@ -48,6 +48,9 @@ class _ConversationDirectProgram:
         self._compiled = compiled
         self._last: dict[str, Any] = {}
 
+    def scrub_memory_body(self) -> None:
+        self._last.clear()
+
     async def invoke(
         self, initial_state: AgentGraphState, config: Mapping[str, JsonValue]
     ) -> Mapping[str, JsonValue]:
@@ -82,7 +85,11 @@ class _ConversationDirectProgram:
         try:
             snapshot = await self._compiled.aget_state(config)
             return dict(snapshot.values)
-        except Exception:  # noqa: BLE001 - 只读检查点失败不泄露框架异常
+        except Exception:
+            if getattr(
+                getattr(self._compiled, "checkpointer", None), "memory_fenced", False
+            ):
+                raise
             return dict(self._last)
 
 
@@ -95,6 +102,8 @@ class ConversationDirectGraphBuilder:
         resolver: DirectSubmissionResolver,
         model_call_scope: ModelCallScope | None = None,
         output_publisher: ConversationOutputPublisher | None = None,
+        *,
+        checkpointer=None,
     ) -> None:
         if not isinstance(agent, GeneralConversationAgent):
             raise TypeError("agent必须是GeneralConversationAgent")
@@ -104,7 +113,9 @@ class ConversationDirectGraphBuilder:
         self.resolver = resolver
         self.model_call_scope = model_call_scope or (lambda _run_id: nullcontext())
         self.output_publisher = output_publisher
-        self.checkpointer = InMemorySaver()
+        self.checkpointer = (
+            checkpointer if checkpointer is not None else InMemorySaver()
+        )
 
     def build(self) -> _ConversationDirectProgram:
         """构建通用对话 Graph；提交消费和模型调用只发生一次。"""
@@ -211,6 +222,7 @@ def build_conversation_direct_registration(
     *,
     model_call_scope: ModelCallScope | None = None,
     output_publisher: ConversationOutputPublisher | None = None,
+    checkpointer=None,
 ) -> GraphRegistration:
     """显式登记通用对话 DIRECT Graph，不改变 S2 公共生命周期。"""
     return GraphRegistration(
@@ -224,7 +236,11 @@ def build_conversation_direct_registration(
             {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED}
         ),
         builder=ConversationDirectGraphBuilder(
-            agent, resolver, model_call_scope, output_publisher
+            agent,
+            resolver,
+            model_call_scope,
+            output_publisher,
+            checkpointer=checkpointer,
         ),
         payload_adapter=_EmptyPayloadAdapter(),
     )

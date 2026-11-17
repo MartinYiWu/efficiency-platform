@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrCandidateMapper">
+ <resultMap id="factSnapshotMap" type="com.aiep.aihub.api.hr.HrCandidateContracts$Snapshot"><constructor>
+ <idArg column="id" javaType="java.lang.String"/><arg column="tenant_id" javaType="java.lang.String"/>
+ <arg column="candidate_id" javaType="java.lang.String"/><arg column="resume_version_id" javaType="java.lang.String"/>
+ <arg column="version" javaType="_long"/><arg column="facts_json" javaType="java.lang.String"/>
+ <arg column="created_by" javaType="java.lang.String"/><arg column="created_at" javaType="java.lang.String" typeHandler="com.aiep.aihub.repository.hr.HrTimestampStringHandler"/>
+ </constructor></resultMap>
+ <select id="history" resultMap="com.aiep.aihub.repository.hr.HrCandidateMapper.factSnapshotMap">SELECT id,tenant_id,candidate_id,resume_version_id,version,facts_json,created_by,created_at FROM ai_hr_fact_snapshot WHERE tenant_id=#{tenantId} AND candidate_id=#{candidateId} ORDER BY version DESC</select>
+ <select id="lockActive" resultType="com.aiep.aihub.api.hr.HrCandidateContracts$Candidate">SELECT id,tenant_id,department_id,current_snapshot_id,version,consent_policy_id,acquired_at,expires_at,status FROM ai_hr_candidate WHERE tenant_id=#{tenantId} AND id=#{id} AND status='ACTIVE' AND expires_at &gt; #{now} FOR UPDATE</select>
+ <select id="findActive" resultType="com.aiep.aihub.api.hr.HrCandidateContracts$Candidate">SELECT id,tenant_id,department_id,current_snapshot_id,version,consent_policy_id,acquired_at,expires_at,status FROM ai_hr_candidate WHERE tenant_id=#{tenantId} AND id=#{id} AND status='ACTIVE' AND expires_at &gt; #{now}</select>
+ <select id="snapshot" resultMap="com.aiep.aihub.repository.hr.HrCandidateMapper.factSnapshotMap">SELECT id,tenant_id,candidate_id,resume_version_id,version,facts_json,created_by,created_at FROM ai_hr_fact_snapshot WHERE tenant_id=#{tenantId} AND id=#{id}</select>
+ <insert id="insertCandidate">INSERT INTO ai_hr_candidate(id,tenant_id,department_id,current_snapshot_id,version,consent_policy_id,acquired_at,expires_at,status) VALUES(#{id},#{tenantId},#{departmentId},#{currentSnapshotId},#{version},#{consentPolicyId},#{acquiredAt},#{expiresAt},#{status})</insert>
+ <insert id="insertSnapshot">INSERT INTO ai_hr_fact_snapshot(id,tenant_id,candidate_id,resume_version_id,version,facts_json,created_by,created_at) VALUES(#{id},#{tenantId},#{candidateId},#{resumeVersionId},#{version},#{factsJson},#{createdBy},#{createdAt,typeHandler=com.aiep.aihub.repository.hr.HrTimestampStringHandler})</insert>
+ <update id="advance">UPDATE ai_hr_candidate SET current_snapshot_id=#{snapshotId},version=version+1 WHERE tenant_id=#{tenantId} AND id=#{id} AND version=#{expectedVersion}</update>
+ <update id="staleResults">UPDATE ai_hr_matching_result SET status='STALE' WHERE tenant_id=#{tenantId} AND candidate_id=#{candidateId} AND status='CURRENT'</update>
+</mapper>
+
+
+
+
+

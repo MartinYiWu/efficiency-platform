@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "budget_id": "REPLACE_WITH_UNIQUE_ID",
+    "max_calls": 0,
+    "max_cost_microunits": 0,
+    "deadline_epoch_ms": 0,
+    "max_run_calls": 0,
+    "max_run_cost_microunits": 0,
+    "max_run_duration_ms": 0,
+    "max_inflight": 0,
+    "max_429_responses": 0,
+    "max_input_tokens": 0,
+    "max_output_tokens": 0,
+    "max_reasoning_tokens": 0,
+    "max_run_input_tokens": 0,
+    "max_run_output_tokens": 0,
+    "max_run_reasoning_tokens": 0
+  },
+  "prices": [],
+  "pricing_verified": false
+}

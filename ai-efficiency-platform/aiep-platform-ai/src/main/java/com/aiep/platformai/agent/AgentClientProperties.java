@@ -12,6 +12,9 @@ public class AgentClientProperties {
     private Duration responseTimeout = Duration.ofSeconds(30);
     private Duration customerServiceResponseTimeout = Duration.ofSeconds(180);
     private Duration customerServiceStreamIdleTimeout = Duration.ofSeconds(180);
+    private String internalSecret = "";
+    public String getInternalSecret() { return internalSecret; }
+    public void setInternalSecret(String internalSecret) { this.internalSecret = internalSecret; }
 
     public String getBaseUrl() {
         return baseUrl;

@@ -1,0 +1,21 @@
+{
+  "health": {
+    "status": "ok",
+    "mode": "local_real_mysql",
+    "dependencies": {
+      "runtime_database": "up"
+    }
+  },
+  "testsPassed": 167,
+  "subtestsPassed": 124,
+  "ruff": "passed",
+  "mypySourceFiles": 3,
+  "compileall": "passed",
+  "review": "prior compressed SSE chunk-size P2 resolved; no remaining important findings",
+  "realPaidAttemptsAfterOfflineFix": 0,
+  "ledgerTotalAttempts": 3,
+  "heldCostCny": 0.3,
+  "budgetStopped": "operator_stop",
+  "javaRestarted": false,
+  "agentRestartedWithFix": true
+}

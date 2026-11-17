@@ -1,1 +1,1 @@
-export { OperationDelivery } from './OperationDelivery';
+export { default as OperationDelivery } from './OperationDelivery.vue';

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from ...core.paid_budget import PaidBudgetError
+from ..paid_http import paid_error_code
+
 _MAX_INPUTS_PER_REQUEST = 10
 
 
@@ -45,6 +48,11 @@ class DashScopeEmbeddingProvider:
                     tuple(float(value) for value in item.embedding) for item in ordered
                 )
             except Exception as error:
+                code = paid_error_code(error)
+                if code is not None:
+                    raise PaidBudgetError(
+                        code, "Embedding已被付费预算保护阻止"
+                    ) from None
                 raise EmbeddingProviderError("Embedding 服务调用失败") from error
             if len(batch_vectors) != len(batch):
                 raise EmbeddingProviderError("Embedding 返回数量不一致")

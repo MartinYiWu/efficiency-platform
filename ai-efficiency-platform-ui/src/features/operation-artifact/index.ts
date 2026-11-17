@@ -1,1 +1,1 @@
-export { OperationArtifactActions } from './OperationArtifactActions';
+export { default as OperationArtifactActions } from './OperationArtifactActions.vue';

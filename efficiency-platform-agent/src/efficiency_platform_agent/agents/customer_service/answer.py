@@ -6,6 +6,8 @@ from collections.abc import Callable
 
 from pydantic import ValidationError
 
+from efficiency_platform_agent.core.run_context_binding import current_run_context
+
 from .answer_stream import AnswerSectionStream
 from .citations import CitationGuardError, validate_citation_closure
 from .intent import StructuredStageGateway
@@ -165,7 +167,12 @@ async def generate_answer(
         if sufficiency is None
         else sufficiency.model_dump(mode="json"),
     }
-    if isinstance(original_evidence, EvidencePack):
+    binding = current_run_context()
+    if isinstance(original_evidence, EvidencePack) or (
+        mode is AnswerMode.GENERAL_ADVICE
+        and binding is not None
+        and binding.memory_context is not None
+    ):
         value["history"] = [h.model_dump(mode="json") for h in history]
     emitted: list[str] = []
 

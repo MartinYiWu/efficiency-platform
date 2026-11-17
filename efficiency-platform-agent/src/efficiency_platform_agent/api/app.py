@@ -3,19 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from efficiency_platform_agent.core.memory_cleanup import MemoryCleanupJournal
+from efficiency_platform_agent.core.memory_execution import MemoryExecutionStore
 from efficiency_platform_agent.harness.errors import HarnessError
 
 from .routes import build_router, handle_harness_error, handle_unexpected_error
 from .uploads import build_upload_router
 
 if TYPE_CHECKING:
+    from efficiency_platform_agent.agents.customer_service.service import (
+        CustomerServiceRunService,
+    )
     from efficiency_platform_agent.capabilities.customer_service_ingest import (
         CustomerServiceIngestPort,
     )
@@ -29,6 +34,8 @@ if TYPE_CHECKING:
     from efficiency_platform_agent.harness.service import AgentRuntimeService
     from efficiency_platform_agent.runtime.event_hub import EventHub
 
+    from .hr_skill_routes import HrSkillEndpoint
+
 
 def create_app(
     service: AgentRuntimeService,
@@ -40,6 +47,15 @@ def create_app(
     customer_service_ingest_service: CustomerServiceIngestPort | None = None,
     customer_service_release_repository: object | None = None,
     customer_service_run_service: object | None = None,
+    hr_skill_endpoint: object | None = None,
+    hr_skill_authorizer: Callable[[Request], Awaitable[str]] | None = None,
+    context_internal_authorizer: Callable[[Request], Awaitable[str]] | None = None,
+    memory_enabled: bool = False,
+    memory_execution_store: MemoryExecutionStore | None = None,
+    memory_manifest_reader: Callable | None = None,
+    memory_erase_threads: Callable | None = None,
+    memory_cleanup_journal: MemoryCleanupJournal | None = None,
+    memory_resume_execution: Callable | None = None,
     runtime_mode: str = "s2_fake_in_memory",
     dependency_probe: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -53,6 +69,65 @@ def create_app(
         allow_credentials=False,
     )
     app.state.runtime_service = service
+    if memory_enabled:
+        from efficiency_platform_agent.core.memory_execution import (
+            MemoryExecutionRecord,
+        )
+
+        from .memory_routes import build_memory_router
+
+        if memory_execution_store is None or context_internal_authorizer is None:
+            raise ValueError("MEMORY_AUTHORITY_REQUIRED")
+        if memory_cleanup_journal is not None:
+            async def scrub_memory_runtime(record: MemoryExecutionRecord) -> bool:
+                if record.runtime_kind == "CUSTOMER_SERVICE" and customer_service_run_service is not None:
+                    return await cast("CustomerServiceRunService", customer_service_run_service).scrub_memory_execution(record)
+                if record.runtime_kind == "OPERATIONS":
+                    if not await service.scrub_memory_execution(record):
+                        return False
+                    return conversation_service is not None and await conversation_service.scrub_memory_execution(record)
+                return False
+            memory_cleanup_journal.runtime_scrubber = scrub_memory_runtime
+
+        async def stop_memory_execution(record: MemoryExecutionRecord) -> None:
+            tenant = record.context.packet.scope.tenant_id
+            if record.runtime_kind == "OPERATIONS":
+                await service.stop_memory_execution(record.runtime_id, tenant)
+            elif (
+                record.runtime_kind == "CUSTOMER_SERVICE"
+                and customer_service_run_service is not None
+            ):
+                from uuid import UUID
+
+                await cast("CustomerServiceRunService", customer_service_run_service).stop_memory_execution(
+                    UUID(record.runtime_id)
+                )  # type: ignore[attr-defined]
+            elif record.runtime_kind == "HR" and hr_skill_endpoint is not None:
+                await hr_skill_endpoint.cancel(tenant, record.context.packet.task_id)  # type: ignore[attr-defined]
+                raise ValueError("MEMORY_STOP_PENDING")
+            else:
+                raise ValueError("MEMORY_STOP_ADAPTER_REQUIRED")
+
+        app.include_router(
+            build_memory_router(
+                memory_execution_store,
+                context_internal_authorizer,
+                stop_memory_execution,
+                memory_manifest_reader,
+                memory_erase_threads,
+                memory_cleanup_journal,
+                memory_resume_execution,
+            )
+        )
+    from .hr_skill_routes import build_hr_skill_router
+
+    app.include_router(
+        build_hr_skill_router(
+            cast("HrSkillEndpoint | None", hr_skill_endpoint),
+            hr_skill_authorizer,
+            memory_enabled=memory_enabled,  # type: ignore[arg-type]
+        )  # type: ignore[arg-type]
+    )
     resolved_event_hub = event_hub or getattr(service, "event_hub", None)
     app.state.event_hub = resolved_event_hub
     app.include_router(build_router(service, resolved_event_hub))
@@ -60,7 +135,13 @@ def create_app(
         from .conversation_routes import build_conversation_router
 
         app.state.conversation_service = conversation_service
-        app.include_router(build_conversation_router(conversation_service))
+        app.include_router(
+            build_conversation_router(
+                conversation_service,
+                context_internal_authorizer,
+                memory_enabled=memory_enabled,
+            )
+        )
     if document_service is not None:
         app.include_router(build_upload_router(document_service))
     if live_acceptance_service is not None:
@@ -95,7 +176,11 @@ def create_app(
 
         app.state.customer_service_run_service = customer_service_run_service
         app.include_router(
-            build_customer_service_router(customer_service_run_service)  # type: ignore[arg-type]
+            build_customer_service_router(
+                customer_service_run_service,  # type: ignore[arg-type]
+                context_internal_authorizer,
+                memory_enabled=memory_enabled,
+            )
         )
     app.add_exception_handler(HarnessError, handle_harness_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

@@ -1,0 +1,17 @@
+{
+  "userInstruction": "制定方案开始实施",
+  "previousAuthorizationRemainsStopped": true,
+  "priorPaidAttempts": 3,
+  "priorHeldCostCny": 0.3,
+  "cumulativeOriginalCapCny": 30,
+  "cumulativeOriginalAttemptsCap": 90,
+  "retryCapCny": 29.7,
+  "retryHttpAttemptsCap": 87,
+  "maxCases": 3,
+  "stopOnFirstFailure": true,
+  "unknownUsageStopsFurtherCases": true,
+  "noAutomaticRenewal": true,
+  "deadlineShanghai": "2026-11-03T18:38:18.979000+08:00",
+  "planSha256": "69c4095bfee4b7ce6ec3d6d1eaf4db2d78006849cb4f1b723e5bc70ff199a78e",
+  "accountProviderSpendingLimitNotIndependentlyVerified": true
+}

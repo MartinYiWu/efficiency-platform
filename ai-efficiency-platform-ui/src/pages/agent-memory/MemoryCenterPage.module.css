@@ -1,0 +1,179 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.page h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+  color: var(--ui-text);
+}
+.page p {
+  color: var(--ui-text-secondary, #667085);
+  line-height: 1.7;
+}
+.scopeCard,
+.listPanel,
+.formPanel,
+.detailPanel {
+  padding: 24px;
+  min-width: 0;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.toolbar h3 {
+  margin: 0;
+}
+.toolbar small,
+.secondary {
+  color: #667085;
+  font-size: 12px;
+  font-weight: normal;
+}
+.agentPicker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.agentPicker :global(.ant-select) {
+  width: 200px;
+}
+.boundaries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.boundaries span {
+  color: #2563eb;
+  background: #eff6ff;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 20px;
+  align-items: start;
+}
+.formPanel :global(.ant-select) {
+  width: 100%;
+}
+.tableScroll {
+  overflow-x: auto;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+.table th {
+  background: #f8fafc;
+  color: #667085;
+  font-weight: 500;
+}
+.table th,
+.table td {
+  padding: 16px 12px;
+  border-bottom: 1px solid var(--ui-border, #eaecf0);
+  vertical-align: top;
+  min-width: 115px;
+}
+.table td:last-child {
+  min-width: 180px;
+}
+.table td div {
+  margin-top: 6px;
+}
+.facts {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 16px;
+}
+.facts dt {
+  color: #667085;
+}
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.value {
+  font-size: 24px;
+  color: var(--ui-text) !important;
+}
+.history {
+  padding-left: 24px;
+}
+.history li {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ui-border, #eaecf0);
+  overflow-wrap: anywhere;
+}
+.history :global(.ant-tag) {
+  margin-left: 12px;
+}
+@media (max-width: 1150px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+  .formPanel {
+    max-width: none;
+  }
+}
+@media (max-width: 600px) {
+  .tableScroll {
+    overflow: visible;
+  }
+  .table,
+  .table tbody,
+  .table tr,
+  .table td {
+    display: block;
+    width: 100%;
+  }
+  .table thead {
+    display: none;
+  }
+  .table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--ui-border, #eaecf0);
+  }
+  .table td,
+  .table td:last-child {
+    min-width: 0;
+    padding: 8px 0;
+    border: 0;
+  }
+  .table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 6px;
+    color: #667085;
+    font-size: 12px;
+  }
+  .scopeCard,
+  .listPanel,
+  .formPanel,
+  .detailPanel {
+    padding: 16px;
+  }
+  .agentPicker {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .agentPicker :global(.ant-select) {
+    flex: 1;
+    min-width: 160px;
+  }
+  .facts {
+    grid-template-columns: 75px 1fr;
+  }
+}

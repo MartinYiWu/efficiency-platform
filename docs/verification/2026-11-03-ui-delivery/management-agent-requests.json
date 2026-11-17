@@ -1,0 +1,29 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/aihub/agents/a/versions",
+    "body": {
+      "semanticVersion": "1.0.1",
+      "graphKey": "customer-service",
+      "graphVersion": "2",
+      "changeSummary": "离线验收版本"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/aihub/agents/a/versions",
+    "body": {
+      "semanticVersion": "1.0.1",
+      "graphKey": "customer-service",
+      "graphVersion": "2",
+      "changeSummary": "离线验收版本"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/aihub/agents/versions/draft/transition",
+    "body": {
+      "status": "READY"
+    }
+  }
+]

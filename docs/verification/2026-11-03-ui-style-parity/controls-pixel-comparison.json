@@ -1,0 +1,23 @@
+{
+  "referenceSize": [
+    960,
+    1135
+  ],
+  "candidateSize": [
+    960,
+    1135
+  ],
+  "identicalSize": true,
+  "identicalPixels": false,
+  "differenceBounds": [
+    25,
+    110,
+    672,
+    764
+  ],
+  "differentPixels": 897,
+  "totalPixels": 1089600,
+  "differentPercent": 0.08232378854625551,
+  "pixelsAbove3ChannelLevels": 2,
+  "maxChannelDifference": 12
+}

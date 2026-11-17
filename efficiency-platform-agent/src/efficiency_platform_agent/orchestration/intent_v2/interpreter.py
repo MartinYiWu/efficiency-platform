@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from efficiency_platform_agent.context.builder import ContextBuilder
 from efficiency_platform_agent.context.contracts import BuiltContext
+from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.intent_v2 import (
     BudgetLeaseReferenceV2,
     CapabilityCatalogSnapshot,
@@ -23,6 +24,7 @@ from efficiency_platform_agent.contracts.intent_v2 import (
 )
 from efficiency_platform_agent.contracts.operation_intent import IntentPlanV1
 from efficiency_platform_agent.core.budget import RemainingBudget
+from efficiency_platform_agent.core.context_dispatch import allow_context_repair
 from efficiency_platform_agent.core.model import (
     CancellationSignal,
     ModelDemand,
@@ -117,6 +119,9 @@ class OperationIntentPlanningAgent:
             )
         ).plan
 
+    @stage_entry(
+        "intent-plan", inputs=("user_text", "visible_history", "available_artifacts")
+    )
     async def execute(
         self,
         *,
@@ -194,6 +199,7 @@ class OperationIntentPlanningAgent:
                 previous_output=invalid_output,
                 validation_errors=first_errors,
             )
+            await allow_context_repair()
             repaired = await self._invoke(repair, repair_budget)
             try:
                 return self._execution(
@@ -252,7 +258,11 @@ class OperationIntentPlanningAgent:
         assembled: AssembledPrompt,
         budget: RemainingBudget,
     ) -> ModelExecutionResult:
-        if budget.iterations <= 0 or budget.output_tokens <= 0 or budget.timeout_ms <= 0:
+        if (
+            budget.iterations <= 0
+            or budget.output_tokens <= 0
+            or budget.timeout_ms <= 0
+        ):
             raise OperationIntentPlanningError(
                 "INTENT_BUDGET_EXHAUSTED", "意图规划预算不足"
             )
@@ -558,6 +568,7 @@ class ControlledIntentInterpreterV2:
     ) -> IntentPatchV2:
         return (await self.execute(text, context, previous, catalog, lease)).patch
 
+    @stage_entry("intent-v2", inputs=("text", "context", "previous", "catalog"))
     async def execute(
         self,
         text: str,
@@ -630,6 +641,7 @@ class ControlledIntentInterpreterV2:
                     "validation_error": _validation_error_payload(error, previous),
                 },
             )
+            await allow_context_repair()
             repaired_content = await self._invoke(
                 "intent-v2-repair/1",
                 ModelTier.BALANCED,
@@ -839,7 +851,7 @@ class ControlledIntentInterpreterV2:
                 *rendered.messages,
                 ProviderMessage("user", untrusted_payload),
             ),
-            options=_model_options(),
+            options=JsonObject(_model_options().items + (("max_tokens", min(_MAX_OUTPUT_TOKENS, available.output_tokens)),)),
             timeout_ms=max(1, available.timeout_ms),
         )
         demand = ModelDemand(

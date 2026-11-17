@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrInterviewBatchMapper">
+ <sql id="cols">id,tenant_id,actor_id,kind,status,payload,input_json,idempotency_key,input_hash</sql>
+ <select id="get" resultType="com.aiep.aihub.repository.hr.HrInterviewBatchMapper$Row">SELECT <include refid="cols"/> FROM ai_hr_interview_batch WHERE tenant_id=#{tenant} AND id=#{id} AND kind=#{kind}</select>
+ <select id="replay" resultType="com.aiep.aihub.repository.hr.HrInterviewBatchMapper$Row">SELECT <include refid="cols"/> FROM ai_hr_interview_batch WHERE tenant_id=#{tenant} AND actor_id=#{actor} AND idempotency_key=#{key} AND kind=#{kind}</select>
+ <insert id="insert">INSERT INTO ai_hr_interview_batch(id,tenant_id,actor_id,kind,status,payload,input_json,idempotency_key,input_hash) VALUES(#{id},#{tenantId},#{actorId},#{kind},#{status},#{payload},#{inputJson},#{idempotencyKey},#{inputHash})</insert>
+ <update id="start">UPDATE ai_hr_interview_batch SET status='RUNNING' WHERE tenant_id=#{tenant} AND id=#{id} AND status='PENDING'</update>
+ <update id="update">UPDATE ai_hr_interview_batch SET status=#{status},payload=#{payload} WHERE tenant_id=#{tenant} AND id=#{id} AND status='RUNNING'</update>
+ <update id="recover">UPDATE ai_hr_interview_batch SET status='FAILED' WHERE status IN ('PENDING','RUNNING')</update>
+</mapper>

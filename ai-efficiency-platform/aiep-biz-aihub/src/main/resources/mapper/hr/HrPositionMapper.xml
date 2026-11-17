@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrPositionMapper">
+  <select id="configs" resultType="string">SELECT payload FROM ai_hr_config_version WHERE tenant_id=#{tenant} AND position_id=#{position}</select>
+  <update id="context">UPDATE ai_hr_position SET context_version=#{context},name=#{name},normalized_name=#{normalized},level=#{level} WHERE tenant_id=#{tenant} AND id=#{position} AND version=#{version}</update>
+  <sql id="grantScope"><if test="grants != null and !grants.isEmpty()"> AND (<foreach collection="grants" item="g" separator=" OR ">(#{g.permission}='hr:position:read' AND department_id=#{g.departmentId} AND (#{g.positionId}='*' OR id=#{g.positionId}))</foreach>)</if></sql>
+  <select id="listGranted" resultType="com.aiep.aihub.repository.hr.HrPositionMapper$PositionRow">SELECT <include refid="columns"/> FROM ai_hr_position WHERE <include refid="scope"/><include refid="objectScope"/><include refid="grantScope"/> ORDER BY created_at DESC,id LIMIT #{limit} OFFSET #{offset}</select>
+  <select id="countGranted" resultType="long">SELECT COUNT(id) FROM ai_hr_position WHERE <include refid="scope"/><include refid="objectScope"/><include refid="grantScope"/></select>
+  <sql id="objectScope"><if test="!ids.contains(&quot;*&quot;)"> AND id IN <foreach collection="ids" item="obj" open="(" separator="," close=")">#{obj}</foreach></if></sql>
+  <select id="listVisible" resultType="com.aiep.aihub.repository.hr.HrPositionMapper$PositionRow">SELECT <include refid="columns"/> FROM ai_hr_position WHERE <include refid="scope"/><include refid="objectScope"/> ORDER BY created_at DESC,id LIMIT #{limit} OFFSET #{offset}</select>
+  <select id="countVisible" resultType="long">SELECT COUNT(id) FROM ai_hr_position WHERE <include refid="scope"/><include refid="objectScope"/></select>
+  <sql id="columns">id,tenant_id,name,normalized_name,family,department_id,level,code,status,config_version,context_version,created_by,created_at,version</sql>
+  <sql id="scope">tenant_id=#{tenant} AND department_id IN <foreach collection="departments" item="department" open="(" separator="," close=")">#{department}</foreach><if test="keyword != null and keyword != ''"> AND name LIKE CONCAT('%',#{keyword},'%')</if><if test="family != null and family != ''"> AND family=#{family}</if><if test="status != null and status != ''"> AND status=#{status}</if></sql>
+  <insert id="allocateCode">INSERT INTO ai_hr_position_sequence(tenant_id,department_id,next_value) VALUES(#{tenant},#{department},1) ON DUPLICATE KEY UPDATE next_value=next_value+1</insert>
+  <select id="currentCode" resultType="long">SELECT next_value FROM ai_hr_position_sequence WHERE tenant_id=#{tenant} AND department_id=#{department}</select>
+  <insert id="insert">INSERT INTO ai_hr_position (<include refid="columns"/>) VALUES (#{id},#{tenantId},#{name},#{normalizedName},#{family},#{departmentId},#{level},#{code},#{status},#{configVersion},#{contextVersion},#{createdBy},#{createdAt},#{version})</insert>
+  <select id="find" resultType="com.aiep.aihub.repository.hr.HrPositionMapper$PositionRow">SELECT <include refid="columns"/> FROM ai_hr_position WHERE tenant_id=#{tenant} AND id=#{id}</select>
+  <select id="list" resultType="com.aiep.aihub.repository.hr.HrPositionMapper$PositionRow">SELECT <include refid="columns"/> FROM ai_hr_position WHERE <include refid="scope"/> ORDER BY created_at DESC,id LIMIT #{limit} OFFSET #{offset}</select>
+  <select id="count" resultType="long">SELECT COUNT(*) FROM ai_hr_position WHERE <include refid="scope"/></select>
+  <select id="draft" resultType="com.aiep.aihub.repository.hr.HrPositionMapper$JsonRow">SELECT position_id,payload,version FROM ai_hr_position_draft WHERE tenant_id=#{tenant} AND position_id=#{positionId}</select>
+  <update id="advanceDraft">UPDATE ai_hr_position SET version=version+1 WHERE tenant_id=#{tenant} AND id=#{positionId} AND version=#{expected}</update>
+  <insert id="writeDraft">INSERT INTO ai_hr_position_draft(tenant_id,position_id,payload,version) VALUES(#{tenant},#{positionId},#{payload},#{version}) ON DUPLICATE KEY UPDATE payload=#{payload},version=#{version}</insert>
+  <insert id="insertConfig">INSERT INTO ai_hr_config_version(id,tenant_id,position_id,config_version,payload,snapshot_hash) VALUES(#{id},#{tenant},#{positionId},#{configVersion},#{payload},#{hash})</insert>
+  <select id="config" resultType="string">SELECT payload FROM ai_hr_config_version WHERE tenant_id=#{tenant} AND position_id=#{positionId} AND config_version=#{configVersion}</select>
+  <update id="activate">UPDATE ai_hr_position SET status='ACTIVE',config_version=#{configVersion},context_version=#{contextVersion},version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND version=#{expected}</update>
+  <update id="disable">UPDATE ai_hr_position SET status='DISABLED',version=version+1 WHERE tenant_id=#{tenant} AND id=#{id} AND version=#{expected} AND status&lt;&gt;'DISABLED'</update>
+  <update id="metadata">UPDATE ai_hr_position SET name=#{name},normalized_name=#{normalizedName},level=#{level} WHERE tenant_id=#{tenant} AND id=#{id} AND config_version=#{configVersion}</update>
+  <update id="staleResults">UPDATE ai_hr_matching_result SET status='STALE' WHERE tenant_id=#{tenant} AND position_id=#{id} AND config_version&lt;&gt;#{configVersion} AND status='CURRENT'</update>
+</mapper>
+

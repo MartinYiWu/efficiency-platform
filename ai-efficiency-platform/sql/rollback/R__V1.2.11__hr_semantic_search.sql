@@ -1,0 +1,2 @@
+DROP TABLE ai_hr_semantic_search_source;
+DROP TABLE ai_hr_semantic_search_job;

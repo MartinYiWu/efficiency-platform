@@ -9,6 +9,15 @@ import reactor.core.publisher.Flux;
 
 @Service
 public class AiInvokeFacadeImpl implements AiInvokeFacade {
+    @Override public MemoryResumeReceipt resumeMemoryExecution(String tenantId,String executionId,MemoryResumeRequest request) {
+        return agentClient.resumeMemoryExecution(tenantId,executionId,request);
+    }
+    @Override public MemoryCleanupReceipt cleanupMemoryExecution(String tenantId,String executionId,MemoryCleanupRequest request) {
+        return agentClient.cleanupMemoryExecution(tenantId,executionId,request);
+    }
+    @Override public MemoryRuntimeManifest queryMemoryManifest(String tenantId,String executionId) {
+        return agentClient.queryMemoryManifest(tenantId,executionId);
+    }
     private final AgentClient agentClient;
     private final CustomerServiceAgentClient customerServiceAgentClient;
 
@@ -19,7 +28,12 @@ public class AiInvokeFacadeImpl implements AiInvokeFacade {
 
     @Override public AiTextResponse generateText(AiTextRequest request) { return agentClient.generateText(request); }
     @Override public void streamChat(AiStreamRequest request, AiStreamObserver observer) { agentClient.streamChat(request, observer); }
-    @Override public AiTextResponse executeSkill(AiSkillExecuteRequest request) { return agentClient.executeSkill(request); }
+    @Override public AiTextResponse executeSkill(AiSkillExecuteRequest request) {
+        try { return agentClient.executeSkill(request); }
+        catch (com.aiep.platformai.agent.AgentTransportException error) {
+            throw new com.aiep.platformai.api.AiInvocationException(error.getStatusCode(),error.getErrorCode(),"AI任务未完成，请核对配置、预算及运行状态");
+        }
+    }
     @Override public void streamKbQa(AiKbQaRequest request, AiStreamObserver observer) { agentClient.streamKbQa(request, observer); }
     @Override public AiTaskStatusResponse submitIngest(AiIngestRequest request) { return agentClient.submitIngest(request); }
     @Override public AiTaskStatusResponse queryTask(String taskId) { return agentClient.queryTask(taskId); }

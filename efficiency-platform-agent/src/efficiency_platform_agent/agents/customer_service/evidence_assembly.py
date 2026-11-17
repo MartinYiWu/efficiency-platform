@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from uuid import UUID
 
+from efficiency_platform_agent.core.paid_budget import PaidBudgetError
+
 from .conflict_screen import ConflictScreen
 from .evidence_extract import ExtractionSelection, select_spans, split_sentences
 from .intent import StructuredStageGateway
@@ -380,7 +382,9 @@ async def build_evidence_pack(
                         raise ValueError("EXTRACTION_RESULT_TOO_LARGE")
                     selected.append(extracted)
                     continue
-                except Exception as error:  # noqa: BLE001
+                except Exception as error:
+                    if isinstance(error, PaidBudgetError):
+                        raise
                     known = {
                         "EXTRACTION_SENTENCE_BOUNDARY_INVALID",
                         "EXTRACTION_SELECTION_INVALID",

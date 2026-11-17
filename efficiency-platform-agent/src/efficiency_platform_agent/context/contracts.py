@@ -6,7 +6,21 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
+from efficiency_platform_agent.core.context_control import (
+    ContextManifest,
+    PreparedContext,
+    SourceDependency,
+)
 from efficiency_platform_agent.core.run import JsonValue
+
+__all__ = [
+    "BuiltContext",
+    "ContextManifest",
+    "ContextSource",
+    "PreparedContext",
+    "SourceDependency",
+    "TrustLevel",
+]
 
 
 class TrustLevel(StrEnum):

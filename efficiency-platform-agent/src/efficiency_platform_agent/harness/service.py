@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import json
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
@@ -45,11 +48,22 @@ from efficiency_platform_agent.core.diagnostics import (
     safe_exception_location,
 )
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
+from efficiency_platform_agent.core.memory_execution import (
+    MemoryExecutionRecord,
+    MemoryExecutionStore,
+)
 from efficiency_platform_agent.core.run import (
     ExecutionBudget,
     JsonObject,
     JsonValue,
     RunRequest,
+)
+from efficiency_platform_agent.core.run_context_binding import (
+    bind_run_context,
+    binding_from_metadata,
+    current_conversation_scope,
+    current_memory_context,
+    metadata_scope,
 )
 from efficiency_platform_agent.core.runtime import (
     RunEventRecord,
@@ -180,6 +194,7 @@ class AgentRuntimeService:
         output_streamer: Callable[[str, Mapping[str, Any]], AsyncIterator[str]]
         | None = None,
         diagnostic_recorder: DiagnosticRecorderPort | None = None,
+        memory_execution_store: MemoryExecutionStore | None = None,
     ) -> None:
         self.repository = repository
         self.event_store = event_store
@@ -193,10 +208,15 @@ class AgentRuntimeService:
         self.event_hub = event_hub or EventHub()
         self.output_streamer = output_streamer
         self.diagnostic_recorder = diagnostic_recorder or NoopDiagnosticRecorder()
+        self.memory_execution_store = memory_execution_store
         self._event_lock = asyncio.Lock()
         self._run_state_lock = asyncio.Lock()
         self._cancelled_runs: set[str] = set()
         self._background_tasks: set[asyncio.Task[RunViewV1 | None]] = set()
+        self._background_owners: dict[
+            asyncio.Task[RunViewV1 | None], tuple[str, str]
+        ] = {}
+        self._background_exits: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._realtime_output_run_tenants: dict[str, str] = {}
         self._realtime_output_runs: set[str] = set()
         self._assistant_started_runs: set[str] = set()
@@ -249,8 +269,7 @@ class AgentRuntimeService:
             self._execute_background(record, request),
             name=f"agent-run:{record.run_id}",
         )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._discard_background_task)
+        self._register_background_task(record, task)
         return self._view(record)
 
     async def create_and_schedule_pipeline(
@@ -280,8 +299,7 @@ class AgentRuntimeService:
             self._execute_pipeline_background(record, request, prepare),
             name=f"agent-run-pipeline:{record.run_id}",
         )
-        self._background_tasks.add(task)
-        task.add_done_callback(self._discard_background_task)
+        self._register_background_task(record, task)
         return view
 
     async def _execute_pipeline_background(
@@ -291,8 +309,17 @@ class AgentRuntimeService:
         prepare: Callable[[RunPipelineContext], Awaitable[RunPipelinePreparation]],
     ) -> RunViewV1 | None:
         """把模型准备错误归一化到已经创建的同一个 Run。"""
-        with bind_diagnostic_context(
-            run_id=record.run_id, request_id=original.request_id
+        with (
+            bind_run_context(
+                binding_from_metadata(
+                    record.request.metadata,
+                    record.run_id,
+                    record.budget_state.deadline_epoch_ms // 1000,
+                )
+            ),
+            bind_diagnostic_context(
+                run_id=record.run_id, request_id=original.request_id
+            ),
         ):
             try:
                 return await self._prepare_and_execute_pipeline(
@@ -556,6 +583,70 @@ class AgentRuntimeService:
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def stop_memory_execution(self, run_id: str, tenant_id: str) -> None:
+        record = await self.repository.get(run_id, tenant_id)
+        if record is None:
+            raise ValueError("MEMORY_STOP_UNAVAILABLE")
+        terminal = {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+        }
+        if record.status not in terminal:
+            await self.cancel_run(run_id, CancelRunRequestV1(tenant_id=tenant_id))
+        owner_key = (tenant_id, run_id)
+        tasks = {
+            task
+            for task, owner in self._background_owners.items()
+            if owner == owner_key
+        }
+        if (
+            not tasks and owner_key not in self._background_exits
+        ) or asyncio.current_task() in tasks:
+            raise ValueError("MEMORY_STOP_PENDING")
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=5)
+            if pending:
+                raise ValueError("MEMORY_STOP_PENDING")
+        stopped = await self.repository.get(run_id, tenant_id)
+        if stopped is None or stopped.status not in terminal:
+            raise ValueError("MEMORY_STOP_PENDING")
+
+    async def can_emit_memory_events(self, run_id: str, tenant_id: str) -> bool:
+        try:
+            record = await self.repository.get(run_id, tenant_id)
+            if record is None:
+                return False
+            binding = binding_from_metadata(record.request.metadata, run_id, record.budget_state.deadline_epoch_ms // 1000)
+            if binding is None or binding.memory_context is None:
+                return True
+            if self.memory_execution_store is None:
+                return False
+            authority = await self.memory_execution_store.get(tenant_id, binding.execution_id)
+            return authority is not None and authority.state == "ACTIVE" and authority.runtime_id == run_id
+        except ValueError:
+            return False
+
+    async def scrub_memory_execution(self, record: MemoryExecutionRecord) -> bool:
+        tenant = record.context.packet.scope.tenant_id
+        run_id = record.runtime_id
+        if record.runtime_kind != "OPERATIONS" or record.state != "REVOKED" or self.event_hub is None:
+            return False
+        if (tenant, run_id) not in self._background_exits or any(owner == (tenant, run_id) for owner in self._background_owners.values()):
+            return False
+        original = await self.repository.get(run_id, tenant)
+        if original is None or original.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.TIMED_OUT}:
+            return False
+        binding = binding_from_metadata(original.request.metadata, run_id, original.budget_state.deadline_epoch_ms // 1000)
+        if binding is None or binding.memory_context != record.context or original.request.user_id != record.context.packet.scope.user_id:
+            return False
+        scrub_graph = getattr(self.graph_runtime, "scrub_memory_run", None)
+        if not callable(scrub_graph) or not scrub_graph(run_id):
+            return False
+        await self.event_hub.scrub_memory_run(run_id)
+        return True
+
     async def _create_queued(
         self, request: CreateRunRequestV1
     ) -> tuple[RunRecord, bool]:
@@ -563,10 +654,64 @@ class AgentRuntimeService:
 
         if not isinstance(request, CreateRunRequestV1):
             raise HarnessError("INVALID_REQUEST", "创建请求无效", category="request")
+        scope = current_conversation_scope()
+        if scope is not None and (
+            scope.tenant_id != request.tenant_id or scope.user_id != request.user_id
+        ):
+            raise HarnessError(
+                "CONTEXT_SCOPE_MISMATCH", "上下文作用域不匹配", category="request"
+            )
+        trusted_metadata = metadata_scope(scope)
+        memory = current_memory_context()
+        if memory is not None and self.memory_execution_store is None:
+            raise HarnessError(
+                "MEMORY_AUTHORITY_REQUIRED", "记忆执行权威未就绪", category="request"
+            )
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "request": request.model_dump(mode="json"),
+                    "authorization": trusted_metadata,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+
+        def require_same(original: RunRecord) -> None:
+            original_metadata = dict(original.request.metadata.items)
+            if (
+                original.request.tenant_id != request.tenant_id
+                or original.request.user_id != request.user_id
+                or original_metadata.get("context_request_fingerprint") != fingerprint
+            ):
+                raise HarnessError(
+                    "CONTEXT_SCOPE_MISMATCH",
+                    "幂等请求与原授权或输入不匹配",
+                    category="request",
+                )
+
         existing = await self.repository.get_by_request_id(
             request.request_id, request.tenant_id
         )
         if existing is not None:
+            require_same(existing)
+            if memory is not None:
+                assert self.memory_execution_store is not None
+                original = await self.memory_execution_store.get(
+                    request.tenant_id, memory.packet.execution_id
+                )
+                if (
+                    original is None
+                    or original.state != "ACTIVE"
+                    or original.runtime_id != existing.run_id
+                    or original.request_fingerprint != fingerprint
+                    or original.context != memory
+                ):
+                    raise HarnessError(
+                        "CONTEXT_SCOPE_MISMATCH", "原执行授权不可用", category="request"
+                    )
             return existing, False
         run_request = RunRequest(
             request_id=request.request_id,
@@ -574,15 +719,50 @@ class AgentRuntimeService:
             user_id=request.user_id,
             input_text=request.input_text,
             metadata=_json_object(
-                {"workflow_id": request.workflow_id}
-                if request.workflow_id is not None
-                else {}
+                {
+                    **trusted_metadata,
+                    "context_request_fingerprint": fingerprint,
+                    **(
+                        {"workflow_id": request.workflow_id}
+                        if request.workflow_id is not None
+                        else {}
+                    ),
+                }
             ),
         )
         run_id = self.id_generator.new_run_id()
         budget_state = self.budget_guard.start(
             self.budget, now_epoch_ms=self.clock.now_epoch_ms()
         )
+        if memory is not None:
+            assert self.memory_execution_store is not None
+            try:
+                claimed, first = await self.memory_execution_store.claim(
+                    memory,
+                    run_id,
+                    "OPERATIONS",
+                    fingerprint,
+                    budget_state.deadline_epoch_ms // 1000,
+                )
+            except ValueError:
+                raise HarnessError(
+                    "CONTEXT_SCOPE_MISMATCH", "原执行授权不匹配", category="request"
+                ) from None
+            if not first:
+                original_run = await self.repository.get(
+                    claimed.runtime_id, request.tenant_id
+                )
+                if original_run is None:
+                    raise HarnessError(
+                        "CONTEXT_SCOPE_MISMATCH",
+                        "原执行创建状态不可用",
+                        category="request",
+                    )
+                require_same(original_run)
+                return original_run, False
+            budget_state = replace(
+                budget_state, deadline_epoch_ms=claimed.deadline_epoch_seconds * 1000
+            )
         record = RunRecord(
             run_id,
             run_request,
@@ -600,6 +780,7 @@ class AgentRuntimeService:
                 request.request_id, request.tenant_id
             )
             if current is not None:
+                require_same(current)
                 return current, False
             raise normalize_error(error)
         await self._event(record, "run_created")
@@ -612,8 +793,17 @@ class AgentRuntimeService:
     ) -> RunViewV1 | None:
         """执行已排队 Run，并将后台边界异常归一化为失败状态。"""
 
-        with bind_diagnostic_context(
-            run_id=record.run_id, request_id=request.request_id
+        with (
+            bind_run_context(
+                binding_from_metadata(
+                    record.request.metadata,
+                    record.run_id,
+                    record.budget_state.deadline_epoch_ms // 1000,
+                )
+            ),
+            bind_diagnostic_context(
+                run_id=record.run_id, request_id=request.request_id
+            ),
         ):
             try:
                 return await self._execute_queued(record, request)
@@ -635,8 +825,17 @@ class AgentRuntimeService:
     ) -> RunViewV1:
         """复用唯一 Graph Runtime 执行一个已经进入 QUEUED 的 Run。"""
 
-        with bind_diagnostic_context(
-            run_id=record.run_id, request_id=request.request_id
+        with (
+            bind_run_context(
+                binding_from_metadata(
+                    record.request.metadata,
+                    record.run_id,
+                    record.budget_state.deadline_epoch_ms // 1000,
+                )
+            ),
+            bind_diagnostic_context(
+                run_id=record.run_id, request_id=request.request_id
+            ),
         ):
             return await self._execute_queued_with_context(record, request)
 
@@ -867,10 +1066,26 @@ class AgentRuntimeService:
         except Exception:  # noqa: BLE001 - Recorder 异常不得影响 Run 终态
             return
 
+    def _register_background_task(
+        self, record: RunRecord, task: asyncio.Task[RunViewV1 | None]
+    ) -> None:
+        owner = (record.request.tenant_id, record.run_id)
+        self._background_exits.pop(owner, None)
+        self._background_owners[task] = owner
+        self._background_tasks.add(task)
+        task.add_done_callback(self._discard_background_task)
+
     def _discard_background_task(self, task: asyncio.Task[RunViewV1 | None]) -> None:
         """释放后台任务引用；异常已在后台边界内部归一化。"""
 
         self._background_tasks.discard(task)
+        owner = self._background_owners.pop(task, None)
+        if owner is not None and task.done():
+            # 仅保存本进程已退出任务的有限元数据；淘汰或重启后缺证明必须pending。
+            self._background_exits[owner] = None
+            self._background_exits.move_to_end(owner)
+            if len(self._background_exits) > 1024:
+                self._background_exits.popitem(last=False)
 
     async def _apply_graph_result(
         self, record: RunRecord, result: GraphExecutionResult
@@ -986,10 +1201,19 @@ class AgentRuntimeService:
             raise HarnessError("RUN_NOT_WAITING_INPUT", "Run 当前不等待补充输入")
         if record.strategy is None:
             raise HarnessError("CHECKPOINT_MISMATCH", "Checkpoint 不匹配")
-        with bind_diagnostic_context(
-            run_id=run_id,
-            request_id=record.request.request_id,
-            strategy=record.strategy.value,
+        with (
+            bind_run_context(
+                binding_from_metadata(
+                    record.request.metadata,
+                    record.run_id,
+                    record.budget_state.deadline_epoch_ms // 1000,
+                )
+            ),
+            bind_diagnostic_context(
+                run_id=run_id,
+                request_id=record.request.request_id,
+                strategy=record.strategy.value,
+            ),
         ):
             return await self._resume_run_with_context(record, request)
 
@@ -1126,9 +1350,7 @@ class AgentRuntimeService:
             cancelled = None
             for _ in range(3):
                 try:
-                    cancelled = await self._transition(
-                        candidate, RunStatus.CANCELLED
-                    )
+                    cancelled = await self._transition(candidate, RunStatus.CANCELLED)
                     break
                 except Exception as error:
                     if getattr(error, "code", None) != "RUN_VERSION_CONFLICT":
@@ -1231,9 +1453,7 @@ class AgentRuntimeService:
                 record.run_id, {"status": record.status.value}
             )
             if not any(item.event == "clarification_required" for item in history):
-                events.append(
-                    ("clarification_required", dict(payload))
-                )
+                events.append(("clarification_required", dict(payload)))
             events.append(
                 (
                     "stream_done",

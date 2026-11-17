@@ -72,7 +72,11 @@ class _Program:
         try:
             snapshot = await self._compiled.aget_state(config)
             return dict(snapshot.values)
-        except Exception:  # noqa: BLE001 - 读取快照失败时回退到最近状态
+        except Exception:
+            if getattr(
+                getattr(self._compiled, "checkpointer", None), "memory_fenced", False
+            ):
+                raise
             return dict(self._last)
 
 

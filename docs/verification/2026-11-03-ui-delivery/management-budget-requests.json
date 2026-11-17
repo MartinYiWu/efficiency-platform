@@ -1,0 +1,63 @@
+[
+  {
+    "method": "POST",
+    "path": "/api/aihub/rag-evaluations/datasets",
+    "body": {
+      "name": "离线事务数据集",
+      "description": "有状态模拟",
+      "agentKey": "customer-service",
+      "status": "DRAFT"
+    }
+  },
+  {
+    "method": "POST",
+    "path": "/api/aihub/rag-evaluations/datasets/dataset/cases/import",
+    "body": [
+      {
+        "caseNo": "001",
+        "question": "报销期限？",
+        "expectedAnswerMode": "COMPANY_KNOWLEDGE",
+        "expectedFacts": [
+          "保留事实",
+          "移除事实"
+        ],
+        "expectedFactAlternatives": {
+          "保留事实": [
+            "保留同义"
+          ],
+          "移除事实": [
+            "旧同义"
+          ]
+        },
+        "prohibitedFacts": [],
+        "expectedDocumentTitles": [
+          "报销制度"
+        ],
+        "expectedDocumentVersionIds": [
+          "doc-v2"
+        ],
+        "minCitationCount": 1,
+        "tags": [
+          "offline"
+        ],
+        "enabled": true
+      }
+    ]
+  },
+  {
+    "method": "POST",
+    "path": "/api/aihub/rag-evaluations/runs",
+    "body": {
+      "datasetId": "dataset",
+      "agentKey": "customer-service",
+      "agentVersionId": "av",
+      "ragPolicyVersionId": "rag",
+      "knowledgeBindings": [
+        {
+          "knowledgeBaseId": "kb",
+          "indexReleaseId": "index"
+        }
+      ]
+    }
+  }
+]

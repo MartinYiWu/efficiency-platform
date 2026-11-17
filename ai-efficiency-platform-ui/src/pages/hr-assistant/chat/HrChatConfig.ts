@@ -1,6 +1,4 @@
-import type { AssistantChatConfig } from './HrChatPage';
-
-export const hrChatConfig: AssistantChatConfig = {
+export const hrChatConfig = {
   title: 'AI 人事助手',
   subtitle: '协助处理岗位、简历、匹配和面试准备',
   placeholder: '输入你想咨询的人事工作问题…',

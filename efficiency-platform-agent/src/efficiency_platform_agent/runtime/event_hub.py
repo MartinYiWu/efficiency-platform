@@ -6,6 +6,7 @@ import asyncio
 import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
+from weakref import WeakValueDictionary
 
 from efficiency_platform_agent.contracts.stream_events import (
     RunStreamEventV1,
@@ -80,28 +81,44 @@ def _closes_run(event: RunStreamEventV1) -> bool:
     return event.event == "stream_done" and event.payload.get("status") != "waiting_input"
 
 
+class _ReplayBatch(list[RunStreamEventV1]):
+    pass
+
+
 class EventSubscription(AsyncIterator[RunStreamEventV1]):
     """一个可显式关闭的 Run 实时订阅。"""
 
     def __init__(self, hub: EventHub, run_id: str) -> None:
         self._hub = hub
         self.run_id = run_id
-        self._queue: asyncio.Queue[RunStreamEventV1] = asyncio.Queue()
+        self._queue: asyncio.Queue[RunStreamEventV1 | None] = asyncio.Queue()
         self._closed = False
+        self._current: RunStreamEventV1 | None = None
 
     def __aiter__(self) -> EventSubscription:
         return self
 
     async def __anext__(self) -> RunStreamEventV1:
         if self._closed:
+            while not self._queue.empty():
+                self._queue.get_nowait()
             raise StopAsyncIteration
-        return await self._queue.get()
+        event = await self._queue.get()
+        if self._closed or event is None or self._hub.is_memory_scrubbed(self.run_id):
+            raise StopAsyncIteration
+        self._current = event
+        return event
 
     async def aclose(self) -> None:
         """幂等关闭订阅并释放 Hub 中的引用。"""
         if self._closed:
             return
         self._closed = True
+        while not self._queue.empty():
+            queued = self._queue.get_nowait()
+            if queued is not None:
+                queued.payload.clear()
+        self._queue.put_nowait(None)
         self._hub._unsubscribe(self)
 
 
@@ -112,6 +129,8 @@ class EventHub:
         self._history: dict[str, list[RunStreamEventV1]] = {}
         self._subscribers: dict[str, set[EventSubscription]] = {}
         self._closed_runs: set[str] = set()
+        self._memory_scrubbed: set[str] = set()
+        self._replays: WeakValueDictionary[int, _ReplayBatch] = WeakValueDictionary()
         self._lock = asyncio.Lock()
 
     async def publish(self, event: RunStreamEventV1) -> None:
@@ -176,16 +195,23 @@ class EventHub:
         ):
             raise ValueError("after_sequence 必须是非负整数")
         async with self._lock:
-            return [
+            if run_id in self._memory_scrubbed:
+                return []
+            replayed = _ReplayBatch(
                 _snapshot(event)
                 for event in self._history.get(run_id, ())
                 if event.sequence > after_sequence
-            ]
+            )
+            self._replays[id(replayed)] = replayed
+            return replayed
 
     def subscribe(self, run_id: str) -> EventSubscription:
         """立即登记订阅，避免回放与实时监听之间丢失事件。"""
         _validate_run_id(run_id)
         subscription = EventSubscription(self, run_id)
+        if run_id in self._memory_scrubbed:
+            subscription._closed = True
+            return subscription
         self._subscribers.setdefault(run_id, set()).add(subscription)
         return subscription
 
@@ -196,6 +222,31 @@ class EventHub:
     def is_closed(self, run_id: str) -> bool:
         """返回该 Run 是否已经发布 stream_done。"""
         return run_id in self._closed_runs
+
+    def is_memory_scrubbed(self, run_id: str) -> bool:
+        return run_id in self._memory_scrubbed
+
+    async def scrub_memory_run(self, run_id: str) -> None:
+        _validate_run_id(run_id)
+        async with self._lock:
+            if run_id not in self._memory_scrubbed and len(self._memory_scrubbed) >= 1024:
+                raise ValueError("MEMORY_EVENT_FENCE_CAPACITY")
+            self._memory_scrubbed.add(run_id)
+            self._closed_runs.add(run_id)
+            history = self._history.pop(run_id, None)
+            if history is not None:
+                for event in history:
+                    event.payload.clear()
+                history.clear()
+            for subscription in tuple(self._subscribers.get(run_id, ())):
+                if subscription._current is not None:
+                    subscription._current.payload.clear()
+                await subscription.aclose()
+            for replayed in tuple(self._replays.values()):
+                if replayed and replayed[0].run_id == run_id:
+                    for event in replayed:
+                        event.payload.clear()
+                    replayed.clear()
 
     def _unsubscribe(self, subscription: EventSubscription) -> None:
         subscribers = self._subscribers.get(subscription.run_id)

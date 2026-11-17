@@ -1,0 +1,16 @@
+# 仅显式受控集成；不加载共享application.yml，不自动建表或连接业务依赖。
+spring:
+  application:
+    name: aiep-memory-transport-integration
+  main:
+    web-application-type: none
+    banner-mode: "off"
+aiep:
+  agent:
+    base-url: ${MEMORY_IT_AGENT_BASE_URL}
+    internal-secret: ${MEMORY_IT_INTERNAL_SECRET}
+    connect-timeout: 3s
+    response-timeout: 30s
+logging:
+  level:
+    root: WARN

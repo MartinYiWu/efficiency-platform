@@ -48,6 +48,7 @@ def _status_for_error(error: HarnessError) -> int:
         "CHECKPOINT_MISMATCH",
         "RUN_ALREADY_TERMINAL",
         "REQUEST_ID_CONFLICT",
+        "CONTEXT_SCOPE_MISMATCH",
         "STRATEGY_UNSUPPORTED",
         "GRAPH_NEXT_STATUS_FORBIDDEN",
     }:
@@ -146,6 +147,7 @@ def build_router(
                     run_id,
                     after_sequence=after_sequence,
                     is_disconnected=request.is_disconnected,
+                    can_emit=lambda: service.can_emit_memory_events(run_id, x_tenant_id),
                 ),
                 media_type="text/event-stream",
                 headers={
@@ -154,8 +156,13 @@ def build_router(
                 },
             )
         events = await service.list_events(run_id, x_tenant_id, after_sequence)
+        async def guarded_events():
+            for chunk in render_events(events):
+                if not await service.can_emit_memory_events(run_id, x_tenant_id):
+                    return
+                yield chunk.encode("utf-8")
         return StreamingResponse(
-            (chunk.encode("utf-8") for chunk in render_events(events)),
+            guarded_events(),
             media_type="text/event-stream",
         )
 

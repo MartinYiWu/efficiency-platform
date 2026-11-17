@@ -9,7 +9,7 @@
   overflow-wrap: anywhere;
   display: grid;
   gap: 14px;
-  color: #334155;
+  color: var(--text-primary);
 }
 
 .tableWrap {
@@ -17,7 +17,7 @@
   max-width: 100%;
   overflow-x: auto;
 
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v1-border);
   border-radius: 6px;
 }
 .tableRow {
@@ -27,13 +27,13 @@
   align-items: center;
   min-height: 42px;
   padding: 6px 12px;
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid var(--v1-border);
   font-size: 13px;
 }
 .tableRow:first-child {
   min-height: 36px;
-  color: #475569;
-  background: #f8fafc;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 .tableRow:last-child {
   border-bottom: 0;
@@ -53,7 +53,7 @@
 }
 .header h1 {
   margin: 0 !important;
-  font-size: 28px !important;
+  font-size: 24px !important;
 }
 .header > div:last-child {
   display: flex;
@@ -64,8 +64,8 @@
   display: grid;
   grid-template-columns: 2.2fr repeat(5, 1fr);
   padding: 22px 26px;
-  background: linear-gradient(112deg, #eef6ff, #f7f4ff);
-  border: 1px solid #bfd4ff;
+  background: linear-gradient(112deg, var(--color-info-bg), var(--primary-bg));
+  border: 1px solid var(--color-info-bg);
   border-radius: 8px;
 }
 .completedCard {
@@ -73,17 +73,17 @@
   align-items: center;
   gap: 16px;
   padding: 22px 26px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success-bg);
   border-radius: 8px;
 }
 .completedCard > :global(.anticon) {
   font-size: 38px;
-  color: #16a34a;
+  color: var(--v1-success);
 }
 .completedCard h2 {
   margin: 0 0 4px !important;
-  color: #166534;
+  color: var(--color-success);
 }
 .completedCard > div:nth-child(2) {
   flex: 1;
@@ -100,28 +100,28 @@
 }
 .mainProgress strong {
   font-size: 42px;
-  color: #1677ff;
+  color: var(--v1-primary);
 }
 .mainProgress small {
   font-size: 15px;
-  color: #334155;
+  color: var(--text-primary);
 }
 .mainProgress span {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .stat {
   display: grid;
   justify-items: center;
   gap: 8px;
-  border-left: 1px solid #d5deef;
+  border-left: 1px solid var(--border-primary);
 }
 .stat b {
   font-size: 26px;
 }
 .log {
   padding: 14px 16px;
-  background: #1e293b;
-  color: #e2e8f0;
+  background: var(--text-primary);
+  color: var(--v1-border);
   border-radius: 8px;
   font-family: Consolas, monospace;
 }
@@ -130,7 +130,7 @@
   justify-content: space-between;
   margin-bottom: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #475569;
+  border-bottom: 1px solid var(--text-secondary);
 }
 .log p {
   margin: 5px 0;
@@ -139,14 +139,14 @@
 .log time {
   display: inline-block;
   width: 74px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
 }
 .details {
   min-width: 0;
   overflow-x: auto;
   padding: 16px;
   background: #fff;
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--v1-border);
   border-radius: 8px;
 }
 .detailsHead {
@@ -165,22 +165,22 @@
 }
 .file :global(.anticon) {
   margin-right: 8px;
-  color: #ef4444;
+  color: var(--v1-danger);
 }
 .statusDone {
-  color: #16a34a;
+  color: var(--v1-success);
 }
 .statusConfirm {
-  color: #f59e0b;
+  color: var(--v1-warning);
 }
 .statusWorking {
-  color: #1677ff;
+  color: var(--v1-primary);
 }
 .statusFailed {
-  color: #ef4444;
+  color: var(--v1-danger);
 }
 .statusWaiting {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .confirmBar,
 .failBar,
@@ -192,22 +192,22 @@
   margin: 0 8px 4px;
 }
 .confirmBar {
-  color: #d97706;
-  background: #fff7ed;
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
 }
 .failBar {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--color-error);
+  background: var(--color-error-bg);
 }
 .mergeBar {
-  color: #2563eb;
-  background: #eff6ff;
+  color: var(--v1-primary);
+  background: var(--color-info-bg);
 }
 .page > footer {
   padding: 14px 16px;
-  color: #64748b;
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
+  color: var(--text-secondary);
+  background: var(--color-info-bg);
+  border: 1px solid var(--color-info-bg);
   border-radius: 8px;
 }
 @media (max-width: 1280px) {
@@ -264,10 +264,10 @@
   grid-column: 1 / -1;
   margin: 0;
   padding: 8px 0;
-  color: var(--ui-text-secondary, #64748b);
+  color: var(--ui-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.6;
-  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  border-bottom: 1px solid var(--ui-border, var(--v1-border));
 }
 
 .tableRow,
@@ -280,10 +280,35 @@
 }
 .progressCard {
   background: #fff;
-  border-inline: 0;
-  border-radius: 0;
+  border-radius: var(--v1-radius);
 }
 
 .page h1 {
-  color: #0f172a !important;
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.3;
+  margin: 0 0 4px !important;
+}
+
+.page table {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+}
+.page table th {
+  padding: 16px;
+  background: rgba(249, 250, 251, 0.8);
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+.page table td {
+  padding: 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+}
+.page table tbody tr:hover td {
+  background: rgba(139, 92, 246, 0.04);
 }

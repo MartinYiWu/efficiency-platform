@@ -1,0 +1,31 @@
+-- 状态：D13隔离验收候选；不得自动执行到共享库。前置V1.2.16及独立审查。
+-- 仅新增技术授权快照，引用既有业务task/execution；无业务Job、无偏好值或Prompt明文。
+CREATE TABLE ai_memory_packet (
+ tenant_id VARBINARY(512) NOT NULL,
+ execution_id VARBINARY(512) NOT NULL,
+ packet_id VARBINARY(512) NOT NULL,
+ packet_revision BIGINT UNSIGNED NOT NULL,
+ user_id VARBINARY(512) NOT NULL,
+ task_id VARBINARY(512) NOT NULL,
+ scope_json JSON NOT NULL,
+ policy_json JSON NOT NULL,
+ grants_json JSON NOT NULL,
+ references_json JSON NOT NULL,
+ dependencies_json JSON NOT NULL,
+ request_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ packet_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ semantic_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ semantic_input_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ parent_authorization_ref VARBINARY(512) NOT NULL,
+ execution_revision BIGINT UNSIGNED NOT NULL,
+ grant_epoch BIGINT UNSIGNED NOT NULL,
+ source_epoch BIGINT UNSIGNED NOT NULL,
+ deletion_epoch BIGINT UNSIGNED NOT NULL,
+ original_deadline BIGINT UNSIGNED NOT NULL,
+ issued_at BIGINT UNSIGNED NOT NULL,
+ expires_at BIGINT UNSIGNED NOT NULL,
+ PRIMARY KEY(tenant_id,execution_id),
+ UNIQUE KEY uk_memory_packet_id(tenant_id,packet_id,packet_revision),
+ CONSTRAINT ck_memory_packet_deadline CHECK(issued_at < expires_at AND expires_at <= original_deadline),
+ CONSTRAINT ck_memory_packet_revision CHECK(packet_revision > 0 AND execution_revision > 0)
+) ENGINE=InnoDB ROW_FORMAT=DYNAMIC;

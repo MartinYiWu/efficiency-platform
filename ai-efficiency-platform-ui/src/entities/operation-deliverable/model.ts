@@ -4,12 +4,7 @@ export type DeliverableKindV2 =
 export type ConfidenceV2 = 'high' | 'medium' | 'low';
 export type VerificationStatusV2 = 'verified' | 'partially_verified' | 'unverified' | 'conflicted';
 export type RankingBasisV2 =
-  | 'importance'
-  | 'recency'
-  | 'heat'
-  | 'mixed'
-  | 'evidence_order'
-  | 'model_event_order';
+  'importance' | 'recency' | 'heat' | 'mixed' | 'evidence_order' | 'model_event_order';
 export type NextActionTypeV2 =
   | 'rewrite_for_platform'
   | 'expand_item'
@@ -521,6 +516,4 @@ export interface DeliverySetV3ViewModel {
 }
 
 export type OperationDeliveryViewModel =
-  | LegacyDeliveryViewModel
-  | DeliverySetV2ViewModel
-  | DeliverySetV3ViewModel;
+  LegacyDeliveryViewModel | DeliverySetV2ViewModel | DeliverySetV3ViewModel;

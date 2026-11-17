@@ -138,10 +138,10 @@ class _CompiledOperationGraph:
 class OperationSupervisorGraphBuilder:
     """通过依赖闭包构建运营 Supervisor 图，不改变 S2 runtime。"""
 
-    def __init__(self, dependencies: SupervisorDependencies, limits=None) -> None:
+    def __init__(self, dependencies: SupervisorDependencies, limits=None, *, checkpointer=None) -> None:
         self.dependencies = dependencies
         self.limits = limits
-        self.checkpointer = InMemorySaver()
+        self.checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
         self.node_sequence = NODE_SEQUENCE
 
     def build(self):

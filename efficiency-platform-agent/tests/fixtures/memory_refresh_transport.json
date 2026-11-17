@@ -1,0 +1,477 @@
+{
+  "original_context": {
+    "schema_version": "memory-context/1",
+    "memory_mode": "EXACT_ONLY",
+    "scope": {
+      "tenant_id": "tenant-中文😀 ",
+      "user_id": "user",
+      "domain": "operations",
+      "top_level_agent_id": "operations",
+      "session_kind": "CONVERSATION",
+      "session_id": "session"
+    },
+    "packet": {
+      "packet_id": "packet",
+      "packet_revision": 1,
+      "scope": {
+        "tenant_id": "tenant-中文😀 ",
+        "user_id": "user",
+        "domain": "operations",
+        "top_level_agent_id": "operations",
+        "session_kind": "CONVERSATION",
+        "session_id": "session"
+      },
+      "task_id": "java-task",
+      "execution_id": "java-execution",
+      "policy_version": "policy-v1",
+      "execution_revision": 1,
+      "issued_at": 100,
+      "expires_at": 160,
+      "grant_epoch": 0,
+      "source_epoch": 0,
+      "deletion_epoch": 0,
+      "semantic_input_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "parent_authorization_ref": "java-parent",
+      "items": [
+        {
+          "item_id": "item-B",
+          "version": "v2",
+          "field_key": "response.language",
+          "value": "zh-CN",
+          "safety_dependencies": [
+            {
+              "source_type": "USER_PREFERENCE_DECISION",
+              "source_id": "B",
+              "source_version": "2",
+              "grant_epoch": 1,
+              "source_epoch": 2,
+              "deletion_epoch": 0
+            },
+            {
+              "source_type": "USER_PREFERENCE_DECISION",
+              "source_id": "A-😀",
+              "source_version": "1",
+              "grant_epoch": 0,
+              "source_epoch": 1,
+              "deletion_epoch": 0
+            },
+            {
+              "source_type": "USER_PREFERENCE_DECISION",
+              "source_id": "B",
+              "source_version": "2",
+              "grant_epoch": 1,
+              "source_epoch": 2,
+              "deletion_epoch": 0
+            }
+          ]
+        }
+      ],
+      "safety_dependencies": [
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "B",
+          "source_version": "2",
+          "grant_epoch": 1,
+          "source_epoch": 2,
+          "deletion_epoch": 0
+        },
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "A-😀",
+          "source_version": "1",
+          "grant_epoch": 0,
+          "source_epoch": 1,
+          "deletion_epoch": 0
+        },
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "B",
+          "source_version": "2",
+          "grant_epoch": 1,
+          "source_epoch": 2,
+          "deletion_epoch": 0
+        }
+      ]
+    },
+    "authorization": {
+      "policy": {
+        "policy_id": "policy",
+        "version": "policy-v1",
+        "domain": "operations",
+        "agent_ids": [
+          "operations"
+        ],
+        "enabled": true,
+        "readable_layers": [
+          "semantic"
+        ],
+        "writable_kinds": [],
+        "allowed_scopes": [
+          "USER_PRIVATE"
+        ],
+        "field_allowlist": [
+          "response.language"
+        ],
+        "sensitivity_levels": [],
+        "confirmation_required": true,
+        "auto_extract": false,
+        "shared_approval_required": true,
+        "source_types": [
+          "USER_PREFERENCE_DECISION"
+        ],
+        "retention_days": 0,
+        "recall_top_k": 0,
+        "recall_token_limit": 0,
+        "max_paid_operations": 0,
+        "degradation_mode": "disabled",
+        "source_deletion_mode": "block",
+        "schema_version": "1",
+        "model_version": "none",
+        "tokenizer_version": "none"
+      },
+      "execution_grants": [
+        {
+          "node_id": "conversation.general",
+          "execution_agent_id": "operations",
+          "purpose": "assistant_response"
+        }
+      ],
+      "deadline_epoch_seconds": 200,
+      "packet_digest": "4cbb364e1707f0a4f4740aa8987d144c086b9c4a62a3ea64a94b2e283d66c8d6",
+      "semantic_snapshot_digest": "3f8c15c39dac9ba94ebab011f77c3c5417b75bd3c9d6584601fa1077e132dc36",
+      "request_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "input_dependencies": [
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "B",
+          "source_version": "2",
+          "grant_epoch": 1,
+          "source_epoch": 2,
+          "deletion_epoch": 0
+        },
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "A-😀",
+          "source_version": "1",
+          "grant_epoch": 0,
+          "source_epoch": 1,
+          "deletion_epoch": 0
+        },
+        {
+          "source_type": "USER_PREFERENCE_DECISION",
+          "source_id": "B",
+          "source_version": "2",
+          "grant_epoch": 1,
+          "source_epoch": 2,
+          "deletion_epoch": 0
+        }
+      ]
+    }
+  },
+  "wait": {
+    "contract_version": "memory-context-wait/1",
+    "wait_event_id": "wait-中文😀",
+    "runtime_id": "run",
+    "task_id": "java-task",
+    "execution_id": "java-execution",
+    "scope": {
+      "tenant_id": "tenant-中文😀 ",
+      "user_id": "user",
+      "domain": "operations",
+      "top_level_agent_id": "operations",
+      "session_kind": "CONVERSATION",
+      "session_id": "session"
+    },
+    "expected_packet_revision": 1,
+    "expected_execution_revision": 1,
+    "operation_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "logical_operation_id": "operation",
+    "semantic_input_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "canonical_request_hmac": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "attempt": 1,
+    "stage_id": null,
+    "stage_slot": null,
+    "checkpoint_mode": "GRAPH",
+    "checkpoint_ns": "",
+    "checkpoint_id": "checkpoint",
+    "wait_phase": "RESERVED",
+    "original_deadline": 200,
+    "refresh_count": 1,
+    "expected_current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "resume": {
+    "wait_event_id": "wait-中文😀",
+    "packet_revision": 1,
+    "expected_execution_revision": 1,
+    "resume_request_id": "resume",
+    "operation_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "mode": "refresh",
+    "new_content": false,
+    "contract_version": "memory-context-resume/2",
+    "logical_operation_id": "operation",
+    "canonical_request_hmac": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "attempt": 1,
+    "expected_current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "refreshed_context": {
+      "schema_version": "memory-context/1",
+      "memory_mode": "EXACT_ONLY",
+      "scope": {
+        "tenant_id": "tenant-中文😀 ",
+        "user_id": "user",
+        "domain": "operations",
+        "top_level_agent_id": "operations",
+        "session_kind": "CONVERSATION",
+        "session_id": "session"
+      },
+      "packet": {
+        "packet_id": "packet",
+        "packet_revision": 3,
+        "scope": {
+          "tenant_id": "tenant-中文😀 ",
+          "user_id": "user",
+          "domain": "operations",
+          "top_level_agent_id": "operations",
+          "session_kind": "CONVERSATION",
+          "session_id": "session"
+        },
+        "task_id": "java-task",
+        "execution_id": "java-execution",
+        "policy_version": "policy-v1",
+        "execution_revision": 1,
+        "issued_at": 150,
+        "expires_at": 195,
+        "grant_epoch": 0,
+        "source_epoch": 0,
+        "deletion_epoch": 0,
+        "semantic_input_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "parent_authorization_ref": "java-parent",
+        "items": [
+          {
+            "item_id": "item-B",
+            "version": "v2",
+            "field_key": "response.language",
+            "value": "zh-CN",
+            "safety_dependencies": [
+              {
+                "source_type": "USER_PREFERENCE_DECISION",
+                "source_id": "B",
+                "source_version": "2",
+                "grant_epoch": 1,
+                "source_epoch": 2,
+                "deletion_epoch": 0
+              },
+              {
+                "source_type": "USER_PREFERENCE_DECISION",
+                "source_id": "A-😀",
+                "source_version": "1",
+                "grant_epoch": 0,
+                "source_epoch": 1,
+                "deletion_epoch": 0
+              },
+              {
+                "source_type": "USER_PREFERENCE_DECISION",
+                "source_id": "B",
+                "source_version": "2",
+                "grant_epoch": 1,
+                "source_epoch": 2,
+                "deletion_epoch": 0
+              }
+            ]
+          }
+        ],
+        "safety_dependencies": [
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "B",
+            "source_version": "2",
+            "grant_epoch": 1,
+            "source_epoch": 2,
+            "deletion_epoch": 0
+          },
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "A-😀",
+            "source_version": "1",
+            "grant_epoch": 0,
+            "source_epoch": 1,
+            "deletion_epoch": 0
+          },
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "B",
+            "source_version": "2",
+            "grant_epoch": 1,
+            "source_epoch": 2,
+            "deletion_epoch": 0
+          }
+        ]
+      },
+      "authorization": {
+        "policy": {
+          "policy_id": "policy",
+          "version": "policy-v1",
+          "domain": "operations",
+          "agent_ids": [
+            "operations"
+          ],
+          "enabled": true,
+          "readable_layers": [
+            "semantic"
+          ],
+          "writable_kinds": [],
+          "allowed_scopes": [
+            "USER_PRIVATE"
+          ],
+          "field_allowlist": [
+            "response.language"
+          ],
+          "sensitivity_levels": [],
+          "confirmation_required": true,
+          "auto_extract": false,
+          "shared_approval_required": true,
+          "source_types": [
+            "USER_PREFERENCE_DECISION"
+          ],
+          "retention_days": 0,
+          "recall_top_k": 0,
+          "recall_token_limit": 0,
+          "max_paid_operations": 0,
+          "degradation_mode": "disabled",
+          "source_deletion_mode": "block",
+          "schema_version": "1",
+          "model_version": "none",
+          "tokenizer_version": "none"
+        },
+        "execution_grants": [
+          {
+            "node_id": "conversation.general",
+            "execution_agent_id": "operations",
+            "purpose": "assistant_response"
+          }
+        ],
+        "deadline_epoch_seconds": 200,
+        "packet_digest": "aeb2d3e324759547f7a30ade4af0fe784210f3b8fbdae45411110a90f16a621d",
+        "semantic_snapshot_digest": "3f8c15c39dac9ba94ebab011f77c3c5417b75bd3c9d6584601fa1077e132dc36",
+        "request_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_dependencies": [
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "B",
+            "source_version": "2",
+            "grant_epoch": 1,
+            "source_epoch": 2,
+            "deletion_epoch": 0
+          },
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "A-😀",
+            "source_version": "1",
+            "grant_epoch": 0,
+            "source_epoch": 1,
+            "deletion_epoch": 0
+          },
+          {
+            "source_type": "USER_PREFERENCE_DECISION",
+            "source_id": "B",
+            "source_version": "2",
+            "grant_epoch": 1,
+            "source_epoch": 2,
+            "deletion_epoch": 0
+          }
+        ]
+      }
+    }
+  },
+  "receipt": {
+    "code": "CONTEXT_REFRESHED",
+    "receipt_ref": "receipt",
+    "wait_event_id": "wait-中文😀",
+    "packet_revision": 3,
+    "execution_revision": 1,
+    "current_packet_revision": 3,
+    "current_context_fingerprint": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "refresh_count": 2,
+    "state": "ACTIVE",
+    "candidate_phase": "ACKED",
+    "next_wait_event_id": null,
+    "dispatch_allowed": true
+  },
+  "canonical_resume_sha256": "de71b56a14f5cd4910567d2a1b52aaa5d04f82a23a905d8bc4b7fff5c7ce7d8e",
+  "nullable_wait": {
+    "contract_version": "memory-context-wait/1",
+    "wait_event_id": "wait-中文😀",
+    "runtime_id": "run",
+    "task_id": "java-task",
+    "execution_id": "java-execution",
+    "scope": {
+      "tenant_id": "tenant-中文😀 ",
+      "user_id": "user",
+      "domain": "operations",
+      "top_level_agent_id": "operations",
+      "session_kind": "CONVERSATION",
+      "session_id": "session"
+    },
+    "expected_packet_revision": 1,
+    "expected_execution_revision": 1,
+    "operation_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "logical_operation_id": "operation",
+    "semantic_input_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "canonical_request_hmac": null,
+    "attempt": 1,
+    "stage_id": null,
+    "stage_slot": null,
+    "checkpoint_mode": "NONE",
+    "checkpoint_ns": null,
+    "checkpoint_id": null,
+    "wait_phase": "BEFORE_PREPARE",
+    "original_deadline": 200,
+    "refresh_count": 1,
+    "expected_current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  },
+  "cpu_resume": {
+    "wait_event_id": "wait-中文😀",
+    "packet_revision": 1,
+    "expected_execution_revision": 1,
+    "resume_request_id": "resume",
+    "operation_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "mode": "cpu",
+    "new_content": false,
+    "contract_version": "memory-context-resume/2",
+    "logical_operation_id": "operation",
+    "canonical_request_hmac": null,
+    "attempt": 1,
+    "expected_current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "refreshed_context": null
+  },
+  "paid_resume": {
+    "wait_event_id": "wait-中文😀",
+    "packet_revision": 1,
+    "expected_execution_revision": 1,
+    "resume_request_id": "resume",
+    "operation_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "mode": "paid",
+    "new_content": false,
+    "contract_version": "memory-context-resume/2",
+    "logical_operation_id": "operation",
+    "canonical_request_hmac": null,
+    "attempt": 1,
+    "expected_current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "refreshed_context": null
+  },
+  "cpu_receipt": {
+    "code": "CPU_CONFIRMED",
+    "receipt_ref": "receipt",
+    "wait_event_id": "wait-中文😀",
+    "packet_revision": null,
+    "execution_revision": 1,
+    "current_packet_revision": 1,
+    "current_context_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "refresh_count": 2,
+    "state": "WAITING_CONTEXT",
+    "candidate_phase": null,
+    "next_wait_event_id": null,
+    "dispatch_allowed": false
+  },
+  "cpu_resume_sha256": "2dc9a984dfadb050ad4fc00ac2971087b57f70e03e37a14fbc855d75cc36212e",
+  "paid_resume_sha256": "7387d6b24069575bfbb369ff5ec53b59a608b1d255ce90deee8454589a8ff2b4"
+}

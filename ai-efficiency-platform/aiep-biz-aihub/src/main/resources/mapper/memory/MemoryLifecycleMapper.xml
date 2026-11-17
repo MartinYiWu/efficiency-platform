@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryLifecycleMapper">
+ <select id="sourceTombstone" resultType="int">SELECT COUNT(*) FROM ai_memory_tombstone WHERE tenant_id=#{tenant} AND target_type='SOURCE' AND target_id=#{source} AND deletion_epoch&gt;=#{epoch}</select>
+ <select id="versionProofs" resultType="com.aiep.aihub.repository.memory.MemoryLifecycleMapper$VersionProof">
+  SELECT v.status,p.policy_json FROM ai_memory_version v LEFT JOIN ai_memory_policy_version p ON p.tenant_id=v.tenant_id AND p.policy_id=v.policy_id AND p.version_id=v.policy_version_id WHERE v.tenant_id=#{tenant} AND v.item_id=#{item} <if test="version != null">AND v.id=#{version}</if> ORDER BY v.id
+ </select>
+ <select id="due" resultType="com.aiep.aihub.repository.memory.MemoryLifecycleMapper$Delivery">
+  SELECT o.tenant_id,o.event_id,j.id AS job_id,o.deletion_epoch,o.revision
+  FROM ai_memory_outbox o JOIN ai_memory_deletion_job j ON j.tenant_id=o.tenant_id AND j.id=o.event_id AND j.item_id=o.aggregate_id AND j.deletion_epoch=o.deletion_epoch
+  WHERE o.event_type IN ('MEMORY_FORGET','MEMORY_DERIVED_REVOKED','MEMORY_SOURCE_REVOKED')
+  AND o.status IN ('QUEUED','CLAIMED','BLOCKED') AND o.attempts&lt;8
+  AND (o.lease_until IS NULL OR o.lease_until&lt;=UTC_TIMESTAMP(6))
+  AND j.status IN ('QUEUED','RUNNING','BLOCKED','RETRYABLE_FAILED') AND j.attempts&lt;8 AND j.deadline&gt;UTC_TIMESTAMP(6)
+  ORDER BY j.deadline,o.tenant_id,o.event_id LIMIT #{limit}
+ </select>
+ <update id="claim">
+  UPDATE ai_memory_outbox o JOIN ai_memory_deletion_job j ON j.tenant_id=o.tenant_id AND j.id=o.event_id AND j.item_id=o.aggregate_id AND j.deletion_epoch=o.deletion_epoch
+  SET o.status='CLAIMED',o.revision=o.revision+1,o.attempts=o.attempts+1,o.lease_until=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 60 SECOND),o.receipt_ref=#{token}
+  WHERE o.tenant_id=#{delivery.tenantId} AND o.event_id=#{delivery.eventId} AND o.deletion_epoch=#{delivery.deletionEpoch} AND o.revision=#{delivery.revision}
+  AND o.status IN ('QUEUED','CLAIMED','BLOCKED') AND o.attempts&lt;8 AND (o.lease_until IS NULL OR o.lease_until&lt;=UTC_TIMESTAMP(6))
+  AND j.status IN ('QUEUED','RUNNING','BLOCKED','RETRYABLE_FAILED') AND j.attempts&lt;8 AND j.deadline&gt;UTC_TIMESTAMP(6)
+ </update>
+ <update id="release">
+  UPDATE ai_memory_outbox SET status='BLOCKED',revision=revision+1,receipt_ref=NULL,lease_until=DATE_ADD(UTC_TIMESTAMP(6),INTERVAL 60 SECOND)
+  WHERE tenant_id=#{delivery.tenantId} AND event_id=#{delivery.eventId} AND deletion_epoch=#{delivery.deletionEpoch}
+  AND status='CLAIMED' AND revision=#{delivery.revision}+1 AND receipt_ref=#{token}
+ </update>
+</mapper>

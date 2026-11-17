@@ -1,1 +1,1 @@
-export { PageContainer } from './PageContainer';
+export { default as PageContainer } from './PageContainer.vue';

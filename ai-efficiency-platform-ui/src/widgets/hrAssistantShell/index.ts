@@ -1,1 +1,1 @@
-export { HrAssistantShell } from './HrAssistantShell';
+export { default as HrAssistantShell } from './HrAssistantShell.vue';

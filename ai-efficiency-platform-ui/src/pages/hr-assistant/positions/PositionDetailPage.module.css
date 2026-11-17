@@ -22,8 +22,8 @@
   justify-content: space-between;
   padding: 20px 24px;
   background: #fff;
-  border: 1px solid #edf0f5;
-  border-radius: 9px;
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
 }
 .hero > div {
   min-width: 0;
@@ -31,10 +31,10 @@
 .hero h1 {
   display: inline-block;
   margin: 0 14px 12px 0 !important;
-  font-size: 28px !important;
+  font-size: 24px !important;
 }
 .hero :global(.ant-typography) {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .grid {
   display: grid;
@@ -62,8 +62,8 @@
   min-width: 0;
   padding: 16px;
   background: #fff;
-  border: 1px solid #edf0f5;
-  border-radius: 9px;
+  border: 1px solid var(--v1-border);
+  border-radius: var(--v1-radius);
 }
 .card h2 {
   margin: 0 0 16px;
@@ -77,14 +77,14 @@
   font-size: 13px;
 }
 .info dt {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .info dd {
   margin: 0;
   line-height: 1.65;
 }
 .card :global(.ant-table-thead > tr > th) {
-  background: #f8fafc;
+  background: var(--bg-secondary);
 }
 .tableWrap {
   margin-top: 14px;
@@ -104,7 +104,7 @@
   font-size: 13px;
 }
 .skills > div > span {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .skills p {
   margin: 0;
@@ -128,23 +128,23 @@
 }
 .threshold span {
   padding: 3px 7px;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
 }
 .strong {
-  color: #16a34a;
-  background: #f0fdf4;
+  color: var(--v1-success);
+  background: var(--color-success-bg);
 }
 .recommend {
-  color: #1677ff;
-  background: #eff6ff;
+  color: var(--v1-primary);
+  background: var(--color-info-bg);
 }
 .review {
-  color: #f59e0b;
-  background: #fff7e6;
+  color: var(--v1-warning);
+  background: var(--color-warning-bg);
 }
 .muted {
-  color: #64748b;
-  background: #f1f5f9;
+  color: var(--text-secondary);
+  background: var(--v1-border-soft);
 }
 .health {
   display: flex;
@@ -157,16 +157,16 @@
 }
 .health :global(.anticon) {
   margin-right: 8px;
-  color: #16a34a;
+  color: var(--v1-success);
 }
 .checkList p {
   margin: 10px 0;
-  color: #475569;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .checkList :global(.anticon) {
   margin-right: 8px;
-  color: #16a34a;
+  color: var(--v1-success);
 }
 .skillImportance {
   display: grid;
@@ -191,9 +191,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
-  border: 1px solid #edf0f5;
+  border: 1px solid var(--v1-border);
   border-radius: 8px;
-  background: #edf0f5;
+  background: var(--v1-border);
 }
 .requirementGrid > div {
   display: grid;
@@ -205,7 +205,7 @@
 }
 .requirementGrid span,
 .compactInfo dt {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .compactInfo {
   display: grid;
@@ -234,9 +234,9 @@
   gap: 8px;
   margin-top: 16px;
   padding: 10px 12px;
-  color: #15803d;
+  color: var(--color-success);
   font-weight: 600;
-  background: #f0fdf4;
+  background: var(--color-success-bg);
   border-radius: 6px;
 }
 .scoreRail {
@@ -251,22 +251,22 @@
   display: block;
 }
 .scoreMuted {
-  background: #94a3b8;
+  background: var(--text-tertiary);
 }
 .scoreReview {
-  background: #f59e0b;
+  background: var(--v1-warning);
 }
 .scoreRecommend {
-  background: #2563eb;
+  background: var(--v1-primary);
 }
 .scoreStrong {
-  background: #16a34a;
+  background: var(--v1-success);
 }
 .scoreScale {
   display: flex;
   justify-content: space-between;
   margin-top: 7px;
-  color: #94a3b8;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 .flagList {
@@ -278,7 +278,7 @@
   justify-content: space-between;
   gap: 20px;
   padding: 11px 0;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--v1-border-soft);
 }
 .flagList > div:last-child {
   border-bottom: 0;
@@ -296,28 +296,28 @@
   grid-template-columns: 42px 1fr 38px;
   gap: 8px;
   padding: 8px 0;
-  color: #64748b;
+  color: var(--text-secondary);
   font-size: 13px;
 }
 .scorePreview b {
-  color: #0f172a;
+  color: var(--text-primary);
   text-align: right;
 }
 .scorePreview .previewTotal {
   grid-template-columns: 42px 1fr auto;
   align-items: center;
   margin-top: 5px;
-  border-top: 1px solid #edf0f5;
+  border-top: 1px solid var(--v1-border);
 }
 .previewTotal strong {
-  color: #2563eb;
+  color: var(--v1-primary);
   font-size: 20px;
 }
 .linkButton {
   padding-left: 0 !important;
 }
 .activeRow :global(td) {
-  background: #eff6ff !important;
+  background: var(--color-info-bg) !important;
 }
 .versionTitle {
   margin: 0 0 4px !important;
@@ -331,15 +331,15 @@
   grid-template-columns: 90px minmax(0, 1fr) 22px minmax(0, 1fr);
   gap: 8px;
   padding: 11px 12px;
-  background: #f8fafc;
+  background: var(--bg-secondary);
   border-radius: 6px;
   font-size: 13px;
 }
 .diffList span {
-  color: #64748b;
+  color: var(--text-secondary);
 }
 .diffList strong {
-  color: #2563eb;
+  color: var(--v1-primary);
 }
 @media (max-width: 1100px) {
   .grid,
@@ -411,18 +411,43 @@
   grid-column: 1 / -1;
   margin: 0;
   padding: 8px 0;
-  color: var(--ui-text-secondary, #64748b);
+  color: var(--ui-text-secondary, var(--text-secondary));
   font-size: 12px;
   line-height: 1.6;
-  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  border-bottom: 1px solid var(--ui-border, var(--v1-border));
 }
 
 .card {
-  border-inline: 0;
-  border-radius: 0;
+  border-radius: var(--v1-radius);
   border-top: 0;
 }
 
 .page h1 {
-  color: #0f172a !important;
+  color: var(--text-primary) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 1.3;
+  margin: 0 0 4px !important;
+}
+
+.page table {
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(8px);
+}
+.page table th {
+  padding: 16px;
+  background: rgba(249, 250, 251, 0.8);
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+.page table td {
+  padding: 16px;
+  background: transparent;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+}
+.page table tbody tr:hover td {
+  background: rgba(139, 92, 246, 0.04);
 }

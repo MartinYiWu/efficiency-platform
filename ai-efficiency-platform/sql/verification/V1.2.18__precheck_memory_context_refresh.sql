@@ -1,0 +1,10 @@
+-- 只读；先核真实迁移历史且新版本无冲突，显式选择目标；结果不构成共享 DDL 授权。
+SELECT DATABASE() AS selected_schema,VERSION() AS mysql_version,@@innodb_page_size AS page_size;
+SELECT table_name,engine,table_rows,data_length,index_length FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('ai_memory_packet','ai_memory_packet_refresh','ai_memory_tombstone','flyway_schema_history');
+SELECT table_name,ordinal_position,column_name,column_type,is_nullable,column_default,character_set_name,collation_name,extra,generation_expression FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name IN ('ai_memory_packet','ai_memory_packet_refresh') ORDER BY table_name,ordinal_position;
+SELECT table_name,index_name,seq_in_index,column_name,non_unique,sub_part FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name IN ('ai_memory_packet','ai_memory_packet_refresh') ORDER BY table_name,index_name,seq_in_index;
+SELECT c.table_name,c.constraint_name,c.constraint_type,k.check_clause FROM information_schema.table_constraints c LEFT JOIN information_schema.check_constraints k ON k.constraint_schema=c.constraint_schema AND k.constraint_name=c.constraint_name WHERE c.table_schema=DATABASE() AND c.table_name IN ('ai_memory_packet','ai_memory_packet_refresh') ORDER BY c.table_name,c.constraint_name;
+SELECT table_name,column_name,referenced_table_name,referenced_column_name,ordinal_position FROM information_schema.key_column_usage WHERE table_schema=DATABASE() AND table_name='ai_memory_packet_refresh' AND referenced_table_name IS NOT NULL ORDER BY constraint_name,ordinal_position;
+SELECT trigger_name,event_object_table,action_timing,event_manipulation,action_statement FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND event_object_table='ai_memory_packet_refresh' ORDER BY trigger_name;
+SELECT COUNT(*) AS invalid_original_packet FROM ai_memory_packet WHERE issued_at>=expires_at OR expires_at>original_deadline OR packet_revision=0 OR execution_revision=0;
+SELECT trx_id,trx_state,trx_started,trx_rows_locked FROM information_schema.innodb_trx;

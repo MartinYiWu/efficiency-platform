@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.hr.HrRetryMapper">
+ <insert id="initialize">INSERT IGNORE INTO ai_hr_item_retry(tenant_id,item_id,generation) VALUES(#{tenant},#{item},0)</insert>
+ <update id="claim">UPDATE ai_hr_item_retry SET generation=generation+1 WHERE tenant_id=#{tenant} AND item_id=#{item} AND generation&lt;2</update>
+ <update id="reset">UPDATE ai_hr_batch_item SET encrypted_content=#{content},filename=#{filename},content_hash=#{hash},status='PENDING',stage='MANUAL_RETRY',error_code=NULL,progress=0 WHERE tenant_id=#{tenant} AND id=#{item} AND status='FAILED'</update>
+</mapper>

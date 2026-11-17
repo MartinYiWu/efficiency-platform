@@ -1,0 +1,5 @@
+[
+  {"key":"company-policy","question":"公司报销流程有哪些步骤？","category":"公司","description":"待人工核验完整调用上界；0为未确认占位，禁止执行。","expected_max_attempts":0},
+  {"key":"mixed-guidance","question":"结合公司报销制度说明如何整理差旅票据。","category":"混合","description":"待人工核验公司与通用路径全部HTTP尝试数。","expected_max_attempts":0},
+  {"key":"general-writing","question":"如何写一份清晰的会议纪要？","category":"通用","description":"待人工核验意图、生成及重试上界，不能假设一次问答只有一次调用。","expected_max_attempts":0}
+]
