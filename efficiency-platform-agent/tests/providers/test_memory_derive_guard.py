@@ -1,5 +1,6 @@
 """真实受控 Provider + PaidHttp + MockTransport 的离线链路验证。"""
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -21,9 +22,11 @@ from efficiency_platform_agent.context.dispatch import (
     ContextDispatch,
     ControlledModelProvider,
 )
+from efficiency_platform_agent.contracts.memory import ConversationScopeModel
 from efficiency_platform_agent.core.context_control import ModelCapacity, WindowLimits
 from efficiency_platform_agent.core.context_dispatch import current_model_stage
 from efficiency_platform_agent.core.execution_control import RunControl, execution_scope
+from efficiency_platform_agent.core.memory import ConversationScope
 from efficiency_platform_agent.core.paid_budget import (
     PaidBudgetPlan,
     PaidPriceLimit,
@@ -138,6 +141,25 @@ async def harness(tmp_path):
             content="data: " + json.dumps(data) + "\n\ndata: [DONE]\n\n",
         )
 
+    async def binding_receipt(scope, op, logical_operation):
+        stage = current_model_stage()
+        assert stage is not None and stage.node_id == "memory.derive"
+        assert stage.stage_id == logical_operation.operation_id
+        assert (
+            scope == logical_operation.scope
+            and op.deadline_epoch_seconds == logical_operation.deadline_epoch_seconds
+        )
+        assert await stages.is_claimed_operation(
+            scope, stage.stage_id, op.operation_id, op.deadline_epoch_seconds
+        )
+        return json.dumps(
+            {
+                "logical_stage_id": stage.stage_id,
+                "physical_operation_id": op.operation_id,
+            },
+            separators=(",", ":"),
+        )
+
     class Authority:
         async def check(self, scope, mode, selected, op):
             assert selected == sources and scope == sources[0].scope and op == operation
@@ -151,6 +173,9 @@ async def harness(tmp_path):
         async def validate(self, scope, packet, deps, op):
             assert scope == operation.scope and len(deps) == 1
             ledger.check_execution("t", "run")
+
+        async def derive_manifest_binding(self, scope, op):
+            return await binding_receipt(scope, op, operation)
 
     class RecordingCounter(ConservativeRequestTokenCounter):
         def __init__(self):
@@ -224,6 +249,7 @@ async def harness(tmp_path):
             "sources": sources,
             "scope": sources[0].scope,
             "engine": engine,
+            "binding_receipt": binding_receipt,
         }
     engine.engine.dispose()
 
@@ -237,7 +263,7 @@ async def invoke(h, mode="SUMMARY", **changes):
     }
     args.update(changes)
     with execution_scope(RunControl()), paid_scope("original-parent"):
-        return await h["gateway"].derive(**args)
+        return await asyncio.wait_for(h["gateway"].derive(**args), timeout=2)
 
 
 async def test_summary_sends_once_and_replays_encrypted_result(harness):
@@ -367,17 +393,125 @@ async def test_arbitrary_fake_provider_cannot_be_marked_guarded(harness):
 @pytest.mark.parametrize("mode", ["PROPOSALS", "BOTH"])
 async def test_allowed_modes_return_single_pending_candidate(harness, mode):
     h = harness
-    answer = json.loads(h["state"]["responses"][0])
-    answer["mode"] = mode
-    if mode == "PROPOSALS":
-        answer["summary"] = None
-    answer["proposals"] = [
-        {"kind": "PREFERENCE", "field_key": "response.language", "value": "zh-CN"}
+    conversation = ConversationScope(
+        "tenant-" + "t" * 110,
+        "principal-" + "u" * 100,
+        "operations",
+        "operations",
+        "CONVERSATION",
+        "session-" + "s" * 100,
+    )
+    operation = replace(
+        h["op"],
+        scope=replace(
+            h["op"].scope, conversation=conversation, task_id="task-" + "a" * 100
+        ),
+        run_id="run-" + "b" * 100,
+    )
+    h["ledger"].bind_execution(
+        conversation.tenant_id, operation.run_id, 60000, context_scope=conversation
+    )
+    ref = h["sources"][0].source_ref.model_copy(
+        update={
+            "source_id": "message-" + "c" * 110,
+            "source_version": "sha256-" + "d" * 110,
+        }
+    )
+    selected = h["sources"][0].model_copy(
+        update={
+            "source_ref": ref,
+            "scope": ConversationScopeModel.from_core(conversation),
+            "group_id": "group-" + "e" * 110,
+            "group_members": (ref,),
+            "source_dependencies": (ref,),
+            "summary_scope_ref": "scope-" + "f" * 110,
+            "proposals_scope_ref": "scope-" + "f" * 110,
+            "summary_retention_ref": "retention-" + "g" * 100,
+            "proposals_retention_ref": "retention-" + "g" * 100,
+        }
+    )
+    required = segment(scope=selected.scope).goal.model_copy(
+        update={
+            "claim_ref": "claim-" + "h" * 100,
+            "source_refs": (ref,),
+            "text": "请用中文回答",
+        }
+    )
+    body = "请用中文简洁回答。"
+
+    class Authorizer:
+        async def check(self, scope, actual_mode, sources, op):
+            assert op == operation and actual_mode == mode and sources == (selected,)
+
+    class Hydrator:
+        async def hydrate(self, *args):
+            return HydratedDeriveSources(
+                (body,), (), 1, (required,) if mode == "BOTH" else ()
+            )
+
+    class Validator:
+        async def validate(self, scope, packet, deps, op):
+            assert scope == operation.scope and tuple(deps) == (ref.to_core(),)
+
+        async def derive_manifest_binding(self, scope, op):
+            return await h["binding_receipt"](scope, op, operation)
+
+    h["kwargs"]["provider"].dispatch.controller._validator = Validator()
+    h["gateway"] = DeriveGateway(
+        **{**h["kwargs"], "authorizer": Authorizer(), "hydrator": Hydrator()}
+    )
+    answer = {
+        "v": 3,
+        "summary": None
+        if mode == "PROPOSALS"
+        else {
+            "goal": {"text": "中文", "sources": ["s0"]},
+            "notes": [],
+            "kept": ["r0"],
+        },
+        "proposals": [
+            {"kind": "PREFERENCE", "field_key": "response.language", "value": "zh-CN"}
+        ],
+    }
+    h["state"]["responses"] = [
+        json.dumps(answer, ensure_ascii=False, separators=(",", ":"))
     ]
-    h["state"]["responses"] = [json.dumps(answer)]
-    candidate = await invoke(h, mode)
+    candidate = await invoke(
+        h, mode, scope=selected.scope, sources=(selected,), operation=operation
+    )
     assert candidate.mode == mode and candidate.proposals[0].value == "zh-CN"
     assert len(h["state"]["sent"]) == 1
+    request = json.loads(h["state"]["sent"][0].content)
+    user = next(
+        message["content"]
+        for message in request["messages"]
+        if message["role"] == "user"
+    )
+    from efficiency_platform_agent.core.run import ProviderMessage
+
+    counter = h["kwargs"]["counter"]
+    input_bound = counter.measure_messages(
+        (ProviderMessage("user", user),), h["kwargs"]["capacity"]
+    ).total_upper_bound
+    output_bound = counter.measure_messages(
+        (ProviderMessage("assistant", h["state"]["responses"][0]),),
+        h["kwargs"]["capacity"],
+    ).total_upper_bound
+    assert input_bound <= 2000 and output_bound <= 500
+    assert (
+        conversation.tenant_id not in user
+        and ref.source_id not in user
+        and "deletion_epoch" not in user
+    )
+    if mode == "BOTH":
+        assert candidate.summary.source_dependencies == (ref,)
+        assert any(
+            entry.claim_ref == required.claim_ref
+            for entry in candidate.summary.decisions
+        )
+    print(
+        f"derive_v3 mode={mode} input_upper={input_bound} output_upper={output_bound}"
+    )
 
 
 @pytest.mark.parametrize(
@@ -436,9 +570,9 @@ async def test_original_parent_close_cancels_inflight_derive(harness):
         task = asyncio.create_task(
             h["gateway"].derive(h["scope"], "SUMMARY", h["sources"], h["op"])
         )
-    await entered.wait()
-    await parent.close()
     try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await parent.close()
         assert cancelled.is_set()
         with pytest.raises(asyncio.CancelledError):
             await task

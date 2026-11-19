@@ -1,11 +1,14 @@
 """内部认证完成后保存的原执行授权；不从模型或公开请求解析权限。"""
 
 from collections.abc import Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
 from .memory import (
     ConversationScope,
+    ExecutionScope,
     MemoryContextPacket,
     MemoryPolicy,
     MemoryReference,
@@ -36,6 +39,9 @@ class MemoryExecutionContext:
     semantic_snapshot_digest: str
     request_digest: str
     input_dependencies: tuple[SourceDependency, ...] = ()
+    summary_context_json: str | None = field(default=None, repr=False)
+    derive_template_json: str | None = field(default=None, repr=False)
+    knowledge_context_json: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.packet, MemoryContextPacket) or not isinstance(
@@ -65,6 +71,17 @@ class MemoryExecutionContext:
             self.input_dependencies
         ).issubset(self.packet.safety_dependencies):
             raise ValueError("MEMORY_INPUT_DEPENDENCIES_INVALID")
+        for snapshot in (
+            self.summary_context_json,
+            self.derive_template_json,
+            self.knowledge_context_json,
+        ):
+            if snapshot is not None and (
+                type(snapshot) is not str
+                or not snapshot
+                or len(snapshot.encode("utf-8")) > 524288
+            ):
+                raise ValueError("MEMORY_SUMMARY_CONTEXT_INVALID")
         for digest in (
             self.packet_digest,
             self.semantic_snapshot_digest,
@@ -87,7 +104,14 @@ class MemoryExecutionContext:
                 return [plain(child) for child in value]
             return value
 
-        return plain(asdict(self))
+        data = asdict(self)
+        if self.summary_context_json is None:
+            data.pop("summary_context_json")
+        if self.derive_template_json is None:
+            data.pop("derive_template_json")
+        if self.knowledge_context_json is None:
+            data.pop("knowledge_context_json")
+        return plain(data)
 
     @classmethod
     def from_metadata(cls, value: object) -> "MemoryExecutionContext":
@@ -159,6 +183,162 @@ class MemoryExecutionRecord:
     grant_epoch: int
     source_epoch: int
     deletion_epoch: int
+    key_version: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class MemorySendPermit:
+    scope: ExecutionScope
+    runtime_id: str
+    operation_id: str
+    attempt: int
+    input_hash: str
+    manifest_id: str
+    packet_id: str
+    packet_revision: int
+    packet_digest: str
+    execution_revision: int
+    deadline_epoch_seconds: int
+    permit_ref: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, ExecutionScope):
+            raise TypeError("MEMORY_SEND_PERMIT_INVALID")
+        for value in (
+            self.runtime_id,
+            self.operation_id,
+            self.manifest_id,
+            self.packet_id,
+            self.permit_ref,
+        ):
+            require_id(value)
+        for count in (
+            self.attempt,
+            self.packet_revision,
+            self.execution_revision,
+            self.deadline_epoch_seconds,
+        ):
+            if type(count) is not int or count <= 0:
+                raise ValueError("MEMORY_SEND_PERMIT_INVALID")
+        if self.attempt > 3:
+            raise ValueError("MEMORY_SEND_PERMIT_INVALID")
+        for digest in (self.input_hash, self.packet_digest):
+            if len(digest) != 64 or any(
+                char not in "0123456789abcdef" for char in digest
+            ):
+                raise ValueError("MEMORY_SEND_PERMIT_INVALID")
+
+
+class MemorySendPermitAuthority(Protocol):
+    async def validate(self, permit: MemorySendPermit) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryWaitCheckpointCapability:
+    scope: ExecutionScope
+    runtime_id: str
+    wait_event_id: str
+    operation_id: str
+    attempt: int
+    canonical_request_hmac: str | None
+    packet_revision: int
+    execution_revision: int
+    current_context_fingerprint: str
+    original_deadline: int
+    capability_ref: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.scope, ExecutionScope):
+            raise TypeError("MEMORY_WAIT_CAPABILITY_INVALID")
+        for value in (
+            self.runtime_id,
+            self.wait_event_id,
+            self.operation_id,
+            self.capability_ref,
+        ):
+            require_id(value)
+        for count in (
+            self.attempt,
+            self.packet_revision,
+            self.execution_revision,
+            self.original_deadline,
+        ):
+            if type(count) is not int or count <= 0:
+                raise ValueError("MEMORY_WAIT_CAPABILITY_INVALID")
+        if self.attempt > 3:
+            raise ValueError("MEMORY_WAIT_CAPABILITY_INVALID")
+        for digest in (self.current_context_fingerprint, self.canonical_request_hmac):
+            if digest is not None and (
+                len(digest) != 64
+                or any(char not in "0123456789abcdef" for char in digest)
+            ):
+                raise ValueError("MEMORY_WAIT_CAPABILITY_INVALID")
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryGraphResumeCapability:
+    binding: MemoryWaitCheckpointCapability
+    receipt_ref: str
+    checkpoint_ns: str
+    checkpoint_id: str
+    target_packet_revision: int
+    target_context_fingerprint: str
+    capability_ref: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.binding, MemoryWaitCheckpointCapability):
+            raise TypeError("MEMORY_RESUME_CAPABILITY_INVALID")
+        for value in (self.receipt_ref, self.checkpoint_id, self.capability_ref):
+            require_id(value)
+        if self.checkpoint_ns != "":
+            require_id(self.checkpoint_ns)
+        if (
+            type(self.target_packet_revision) is not int
+            or self.target_packet_revision <= self.binding.packet_revision
+        ):
+            raise ValueError("MEMORY_RESUME_CAPABILITY_INVALID")
+        if len(self.target_context_fingerprint) != 64 or any(
+            char not in "0123456789abcdef" for char in self.target_context_fingerprint
+        ):
+            raise ValueError("MEMORY_RESUME_CAPABILITY_INVALID")
+
+
+_wait_checkpoint_capability: ContextVar[MemoryWaitCheckpointCapability | None] = (
+    ContextVar("memory_wait_checkpoint_capability", default=None)
+)
+
+
+def current_memory_wait_checkpoint_capability() -> (
+    MemoryWaitCheckpointCapability | None
+):
+    return _wait_checkpoint_capability.get()
+
+
+@contextmanager
+def bind_memory_wait_checkpoint_capability(capability: MemoryWaitCheckpointCapability):
+    token = _wait_checkpoint_capability.set(capability)
+    try:
+        yield capability
+    finally:
+        _wait_checkpoint_capability.reset(token)
+
+
+_result_checkpoint_permit: ContextVar[MemorySendPermit | None] = ContextVar(
+    "memory_result_checkpoint_permit", default=None
+)
+
+
+def current_memory_result_checkpoint_permit() -> MemorySendPermit | None:
+    return _result_checkpoint_permit.get()
+
+
+@contextmanager
+def bind_memory_result_checkpoint_permit(permit: MemorySendPermit):
+    token = _result_checkpoint_permit.set(permit)
+    try:
+        yield permit
+    finally:
+        _result_checkpoint_permit.reset(token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,3 +379,17 @@ class MemoryExecutionStore(Protocol):
     ) -> MemoryExecutionRecord | None: ...
 
     async def invalidate(self, event: MemoryInvalidation) -> str: ...
+
+
+def memory_operation_deadline_matches(
+    node_id: str, deadline: int, original: int
+) -> bool:
+    """原操作截止不改；已核原帧的派生只可收紧，其他节点仍精确相等。"""
+    return (
+        type(deadline) is int
+        and type(original) is int
+        and deadline > 0
+        and (
+            deadline <= original if node_id == "memory.derive" else deadline == original
+        )
+    )

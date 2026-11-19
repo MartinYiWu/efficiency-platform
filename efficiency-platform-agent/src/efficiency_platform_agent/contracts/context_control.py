@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Self
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, model_serializer, model_validator
 
 from efficiency_platform_agent.core import context_control as core
 
@@ -190,6 +190,17 @@ class ContextManifestModel(_Boundary):
     summary_adoption_status: str = "not-applied"
     reservation_ref: str | None = None
     usage_ref: str | None = None
+    summary_projection_aliases: tuple[tuple[str, str], ...] = ()
+    derive_binding_json: str | None = None
+
+    @model_serializer(mode="wrap")
+    def without_empty_aliases(self, handler):
+        data = handler(self)
+        if not self.summary_projection_aliases:
+            data.pop("summary_projection_aliases", None)
+        if self.derive_binding_json is None:
+            data.pop("derive_binding_json", None)
+        return data
 
     @model_validator(mode="after")
     def validate_core(self) -> Self:
@@ -234,6 +245,8 @@ class ContextManifestModel(_Boundary):
             summary_adoption_status=self.summary_adoption_status,
             reservation_ref=self.reservation_ref,
             usage_ref=self.usage_ref,
+            summary_projection_aliases=self.summary_projection_aliases,
+            derive_binding_json=self.derive_binding_json,
         )
 
     @classmethod
@@ -278,4 +291,6 @@ class ContextManifestModel(_Boundary):
             summary_adoption_status=value.summary_adoption_status,
             reservation_ref=value.reservation_ref,
             usage_ref=value.usage_ref,
+            summary_projection_aliases=value.summary_projection_aliases,
+            derive_binding_json=value.derive_binding_json,
         )

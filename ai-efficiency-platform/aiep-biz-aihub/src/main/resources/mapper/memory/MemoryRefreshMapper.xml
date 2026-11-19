@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryRefreshMapper">
+  <sql id="candidateColumns">tenant_id,execution_id,resume_request_id,wait_event_id,old_packet_revision,target_revision,
+    expected_current_context_fingerprint,request_hash,candidate_digest,issued_at,expires_at,phase,receipt_code,receipt_ref,
+    candidate_phase,current_packet_revision,current_context_fingerprint,refresh_count,receipt_state,next_wait_event_id,dispatch_allowed</sql>
+  <select id="lockPacket" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$PacketLockPO">
+    SELECT execution_id FROM ai_memory_packet WHERE tenant_id=#{tenant} AND execution_id=#{execution} FOR UPDATE
+  </select>
+  <select id="findLatestForWait" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$Candidate">
+    SELECT <include refid="candidateColumns"/> FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH' AND wait_event_id=#{wait}
+    ORDER BY target_revision DESC LIMIT 1 FOR UPDATE
+  </select>
+  <select id="countForWait" resultType="int">
+    SELECT COUNT(*) FROM ai_memory_packet_refresh WHERE tenant_id=#{tenant} AND execution_id=#{execution}
+      AND record_kind='REFRESH' AND wait_event_id=#{wait}
+  </select>
+  <select id="maxConfirmedCount" resultType="int">
+    SELECT COALESCE(MAX(refresh_count),0) FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH'
+      AND phase IN ('ACKED','EXPIRED_UNAPPLIED','APPLIED_EXPIRED','ABORTED') LOCK IN SHARE MODE
+  </select>
+  <select id="findAnchor" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$Anchor">
+    SELECT tenant_id,execution_id,user_id,packet_id,initial_packet_revision,execution_revision,request_digest,semantic_digest,
+      original_deadline,original_session_ref,policy_ttl_seconds,source_retention_deadline
+    FROM ai_memory_packet_refresh WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='ANCHOR' FOR UPDATE
+  </select>
+  <select id="findCandidate" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$Candidate">
+    SELECT <include refid="candidateColumns"/> FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH' AND resume_request_id=#{request} FOR UPDATE
+  </select>
+  <select id="findPending" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$Candidate">
+    SELECT <include refid="candidateColumns"/> FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH' AND phase='PREPARED' FOR UPDATE
+  </select>
+  <select id="findCurrent" resultType="com.aiep.aihub.repository.memory.MemoryRefreshMapper$Candidate">
+    SELECT <include refid="candidateColumns"/> FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH' AND phase IN ('ACKED','APPLIED_EXPIRED')
+    ORDER BY target_revision DESC LIMIT 1
+  </select>
+  <select id="authorizedRevisions" resultType="long">
+    SELECT target_revision FROM ai_memory_packet_refresh
+    WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH' AND phase='ACKED'
+  </select>
+  <select id="highestRevision" resultType="long">
+    SELECT COALESCE(MAX(target_revision),0) FROM ai_memory_packet_refresh WHERE tenant_id=#{tenant} AND execution_id=#{execution} AND record_kind='REFRESH'
+  </select>
+  <insert id="insertAnchor">
+    INSERT INTO ai_memory_packet_refresh(tenant_id,execution_id,record_kind,record_id,user_id,packet_id,initial_packet_revision,
+      execution_revision,request_digest,semantic_digest,original_deadline,original_session_ref,policy_ttl_seconds,source_retention_deadline,phase)
+    VALUES(#{anchor.tenantId},#{anchor.executionId},'ANCHOR',#{anchor.executionId},#{anchor.userId},#{anchor.packetId},#{anchor.initialPacketRevision},
+      #{anchor.executionRevision},#{anchor.requestDigest},#{anchor.semanticDigest},#{anchor.originalDeadline},#{anchor.originalSessionRef},#{anchor.policyTtlSeconds},#{anchor.sourceRetentionDeadline},'ANCHORED')
+  </insert>
+  <insert id="insertCandidate">
+    INSERT INTO ai_memory_packet_refresh(tenant_id,execution_id,record_kind,record_id,user_id,packet_id,initial_packet_revision,execution_revision,
+      request_digest,semantic_digest,original_deadline,policy_ttl_seconds,source_retention_deadline,resume_request_id,wait_event_id,old_packet_revision,
+      target_revision,expected_current_context_fingerprint,request_hash,candidate_digest,issued_at,expires_at,phase)
+    VALUES(#{anchor.tenantId},#{anchor.executionId},'REFRESH',#{candidate.resumeRequestId},#{anchor.userId},#{anchor.packetId},#{anchor.initialPacketRevision},#{anchor.executionRevision},
+      #{anchor.requestDigest},#{anchor.semanticDigest},#{anchor.originalDeadline},#{anchor.policyTtlSeconds},#{anchor.sourceRetentionDeadline},#{candidate.resumeRequestId},#{candidate.waitEventId},#{candidate.oldPacketRevision},
+      #{candidate.targetRevision},#{candidate.expectedCurrentContextFingerprint},#{candidate.requestHash},#{candidate.candidateDigest},#{candidate.issuedAt},#{candidate.expiresAt},'PREPARED')
+  </insert>
+  <update id="complete">
+    UPDATE ai_memory_packet_refresh SET phase=#{receipt.candidatePhase},receipt_code=#{receipt.resultCode},receipt_ref=CAST(#{receipt.receiptRef} AS BINARY),
+      candidate_phase=#{receipt.candidatePhase},current_packet_revision=#{receipt.currentPacketRevision},current_context_fingerprint=#{receipt.currentContextFingerprint},
+      refresh_count=#{receipt.refreshCount},receipt_state=#{receipt.state},next_wait_event_id=CAST(#{receipt.nextWaitEventId,jdbcType=VARCHAR} AS BINARY),dispatch_allowed=#{receipt.dispatchAllowed}
+    WHERE tenant_id=#{candidate.tenantId} AND execution_id=#{candidate.executionId} AND record_kind='REFRESH'
+      AND resume_request_id=#{candidate.resumeRequestId} AND request_hash=#{candidate.requestHash} AND phase='PREPARED'
+  </update>
+  <select id="invalidCurrentInputs" resultType="int">
+    SELECT COUNT(*) FROM ai_memory_dependency d JOIN ai_memory_source s ON s.tenant_id=d.tenant_id AND s.id=d.source_id
+    WHERE d.tenant_id=#{tenant} AND d.target_type='EXECUTION' AND d.target_id=#{execution} AND d.target_version=CAST('1' AS BINARY)
+      AND s.source_type='CURRENT_USER_MESSAGE' AND NOT EXISTS (
+      SELECT 1
+      <choose>
+        <when test="domain == 'operations'">FROM ai_operation_message m JOIN ai_operation_conversation c ON c.id=m.conversation_id</when>
+        <when test="domain == 'customer-service'">FROM ai_customer_service_message m JOIN ai_customer_service_conversation c ON c.id=m.conversation_id</when>
+        <otherwise>FROM ai_operation_message m JOIN ai_operation_conversation c ON 1=0</otherwise>
+      </choose>
+      WHERE CAST(m.tenant_id AS BINARY)=#{tenant} AND CAST(c.tenant_id AS BINARY)=#{tenant} AND CAST(c.user_id AS BINARY)=#{user}
+        AND CAST(c.id AS BINARY)=#{session}
+        AND CAST(m.id AS BINARY)=s.source_object_ref AND m.role IN ('user','USER')
+        AND CAST(SHA2(CAST(<choose><when test="domain == 'customer-service'">m.content_markdown</when><otherwise>m.content</otherwise></choose> AS BINARY),256) AS BINARY)=s.source_version)
+  </select>
+</mapper>

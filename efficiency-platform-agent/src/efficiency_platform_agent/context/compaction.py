@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field, replace
 
-from efficiency_platform_agent.context.policy import ContextPiece, ContextPolicy
+from efficiency_platform_agent.context.policy import (
+    ContextPiece,
+    ContextPolicy,
+    render_context_messages,
+)
 from efficiency_platform_agent.context.selection import ContextView
 from efficiency_platform_agent.core.context_control import (
     ModelCapacity,
@@ -15,7 +18,10 @@ from efficiency_platform_agent.core.context_control import (
 )
 from efficiency_platform_agent.core.memory import SourceDependency
 from efficiency_platform_agent.core.run import ProviderMessage, ProviderRequest
-from efficiency_platform_agent.memory.summary_contracts import RejectedOption
+from efficiency_platform_agent.memory.summary_projection import (
+    SUMMARY_LEGEND,
+    render_summary,
+)
 from efficiency_platform_agent.memory.summary_validation import (
     ValidatedSummary,
     validate_summary,
@@ -85,7 +91,7 @@ def propose_compaction(
         return CompactionDecision("REJECTED", "SUMMARY_VALIDATION_FAILED")
     pieces = view.pieces
     if (
-        tuple(message for piece in pieces for message in piece.messages)
+        render_context_messages(baseline.window_policy,pieces)
         != view.request.messages
         or view.messages != view.request.messages
         or tuple(dict.fromkeys(dep for p in pieces for dep in p.safety_dependencies))
@@ -135,85 +141,38 @@ def propose_compaction(
     dependencies = tuple(ref.to_core() for ref in segment.source_dependencies)
     if set(dependencies) != {dep for p in removed for dep in p.safety_dependencies}:
         return CompactionDecision("REJECTED", "SUMMARY_DEPENDENCIES_INCOMPLETE")
-    slots = {
-        "goal": (segment.goal,),
-        "confirmed_constraints": segment.confirmed_constraints,
-        "decisions": segment.decisions,
-        "rejected_options": segment.rejected_options,
-        "open_questions": segment.open_questions,
-        "important_refs": segment.important_refs,
-        "uncertainties": segment.uncertainties,
-    }
-    references = tuple(
-        dict.fromkeys(
-            ref
-            for entries in slots.values()
-            for entry in entries
-            for ref in (
-                *entry.source_refs,
-                *(() if entry.basis_event_ref is None else (entry.basis_event_ref,)),
-            )
-        )
-    )
-    payload: dict[str, object] = {
-        "version": 1,
-        "refs": [
-            {
-                "type": ref.source_type,
-                "id": ref.source_id,
-                "version": ref.source_version,
-            }
-            for ref in references
-        ],
-    }
-    for slot, entries in slots.items():
-        if not entries:
-            continue
-        projected = []
-        for entry in entries:
-            item: dict[str, object] = {
-                "claim": entry.claim_ref,
-                "text": entry.text,
-                "origin": entry.content_origin,
-                "status": entry.decision_status,
-                "sources": [references.index(ref) for ref in entry.source_refs],
-                "basis": references.index(entry.basis_event_ref)
-                if entry.basis_event_ref is not None
-                else None,
-            }
-            if entry.critical_values:
-                item["critical"] = [
-                    value.model_dump(mode="json") for value in entry.critical_values
-                ]
-            if isinstance(entry, RejectedOption):
-                item["reason"] = entry.reason
-            projected.append(item)
-        payload[slot] = projected[0] if slot == "goal" else projected
-    # 新消息由本组件从已验证完整结构构造；调用方不能夹带改写后的事实或Schema。
-    # epoch、完整覆盖和权限仍在原冻结元数据中，投影只去重引用，不缩安全闭包。
+    rendered = render_summary(segment)
     summary = ContextPiece(
         "compaction:" + segment.segment_id,
         removed[0].scope,
-        (
-            ProviderMessage(
-                "user",
-                json.dumps(
-                    payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-                ),
-            ),
-        ),
+        (ProviderMessage("user", rendered.text),),
         dependencies,
         kind="summary",
         covered_message_ids=coverage,
+        projection_aliases=((segment.segment_id, rendered.aliases_json),),
     )
     proposed: list[ContextPiece] = []
     for piece in pieces:
         if piece is removed[0]:
+            if not any(
+                p.piece_id == "summary-legend/2"
+                and p.messages == (ProviderMessage("system", SUMMARY_LEGEND),)
+                for p in pieces
+            ):
+                proposed.append(
+                    ContextPiece(
+                        "summary-legend/2",
+                        removed[0].scope,
+                        (ProviderMessage("system", SUMMARY_LEGEND),),
+                        required=True,
+                        kind="system",
+                    )
+                )
             proposed.append(summary)
         if piece not in removed:
             proposed.append(piece)
     request = replace(
-        view.request, messages=tuple(m for p in proposed for m in p.messages)
+        view.request, messages=render_context_messages(baseline.window_policy,tuple(proposed))
     )
     after_dependencies = tuple(
         dict.fromkeys(dep for p in proposed for dep in p.safety_dependencies)

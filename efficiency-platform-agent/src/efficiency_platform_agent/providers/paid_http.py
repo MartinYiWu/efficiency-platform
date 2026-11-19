@@ -17,6 +17,10 @@ from ..core.execution_control import (
     consume_http_attempt,
     current_run_control,
 )
+from ..core.memory_execution import (
+    current_memory_result_checkpoint_permit,
+    current_memory_wait_checkpoint_capability,
+)
 from ..core.paid_budget import (
     PaidBudgetError,
     PaidBudgetLedger,
@@ -57,6 +61,7 @@ class _BudgetStream(httpx.AsyncByteStream):
         request_slots: asyncio.Semaphore | None = None,
         control: RunControl | None = None,
         http_token: object | None = None,
+        context_guard: object | None = None,
     ) -> None:
         self.stream = stream
         self.ledger = ledger
@@ -69,6 +74,7 @@ class _BudgetStream(httpx.AsyncByteStream):
         self.control = control
         self.http_token = http_token
         self.consumer_token = object()
+        self.context_guard = context_guard
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         task = asyncio.current_task()
@@ -147,13 +153,20 @@ class _BudgetStream(httpx.AsyncByteStream):
             except PaidBudgetError as error:
                 raise PaidBudgetTransportError(error.code, self.request) from None
             finally:
-                if self.control is not None:
-                    self.control.http_tasks.pop(self.http_token, None)
-                    self.control.http_tasks.pop(self.consumer_token, None)
-                    self.control.streams.pop(self.http_token, None)
-                if self.request_slots is not None:
-                    self.request_slots.release()
-                    self.request_slots = None
+                try:
+                    close_lease = getattr(
+                        self.context_guard, "after_transport_close", None
+                    )
+                    if close_lease is not None:
+                        await close_lease(complete=self.complete and closed_normally)
+                finally:
+                    if self.control is not None:
+                        self.control.http_tasks.pop(self.http_token, None)
+                        self.control.http_tasks.pop(self.consumer_token, None)
+                        self.control.streams.pop(self.http_token, None)
+                    if self.request_slots is not None:
+                        self.request_slots.release()
+                        self.request_slots = None
 
 
 class PaidHttpTransport(httpx.AsyncBaseTransport):
@@ -180,6 +193,7 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
         response: httpx.Response | None = None
         transferred = False
         slot_acquired = False
+        context_guard = current_context_send_guard()
         control = current_run_control()
         http_token = object()
         task = asyncio.current_task()
@@ -188,6 +202,13 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
             if task is not None:
                 control.http_tasks[http_token] = task
         try:
+            if (
+                current_memory_wait_checkpoint_capability() is not None
+                or current_memory_result_checkpoint_permit() is not None
+            ):
+                raise PaidBudgetTransportError(
+                    "MEMORY_CPU_CHECKPOINT_SEND_FORBIDDEN", request
+                )
             if self.require_context_guard and current_context_send_guard() is None:
                 raise PaidBudgetTransportError(
                     "CONTEXT_TRANSPORT_GATE_REQUIRED", request
@@ -230,12 +251,32 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
                 raise PaidBudgetTransportError(
                     "PAID_REQUEST_BOUND_REQUIRED", request
                 ) from None
+            before_reservation = getattr(context_guard, "before_reservation", None)
+            if before_reservation is not None:
+                before_reservation()
             if self.request_slots is not None:
                 await self.request_slots.acquire()
                 slot_acquired = True
+            task_options = {}
+            budget_id = self.budget_id
+            if getattr(self.ledger, "task_authorization_enabled", False):
+                binding_factory = getattr(
+                    context_guard, "task_authorization_binding", None
+                )
+                if binding_factory is None:
+                    raise PaidBudgetError(
+                        "TASK_SCOPE_REQUIRED", "trusted task binding required"
+                    )
+                task_binding = binding_factory()
+                budget_id = self.ledger.task_budget_id(task_binding, budget_id)
+                if budget_id is None:
+                    raise PaidBudgetError(
+                        "NO_BUDGET", "no task authorization available"
+                    )
+                task_options["task_binding"] = task_binding
             consume_http_attempt()
             reservation = self.ledger.reserve(
-                self.budget_id,
+                budget_id,
                 current_paid_scope(),
                 self.provider,
                 model,
@@ -246,13 +287,25 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
                 if self.provider == "deepseek"
                 and payload.get("thinking", {}).get("type") != "disabled"
                 else 0,
+                **task_options,
             )
+            if task_options and control is not None and budget_id is not None:
+                control.bind_task_authorization(
+                    task_binding.scope.task_id,
+                    task_binding.scope.execution_id,
+                    budget_id,
+                    reservation.deadline_epoch_ms,
+                )
             remaining = (reservation.deadline_epoch_ms - time.time() * 1000) / 1000
             if remaining <= 0:
                 raise PaidBudgetTransportError("PAID_BUDGET_DEADLINE", request)
             context_guard = current_context_send_guard()
-            if self.provider == "deepseek" and context_guard is not None:
-                await context_guard.before_send(payload)
+            bind_reservation = getattr(context_guard, "bind_reservation", None)
+            if bind_reservation is not None:
+                bind_reservation(reservation, self.ledger)
+            before_send = getattr(context_guard, "before_send", None)
+            if before_send is not None:
+                await before_send(payload)
             if control is not None:
                 control.check()
             self.ledger.check_live(reservation.reservation_id)
@@ -294,6 +347,7 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
                 self.request_slots if slot_acquired else None,
                 control,
                 http_token,
+                context_guard,
             )
             if control is not None:
                 control.streams[http_token] = stream.aclose
@@ -330,8 +384,15 @@ class PaidHttpTransport(httpx.AsyncBaseTransport):
                                     error.code, request
                                 ) from None
                 finally:
-                    if slot_acquired and self.request_slots is not None:
-                        self.request_slots.release()
+                    try:
+                        close_lease = getattr(
+                            context_guard, "after_transport_close", None
+                        )
+                        if close_lease is not None:
+                            await close_lease(complete=False)
+                    finally:
+                        if slot_acquired and self.request_slots is not None:
+                            self.request_slots.release()
 
     async def aclose(self) -> None:
         await self.inner.aclose()

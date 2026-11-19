@@ -36,6 +36,8 @@ import reactor.core.publisher.Flux;
 
 @Service
 public class OperationAssistantService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryAgentPolicyService memoryAgentPolicies;
     private static final Logger log = LoggerFactory.getLogger(OperationAssistantService.class);
     private static final Set<String> TERMINAL_STATUSES = Set.of("succeeded", "failed", "cancelled", "timed_out");
     private final OperationConversationMapper conversationMapper;
@@ -46,6 +48,8 @@ public class OperationAssistantService {
     private final ObjectMapper objectMapper;
 
     private final MemoryActorProvider actors;
+    private final com.aiep.aihub.application.memory.MemoryContextResumeService memoryResumes;
+    private final com.aiep.aihub.application.memory.MemoryDerivePlanService memoryDerives;
     private final ConversationScopeResolver scopes = new ConversationScopeResolver();
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.aiep.aihub.application.memory.MemoryPacketService memoryPackets;
@@ -65,7 +69,6 @@ public class OperationAssistantService {
             });
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
     public OperationAssistantService(
             OperationConversationMapper conversationMapper,
             OperationMessageMapper messageMapper,
@@ -73,6 +76,21 @@ public class OperationAssistantService {
             OperationArtifactMapper artifactMapper,
             AiInvokeFacade aiInvokeFacade,
             ObjectMapper objectMapper, MemoryActorProvider actors) {
+        this(conversationMapper,messageMapper,runMapper,artifactMapper,aiInvokeFacade,objectMapper,actors,null);
+    }
+
+    public OperationAssistantService(OperationConversationMapper conversationMapper,OperationMessageMapper messageMapper,
+            OperationRunMapper runMapper,OperationArtifactMapper artifactMapper,AiInvokeFacade aiInvokeFacade,ObjectMapper objectMapper,
+            MemoryActorProvider actors,@org.springframework.lang.Nullable com.aiep.aihub.application.memory.MemoryContextResumeService memoryResumes) {
+        this(conversationMapper,messageMapper,runMapper,artifactMapper,aiInvokeFacade,objectMapper,actors,memoryResumes,null);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public OperationAssistantService(OperationConversationMapper conversationMapper,OperationMessageMapper messageMapper,
+            OperationRunMapper runMapper,OperationArtifactMapper artifactMapper,AiInvokeFacade aiInvokeFacade,ObjectMapper objectMapper,
+            MemoryActorProvider actors,@org.springframework.lang.Nullable com.aiep.aihub.application.memory.MemoryContextResumeService memoryResumes,
+            @org.springframework.lang.Nullable com.aiep.aihub.application.memory.MemoryDerivePlanService memoryDerives) {
+        this.memoryResumes=memoryResumes;
+        this.memoryDerives=memoryDerives;
         this.actors = actors;
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
@@ -154,7 +172,7 @@ public class OperationAssistantService {
             var artifacts = availableArtifactContexts(conversationId, actor.tenantId());
             var request = new OperationAgentMessageRequest(message, clientRequestId, actor.userId(), artifacts,
                     actor.tenantId(), scopes.envelope(memoryScope));
-            if (memoryPackets != null && memoryPackets.enabled()) {
+            if (memoryPackets != null && memoryPackets.enabled()&&(memoryAgentPolicies==null||memoryAgentPolicies.privateMemory(memoryScope))) {
                 if (!artifacts.isEmpty()) throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_ARTIFACT_LINEAGE_REQUIRED");
                 var candidates=messageMapper.selectConversationMessages(conversationId,actor.tenantId()).stream()
                     .filter(item->!item.getId().equals(userMessage.getId())&&item.getRunId()!=null)
@@ -231,9 +249,17 @@ public class OperationAssistantService {
         if (!run.getAgentRunId().equals(event.runId())) {
             throw new OperationAssistantException("RUN_EVENT_MISMATCH", "运行事件标识不匹配");
         }
+        if("context_refresh_required".equals(event.event())) {
+            memoryWaitReference(event);
+            // 不推进该内部事件游标，HTTP响应不明时重连仍能按原wait重放同候选。
+            return;
+        }
+        if("memory_derive_required".equals(event.event())) {memoryDeriveReferences(event);return;}
         java.util.List<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency> actualMemoryInputs=List.of();
         com.aiep.aihub.api.memory.MemoryScopeDTO memoryScope=null;
-        if(memoryPackets!=null&&memoryPackets.enabled()&&Set.of("assistant_delta","deliverable","clarification_required","stream_done").contains(event.event())) {
+        if(memoryPackets!=null&&memoryPackets.enabled()
+                &&(memoryAgentPolicies==null||memoryAgentPolicies.privateMemoryDomain(run.getTenantId(),"operations")||memoryPackets.hasIssuedExecution(run.getTenantId(),runId))
+                &&Set.of("assistant_delta","deliverable","clarification_required","stream_done").contains(event.event())) {
             var conversation=ownedConversation(run.getConversationId(),capturedActor);
             memoryScope=scopes.conversation(capturedActor,"operations",run.getConversationId(),conversation.getTenantId(),conversation.getUserId(),"operations");
             actualMemoryInputs=memoryPackets.verifyManifest(memoryScope,runId,run.getAgentRunId(),aiInvokeFacade.queryMemoryManifest(run.getTenantId(),runId));
@@ -276,6 +302,44 @@ public class OperationAssistantService {
             log.info("event=operation_run_terminal runId={} agentRunId={} sequence={} status={}",
                     run.getId(), run.getAgentRunId(), event.sequence(), run.getStatus());
         }
+    }
+
+    /** 由Controller在projection提交后调用；原执行映射及捕获登录每次重查。 */
+    public com.aiep.platformai.api.dto.MemoryResumeReceipt onMemoryWait(String runId,OperationAgentRunEvent event,OperationActor capturedActor) {
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_REFRESH_TRANSACTION_INVALID");
+        String ref=memoryWaitReference(event);var actor=actors.revalidate(capturedActor);var run=ownedRun(runId,actor);
+        if(!actor.tenantId().equals(run.getTenantId())||!event.runId().equals(run.getAgentRunId()))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_RESUME_CONFLICT");
+        if(TERMINAL_STATUSES.contains(run.getStatus()))throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("ACCESS_REVOKED");
+        if(memoryResumes==null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED");
+        return memoryResumes.onWaitEvent(run.getTenantId(),run.getId(),run.getAgentRunId(),ref);
+    }
+    private static String memoryWaitReference(OperationAgentRunEvent event) {
+        if(!"context_refresh_required".equals(event.event())||event.payload()==null||event.payload().size()!=1
+                ||!(event.payload().get("wait_event_id") instanceof String ref))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_WAIT_EVENT_INVALID");
+        com.aiep.aihub.repository.memory.MemoryMapper.identity(ref);return ref;
+    }
+    /** 原projection提交后才查询原Agent已登记计划，内部事件从不进入员工流/公开游标。 */
+    public void onMemoryDerive(String runId,OperationAgentRunEvent event,OperationActor capturedActor) {
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_OUTSIDE_TRANSACTION_REQUIRED");
+        var refs=memoryDeriveReferences(event);var actor=actors.revalidate(capturedActor);var run=ownedRun(runId,actor);
+        if(!actor.tenantId().equals(run.getTenantId())||!event.runId().equals(run.getAgentRunId()))throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_BINDING_CONFLICT");
+        if(TERMINAL_STATUSES.contains(run.getStatus()))return;
+        if(memoryDerives==null||memoryPackets==null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_DERIVE_FEATURE_DISABLED");
+        var scope=memoryPackets.issuedScope(run.getTenantId(),runId);
+        if(!scope.userId().equals(actor.userId())||!scope.sessionId().equals(run.getConversationId())||!"operations".equals(scope.domain()))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_SCOPE_MISMATCH");
+        memoryDerives.handlePendingDerive(actor,scope,runId,run.getAgentRunId(),refs.get(0),refs.get(1));
+    }
+    private static List<String> memoryDeriveReferences(OperationAgentRunEvent event) {
+        if(!"memory_derive_required".equals(event.event())||event.payload()==null||event.payload().size()!=2
+                ||!(event.payload().get("plan_id") instanceof String plan)||!(event.payload().get("baseline_ref") instanceof String baseline))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_BINDING_CONFLICT");
+        com.aiep.aihub.repository.memory.MemoryMapper.identity(plan);com.aiep.aihub.repository.memory.MemoryMapper.identity(baseline);
+        return List.of(plan,baseline);
     }
 
     @Transactional
@@ -569,8 +633,9 @@ public class OperationAssistantService {
         return value;
     }
 
-    private OperationRunPO ownedRun(String id) {
-        OperationActor actor = actors.current();
+    private OperationRunPO ownedRun(String id) {return ownedRun(id,actors.current());}
+
+    private OperationRunPO ownedRun(String id,OperationActor actor) {
         OperationRunPO value = runMapper.selectOne(new LambdaQueryWrapper<OperationRunPO>()
                 .eq(OperationRunPO::getId, id)
                 .eq(OperationRunPO::getTenantId, actor.tenantId())

@@ -94,6 +94,53 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it('clears all private panels when a sharing request learns the unchanged credential has expired', async () => {
+  const episode = {
+    id: 'case-one',
+    topAgent: 'operations',
+    sessionId: 'session-one',
+    status: 'CONFIRMED',
+    revision: 1,
+    expiresAt: '2030-01-01T00:00:00Z',
+    feedbackLikes: 0,
+    content: {
+      category: 'USER_PREFERENCE',
+      scenario: 'private case awaiting authorization',
+      preconditions: [],
+      actions: ['a'],
+      observedResults: 'r',
+      denominator: null,
+      observedFrom: null,
+      observedUntil: null,
+      evidenceRefs: ['r'],
+      applicableVersion: '1',
+      disallowedConditions: [],
+    },
+  };
+  const fetcher = vi.fn(async (url: string) => {
+    if (url.includes('/memory-sharing/agent-grants'))
+      return new Response(JSON.stringify({ code: 'MEMORY_IDENTITY_REQUIRED' }), { status: 401 });
+    const data = url.includes('/memory-episodes')
+      ? [episode]
+      : { items: [preference], total: 1, page: 1, pageSize: 20 };
+    return new Response(JSON.stringify({ code: 'SUCCESS', data }));
+  });
+  vi.stubGlobal('fetch', fetcher);
+  await renderPage(
+    MemoryCenterPage,
+    '/ai-center/memories?topAgent=operations&sessionId=session-one',
+  );
+  await flushPromises();
+  expect(screen.getByRole('link', { name: '详情与来源' })).toBeTruthy();
+  await fireEvent.click(screen.getByRole('button', { name: '经验案例与资产晋升' }));
+  await flushPromises();
+  expect(screen.getByText('private case awaiting authorization')).toBeTruthy();
+  await fireEvent.click(screen.getByRole('button', { name: '跨 Agent 偏好授权' }));
+  await flushPromises();
+  expect(screen.queryByText('private case awaiting authorization')).toBeNull();
+  expect(screen.queryByRole('link', { name: '详情与来源' })).toBeNull();
+});
+
 async function renderPage(
   component = MemoryCenterPage,
   path = '/ai-center/memories?topAgent=operations',
@@ -121,7 +168,7 @@ it('renders private boundaries with disabled unavailable features and requires l
   await renderPage(MemoryCenterPage, '/ai-center/memories?topAgent=hr', false);
   expect(await screen.findByText('请先登录后管理记忆')).toBeTruthy();
   expect(screen.getByRole('button', { name: '保存偏好' })).toBeDisabled();
-  expect(screen.getByRole('button', { name: '跨 Agent 共享' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: '跨 Agent 偏好授权' })).toBeNull();
   expect(screen.getByText(/TASK_ONLY/)).toBeTruthy();
   expect(screen.queryByRole('log')).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();

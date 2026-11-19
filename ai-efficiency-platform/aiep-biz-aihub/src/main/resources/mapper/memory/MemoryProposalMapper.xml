@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryProposalMapper">
+ <sql id="columns">tenant_id,id,item_id,task_id,execution_id,user_id,domain,top_level_agent_id,session_id,field_key,action,status,revision,expected_item_revision,policy_id,policy_version_id,expires_at,source_message_ids_json,dependencies_json,key_version,encrypted_payload,nonce,auth_tag,content_hmac,decision_request_id,decision_actor_id,decision_action,decision_expected_revision,decision_expected_item_revision,accepted_version_id</sql>
+ <select id="lockBatch" resultType="com.aiep.aihub.repository.memory.MemoryProposalMapper$BatchPO">
+  SELECT tenant_id,task_id,execution_id,user_id,domain,session_id,request_id,fingerprint,policy_id,policy_version_id,actions_json
+  FROM ai_memory_proposal_batch WHERE tenant_id=#{tenant} AND task_id=#{task} FOR UPDATE
+ </select>
+ <insert id="insertBatch">
+  INSERT INTO ai_memory_proposal_batch(tenant_id,task_id,execution_id,user_id,domain,session_id,request_id,fingerprint,policy_id,policy_version_id,actions_json)
+  VALUES(#{row.tenantId},#{row.taskId},#{row.executionId},#{row.userId},#{row.domain},#{row.sessionId},#{row.requestId},#{row.fingerprint},#{row.policyId},#{row.policyVersionId},#{row.actionsJson})
+ </insert>
+ <update id="setBatchActions">UPDATE ai_memory_proposal_batch SET actions_json=#{actions} WHERE tenant_id=#{tenant} AND task_id=#{task} AND JSON_LENGTH(actions_json)=0</update>
+ <insert id="claimSource">INSERT INTO ai_memory_proposal_source_claim(tenant_id,source_id,source_version,task_id) VALUES(#{tenant},#{source},#{version},#{task})</insert>
+ <insert id="ensureItem">
+  INSERT INTO ai_memory_item(tenant_id,id,subject_type,subject_id,owner_id,domain,origin_top_agent_id,scope_type,scope_id,purpose,field_key,lifecycle)
+  VALUES(#{item.tenantId},#{item.id},#{item.subjectType},#{item.subjectId},#{item.ownerId},#{item.domain},#{item.originTopAgentId},#{item.scopeType},#{item.scopeId},#{item.purpose},#{item.fieldKey},'LIVE')
+  ON DUPLICATE KEY UPDATE id=id
+ </insert>
+ <insert id="insertProposal">
+  INSERT INTO ai_memory_proposal(tenant_id,id,item_id,task_id,execution_id,user_id,domain,top_level_agent_id,session_id,field_key,action,status,revision,expected_item_revision,policy_id,policy_version_id,expires_at,source_message_ids_json,dependencies_json,key_version,encrypted_payload,nonce,auth_tag,content_hmac)
+  VALUES(#{row.tenantId},#{row.id},#{row.itemId},#{row.taskId},#{row.executionId},#{row.userId},#{row.domain},#{row.topLevelAgentId},#{row.sessionId},#{row.fieldKey},#{row.action},'PENDING',0,#{row.expectedItemRevision},#{row.policyId},#{row.policyVersionId},#{row.expiresAt},#{row.sourceMessageIdsJson},#{row.dependenciesJson},#{row.keyVersion},#{row.encryptedPayload},#{row.nonce},#{row.authTag},#{row.contentHmac})
+ </insert>
+ <select id="readProposal" resultType="com.aiep.aihub.repository.memory.MemoryProposalMapper$ProposalPO">SELECT <include refid="columns"/> FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND id=#{id}</select>
+ <select id="lockProposal" resultType="com.aiep.aihub.repository.memory.MemoryProposalMapper$ProposalPO">SELECT <include refid="columns"/> FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <select id="listBatch" resultType="com.aiep.aihub.repository.memory.MemoryProposalMapper$ProposalPO">SELECT <include refid="columns"/> FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND task_id=#{task} ORDER BY id</select>
+ <select id="listOwned" resultType="com.aiep.aihub.repository.memory.MemoryProposalMapper$ProposalPO">SELECT <include refid="columns"/> FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND user_id=#{user} AND domain=#{domain} AND top_level_agent_id=#{domain} AND session_id=#{session} ORDER BY id LIMIT #{limit}</select>
+ <select id="pendingValues" resultType="_byte[]">SELECT content_hmac FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND item_id=#{item} AND status='PENDING' AND encrypted_payload IS NOT NULL AND expires_at&gt;UTC_TIMESTAMP(6) ORDER BY id FOR UPDATE</select>
+ <update id="resolve">
+  UPDATE ai_memory_proposal SET status=#{status},revision=revision+1,decision_request_id=#{request},decision_actor_id=#{actor},decision_action=#{action},
+    decision_expected_revision=#{row.revision},decision_expected_item_revision=#{expectedItem},accepted_version_id=#{version,jdbcType=VARBINARY}
+  WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND status='PENDING' AND revision=#{row.revision} AND decision_request_id IS NULL
+ </update>
+ <update id="invalidate">
+  UPDATE ai_memory_proposal SET status=CASE WHEN status='PENDING' THEN #{status} ELSE status END,revision=revision+1,
+    encrypted_payload=NULL,nonce=NULL,auth_tag=NULL,content_hmac=NULL
+  WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND revision=#{row.revision} AND encrypted_payload IS NOT NULL
+ </update>
+</mapper>

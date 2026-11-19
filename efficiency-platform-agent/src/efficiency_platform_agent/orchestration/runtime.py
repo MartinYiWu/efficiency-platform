@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Mapping
+from contextlib import AsyncExitStack
 from typing import cast
 
 from efficiency_platform_agent.core.budget import (
@@ -20,6 +21,8 @@ from efficiency_platform_agent.core.diagnostics import (
     safe_exception_location,
 )
 from efficiency_platform_agent.core.enums import RunStatus
+from efficiency_platform_agent.core.execution_control import current_run_control
+from efficiency_platform_agent.core.memory_execution import MemoryGraphResumeCapability
 from efficiency_platform_agent.core.memory_thread import MemoryThreadRegistry
 from efficiency_platform_agent.core.run import JsonObject, JsonValue
 from efficiency_platform_agent.core.runtime import (
@@ -92,12 +95,52 @@ class GraphRuntime:
         self.clock = clock
         self.diagnostic_recorder = diagnostic_recorder or NoopDiagnosticRecorder()
         self._programs: dict[tuple[str, str], GraphProgram] = {}
+        self._memory_resume_frames: dict[str, tuple[GraphProgram, Mapping]] = {}
+
+    async def resume_memory_context(self, capability):
+        if not isinstance(capability, MemoryGraphResumeCapability):
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        frame = self._memory_resume_frames.get(capability.binding.runtime_id)
+        if frame is None:
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        program, _config = frame
+        resume = getattr(program, "resume_memory_context", None)
+        if not callable(resume):
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        gate = getattr(program, "_memory_gate", None)
+        if gate is None or not callable(getattr(gate, "resume_scope", None)):
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        config = {
+            "configurable": {
+                "thread_id": capability.binding.runtime_id,
+                "checkpoint_ns": capability.checkpoint_ns,
+                "checkpoint_id": capability.checkpoint_id,
+            }
+        }
+        async with gate.resume_scope(capability):
+            values = await resume(capability, config)
+            await gate.finish_resume(capability)
+            return values
 
     async def execute(self, selection, initial_state):
+        return await self._execute(selection, initial_state)
+
+    async def execute_memory_context(
+        self, selection, initial_state, apply_result_callback
+    ):
+        if not callable(apply_result_callback):
+            raise PermissionError("MEMORY_RESULT_CALLBACK_REQUIRED")
+        return await self._execute(selection, initial_state, apply_result_callback)
+
+    async def _execute(self, selection, initial_state, apply_result_callback=None):
         registration = self._registration(selection)
         run_id = initial_state.get("run_id")
         tenant_id = _state_tenant_id(initial_state)
-        if self.memory_registry is not None:
+        memory_gate = getattr(registration.builder, "memory_gate", None)
+        if apply_result_callback is not None and memory_gate is None:
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        callback_started = False
+        if self.memory_registry is not None and memory_gate is None:
             await self.memory_registry.check_runtime(str(run_id or ""), tenant_id)
         if not isinstance(run_id, str) or not run_id:
             return await self._failure_result(
@@ -147,17 +190,42 @@ class GraphRuntime:
                     "checkpoint_ns": registration.checkpoint_ns,
                 }
             }
-            values = await program.invoke(initial_state, config)
-            values = dict(values)
-            checkpoint = await self._save_checkpoint(
-                registration, run_id, values, tenant_id=tenant_id
-            )
-            return self._normalize(registration, values, checkpoint)
+            async with AsyncExitStack() as stack:
+                if memory_gate is not None:
+                    await stack.enter_async_context(
+                        memory_gate.run_scope(program, initial_state, config)
+                    )
+                    self._memory_resume_frames[run_id] = (program, config)
+                    stack.callback(self._memory_resume_frames.pop, run_id, None)
+                async with AsyncExitStack() as invocation:
+                    if memory_gate is not None:
+                        await invocation.enter_async_context(memory_gate.invoke_scope())
+                    values = dict(await program.invoke(initial_state, config))
+                while memory_gate is not None and values.get("__interrupt__"):
+                    await memory_gate.ready_wait(program, config)
+                    capability = await memory_gate.wait_for_resume()
+                    values = dict(await self.resume_memory_context(capability))
+                checkpoint = await self._save_checkpoint(
+                    registration, run_id, values, tenant_id=tenant_id
+                )
+                result = self._normalize(registration, values, checkpoint)
+                if apply_result_callback is not None:
+                    async with memory_gate.result_save_scope(values):
+                        callback_started = True
+                        return await apply_result_callback(result)
+                return result
         except BudgetExhaustedError:
+            if callback_started:
+                raise
             return await self._failure_result(
                 registration, run_id, "BUDGET_EXHAUSTED", tenant_id=tenant_id
             )
-        except Exception as error:  # noqa: BLE001 - 图异常统一归一化为安全运行错误
+        except Exception as error:
+            if callback_started:
+                control = current_run_control()
+                if control is not None:
+                    control.stop("MEMORY_RESULT_SAVE_FAILED")
+                raise
             self._record_graph_failure(error, "GRAPH_EXECUTION_FAILED")
             return await self._failure_result(
                 registration,
@@ -249,8 +317,15 @@ class GraphRuntime:
         return record.view if record else None
 
     def scrub_memory_run(self, run_id: str) -> bool:
-        selected = [(key, program) for key, program in self._programs.items() if key[0] == run_id]
-        if any(not callable(getattr(program, "scrub_memory_body", None)) for _, program in selected):
+        selected = [
+            (key, program)
+            for key, program in self._programs.items()
+            if key[0] == run_id
+        ]
+        if any(
+            not callable(getattr(program, "scrub_memory_body", None))
+            for _, program in selected
+        ):
             return False
         for key, program in selected:
             scrub = getattr(program, "scrub_memory_body", None)

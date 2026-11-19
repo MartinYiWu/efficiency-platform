@@ -126,6 +126,10 @@ public class OperationAssistantController {
     private void sendEvent(SseEmitter emitter, String runId, OperationAgentRunEvent event, OperationActor actor) {
         try {
             service.projectEvent(runId, event, actor);
+            if("context_refresh_required".equals(event.event())) {
+                service.onMemoryWait(runId,event,actor);return;
+            }
+            if("memory_derive_required".equals(event.event())) {service.onMemoryDerive(runId,event,actor);return;}
             OperationAgentRunEvent publicEvent = new OperationAgentRunEvent(
                     event.contractVersion(), event.event(), runId, event.sequence(), event.payload());
             emitter.send(SseEmitter.event()
@@ -133,6 +137,8 @@ public class OperationAssistantController {
                     .name(event.event())
                     .data(publicEvent, MediaType.APPLICATION_JSON));
         } catch (Exception exception) {
+            if("context_refresh_required".equals(event.event()))throw new IllegalStateException("MEMORY_CONTEXT_REFRESH_FAILED",exception);
+            if("memory_derive_required".equals(event.event()))throw new IllegalStateException("MEMORY_DERIVE_FAILED",exception);
             try {
                 service.failEventProjection(runId, event, exception, actor);
             } catch (RuntimeException persistenceException) {

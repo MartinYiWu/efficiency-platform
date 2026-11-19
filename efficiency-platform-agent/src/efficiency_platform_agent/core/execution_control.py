@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from time import monotonic
+from time import monotonic, time
 from typing import Any, TypeVar
 
 from .paid_budget import PaidBudgetError
@@ -45,6 +45,22 @@ class RunControl:
         self.operations: dict[str, _Operation] = {}
         self.http_tasks: dict[object, asyncio.Task[Any]] = {}
         self.streams: dict[object, Callable[[], Awaitable[None]]] = {}
+        self.task_authorization: tuple[str, str, str] | None = None
+
+    def bind_task_authorization(
+        self, task_id: str, run_id: str, authorization_id: str, deadline_epoch_ms: int
+    ) -> None:
+        identity = task_id, run_id, authorization_id
+        if self.task_authorization is not None and self.task_authorization != identity:
+            raise PaidBudgetError(
+                "TASK_RUN_CONFLICT", "execution authorization is immutable"
+            )
+        self.check()
+        self.task_authorization = identity
+        self.deadline = min(
+            self.deadline, monotonic() + (deadline_epoch_ms - time() * 1000) / 1000
+        )
+        self.check()
 
     def stop(self, code: str = "AGENT_TASK_STOPPED") -> None:
         if self.stopped is None:

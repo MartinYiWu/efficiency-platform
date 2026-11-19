@@ -7,7 +7,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import closing
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from functools import wraps
 from pathlib import Path
 from typing import Any
@@ -28,9 +28,15 @@ from efficiency_platform_agent.core.paid_budget import (
     _pos,
     calculate_paid_cost,
 )
+from efficiency_platform_agent.core.task_authorization import (
+    TaskContinuation,
+    TaskPaidBinding,
+)
 
 
-def _execution_identity(tenant_id: str, scope: ConversationScope | None) -> bytes | None:
+def _execution_identity(
+    tenant_id: str, scope: ConversationScope | None
+) -> bytes | None:
     """完整可信作用域按原字符串精确绑定，不折叠大小写、空格或Unicode。"""
     if scope is None:
         return None
@@ -64,12 +70,522 @@ def _closed(method: Callable[..., Any]) -> Callable[..., Any]:
 
 class SqlitePaidBudgetLedger:
     @_closed
-    def __init__(self, path: Path, *, read_only: bool = False) -> None:
+    def initialize_task_authorization_schema(self, backup_path: Path) -> None:
+        """仅本机显式迁移入口：先SQLite一致性备份，再建表并核验；构造器不调用。"""
+        target = Path(backup_path).resolve()
+        if self.read_only or target == self.path or target.exists():
+            raise PaidBudgetError(
+                "TASK_SCHEMA_BACKUP_REQUIRED", "new backup path required"
+            )
+        with closing(self._db()) as connection:
+            if connection.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                raise PaidBudgetError(
+                    "LEDGER_UNAVAILABLE", "ledger integrity check failed"
+                )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("xb"):
+                pass
+            with closing(sqlite3.connect(target)) as backup:
+                connection.backup(backup)
+                if backup.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                    raise PaidBudgetError(
+                        "LEDGER_UNAVAILABLE", "backup verification failed"
+                    )
+            connection.executescript(
+                "BEGIN IMMEDIATE;"
+                "CREATE TABLE IF NOT EXISTS task_budget_chains(task TEXT PRIMARY KEY,chain TEXT NOT NULL UNIQUE,root_bid TEXT NOT NULL UNIQUE,limits TEXT NOT NULL,identity BLOB NOT NULL,operation_limit INTEGER NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS task_authorizations(id TEXT PRIMARY KEY,chain TEXT NOT NULL,parent TEXT,request_hash TEXT UNIQUE,run TEXT,identity BLOB NOT NULL);"
+                "CREATE TABLE IF NOT EXISTS task_paid_operations(chain TEXT NOT NULL,operation TEXT NOT NULL,input_hash TEXT NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(chain,operation));"
+                "CREATE TABLE IF NOT EXISTS task_authorization_schema(version INTEGER PRIMARY KEY CHECK(version=1));"
+                "INSERT OR IGNORE INTO task_authorization_schema VALUES(1);COMMIT;"
+            )
+            self._task_schema(connection)
+
+    def _task_schema(self, connection: sqlite3.Connection) -> None:
+        if not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_authorization_schema'"
+        ).fetchone():
+            raise PaidBudgetError(
+                "TASK_SCHEMA_REQUIRED", "reviewed task schema required"
+            )
+        row = connection.execute(
+            "SELECT version FROM task_authorization_schema"
+        ).fetchall()
+        if row != [(1,)]:
+            raise PaidBudgetError(
+                "TASK_SCHEMA_REQUIRED", "reviewed task schema required"
+            )
+
+    def _task_totals(
+        self, connection: sqlite3.Connection, chain: str
+    ) -> dict[str, int]:
+        totals = connection.execute(
+            "SELECT COALESCE(SUM(b.calls),0),COALESCE(SUM(b.cost),0),COALESCE(SUM(b.inflight),0) FROM budgets b JOIN task_authorizations a ON a.id=b.id WHERE a.chain=?",
+            (chain,),
+        ).fetchone()
+        result = dict(zip(("calls", "cost_microunits", "inflight"), totals))
+        result.update(input_tokens=0, output_tokens=0, reasoning_tokens=0)
+        for (
+            held_input,
+            held_output,
+            held_reasoning,
+            encoded,
+            state,
+        ) in connection.execute(
+            "SELECT r.reserved_input,r.reserved_output,r.reserved_reasoning,r.usage,r.state FROM reservations r JOIN task_authorizations a ON a.id=r.bid WHERE a.chain=?",
+            (chain,),
+        ):
+            usage = json.loads(encoded) if encoded else None
+            for dimension, held in zip(
+                ("input", "output", "reasoning"),
+                (held_input, held_output, held_reasoning),
+            ):
+                if held is None:
+                    raise PaidBudgetError(
+                        "TASK_HISTORY_UNVERIFIED", "legacy token bounds unavailable"
+                    )
+                amount = usage[dimension + "_tokens"] if usage else held
+                result[dimension + "_tokens"] += (
+                    max(held, amount) if state == "anomaly" else amount
+                )
+        return result
+
+    def _task_provider_check(
+        self, connection: sqlite3.Connection, providers: set[str], threshold: int
+    ) -> None:
+        # 供应商账户在本机总账共享；新授权不能抹去旧402及累计429熔断。
+        for provider in providers:
+            statuses = connection.execute(
+                "SELECT COALESCE(SUM(CASE WHEN status=402 THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status=429 THEN 1 ELSE 0 END),0) FROM reservations WHERE provider=?",
+                (provider,),
+            ).fetchone()
+            stopped = connection.execute(
+                "SELECT 1 FROM budgets b JOIN prices p ON p.bid=b.id WHERE p.provider=? AND b.stopped IN ('402','429','usage_overflow','usage_exceeded') LIMIT 1",
+                (provider,),
+            ).fetchone()
+            if stopped or statuses[0] or statuses[1] >= threshold:
+                raise PaidBudgetError(
+                    "PROVIDER_CIRCUIT_OPEN", "provider circuit is permanently open"
+                )
+
+    def _task_reserve(
+        self,
+        connection: sqlite3.Connection,
+        bid: str,
+        binding: TaskPaidBinding | None,
+        price: PaidPriceLimit,
+        requested: tuple[int, int, int],
+        now: int,
+    ) -> int | None:
+        if not self.task_authorization_enabled:
+            if binding is not None:
+                raise PaidBudgetError(
+                    "CONTINUATION_AUTH_UNSUPPORTED", "task authorization disabled"
+                )
+            if (
+                connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_authorizations'"
+                ).fetchone()
+                and connection.execute(
+                    "SELECT 1 FROM task_authorizations WHERE id=?", (bid,)
+                ).fetchone()
+            ):
+                raise PaidBudgetError(
+                    "CONTINUATION_AUTH_UNSUPPORTED", "task authorization disabled"
+                )
+            return None
+        self._task_schema(connection)
+        if binding is None:
+            # 一旦budget属于task，所有通道都必须携带同一可信身份。
+            if connection.execute(
+                "SELECT 1 FROM task_authorizations WHERE id=?", (bid,)
+            ).fetchone():
+                raise PaidBudgetError(
+                    "TASK_SCOPE_REQUIRED", "trusted task binding required"
+                )
+            return None
+        scope = binding.scope
+        identity = _execution_identity(scope.conversation.tenant_id, scope.conversation)
+        root = connection.execute(
+            "SELECT chain,root_bid,limits,identity,operation_limit FROM task_budget_chains WHERE task=?",
+            (scope.task_id,),
+        ).fetchone()
+        plan = PaidBudgetPlan(
+            **json.loads(
+                connection.execute(
+                    "SELECT plan FROM budgets WHERE id=?", (bid,)
+                ).fetchone()[0]
+            )
+        )
+        if root is None:
+            if connection.execute(
+                "SELECT 1 FROM reservations WHERE bid=? LIMIT 1", (bid,)
+            ).fetchone():
+                raise PaidBudgetError(
+                    "TASK_HISTORY_UNVERIFIED",
+                    "legacy operations cannot be assigned to task automatically",
+                )
+            if connection.execute(
+                "SELECT 1 FROM task_authorizations WHERE id=?", (bid,)
+            ).fetchone():
+                raise PaidBudgetError(
+                    "TASK_SCOPE_CONFLICT", "authorization belongs to another task"
+                )
+            chain = hashlib.sha256((scope.task_id + "\0" + bid).encode()).hexdigest()
+            limits = {
+                "max_total_http": min(
+                    plan.max_calls, plan.max_run_calls, MAX_RUN_CALLS
+                ),
+                "max_total_cost_microunits": min(
+                    plan.max_cost_microunits,
+                    plan.max_run_cost_microunits,
+                    MAX_RUN_COST_MICROUNITS,
+                ),
+                "max_input_tokens": min(
+                    plan.max_input_tokens, plan.max_run_input_tokens
+                ),
+                "max_output_tokens": min(
+                    plan.max_output_tokens, plan.max_run_output_tokens
+                ),
+                "max_reasoning_tokens": min(
+                    plan.max_reasoning_tokens, plan.max_run_reasoning_tokens
+                ),
+            }
+            run_limit = connection.execute(
+                "SELECT operation_attempt_limit FROM execution_runs WHERE tenant=? AND run=?",
+                (scope.conversation.tenant_id, scope.execution_id),
+            ).fetchone()
+            operation_limit = min(3, run_limit[0]) if run_limit else 3
+            connection.execute(
+                "INSERT INTO task_budget_chains VALUES(?,?,?,?,?,?)",
+                (
+                    scope.task_id,
+                    chain,
+                    bid,
+                    json.dumps(limits),
+                    identity,
+                    operation_limit,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO task_authorizations(id,chain,run,identity) VALUES(?,?,?,?)",
+                (bid, chain, scope.execution_id, identity),
+            )
+            root = chain, bid, json.dumps(limits), identity, operation_limit
+        if root[3] != identity:
+            raise PaidBudgetError(
+                "TASK_SCOPE_CONFLICT", "task conversation identity changed"
+            )
+        authorization = connection.execute(
+            "SELECT chain,run,identity FROM task_authorizations WHERE id=?", (bid,)
+        ).fetchone()
+        if (
+            not authorization
+            or authorization[0] != root[0]
+            or authorization[2] != identity
+        ):
+            raise PaidBudgetError(
+                "TASK_AUTHORIZATION_REQUIRED", "authorization not bound to task"
+            )
+        if authorization[1] not in (None, scope.execution_id):
+            raise PaidBudgetError(
+                "TASK_RUN_CONFLICT", "authorization already bound to another execution"
+            )
+        connection.execute(
+            "UPDATE task_authorizations SET run=COALESCE(run,?) WHERE id=?",
+            (scope.execution_id, bid),
+        )
+        # 后继预算绑定新run；绝不更新/延长旧run的截止或stopped。
+        run = connection.execute(
+            "SELECT deadline,stopped,context_identity FROM execution_runs WHERE tenant=? AND run=?",
+            (scope.conversation.tenant_id, scope.execution_id),
+        ).fetchone()
+        deadline = min(
+            plan.deadline_epoch_ms,
+            now + min(plan.max_run_duration_ms, MAX_RUN_DURATION_MS),
+        )
+        if run:
+            if run[1] or now >= run[0] or run[2] != identity:
+                raise PaidBudgetError(
+                    "AGENT_TASK_STOPPED", "execution stopped or identity changed"
+                )
+            deadline = min(deadline, run[0])
+        else:
+            connection.execute(
+                "INSERT INTO execution_runs(tenant,run,deadline,context_identity) VALUES(?,?,?,?)",
+                (scope.conversation.tenant_id, scope.execution_id, deadline, identity),
+            )
+        limits = json.loads(root[2])
+        totals = self._task_totals(connection, root[0])
+        self._task_provider_check(connection, {price.provider}, plan.max_429_responses)
+        if (
+            totals["calls"] + 1 > limits["max_total_http"]
+            or totals["cost_microunits"] + price.max_cost_microunits_per_attempt
+            > limits["max_total_cost_microunits"]
+            or any(
+                totals[dimension + "_tokens"] + amount
+                > limits["max_" + dimension + "_tokens"]
+                for dimension, amount in zip(
+                    ("input", "output", "reasoning"), requested
+                )
+            )
+        ):
+            raise PaidBudgetError(
+                "TASK_BUDGET_EXHAUSTED", "task cumulative budget exhausted"
+            )
+        operation = connection.execute(
+            "SELECT input_hash,attempts FROM task_paid_operations WHERE chain=? AND operation=?",
+            (root[0], binding.operation_id),
+        ).fetchone()
+        if operation and operation[0] != binding.input_hash:
+            raise PaidBudgetError(
+                "TASK_OPERATION_INPUT_CONFLICT", "operation input changed"
+            )
+        if operation and operation[1] >= root[4]:
+            raise PaidBudgetError(
+                "AGENT_OPERATION_ATTEMPTS_EXHAUSTED",
+                "task operation attempts exhausted",
+            )
+        connection.execute(
+            "INSERT INTO task_paid_operations(chain,operation,input_hash,attempts) VALUES(?,?,?,1) ON CONFLICT(chain,operation) DO UPDATE SET attempts=attempts+1",
+            (root[0], binding.operation_id, binding.input_hash),
+        )
+        return deadline
+
+    @_closed
+    def task_authorization_snapshot(self, task_id: str) -> dict[str, Any]:
+        with closing(self._db()) as connection:
+            connection.execute("BEGIN")
+            self._task_schema(connection)
+            row = connection.execute(
+                "SELECT chain,root_bid,limits FROM task_budget_chains WHERE task=?",
+                (task_id,),
+            ).fetchone()
+            if not row:
+                raise PaidBudgetError(
+                    "TASK_AUTHORIZATION_REQUIRED", "task has no original authorization"
+                )
+            return {
+                "task_id": task_id,
+                "chain_id": row[0],
+                "root_authorization_id": row[1],
+                "limits": json.loads(row[2]),
+                **self._task_totals(connection, row[0]),
+            }
+
+    @_closed
+    def task_budget_id(
+        self, binding: TaskPaidBinding, fallback: str | None
+    ) -> str | None:
+        with closing(self._db()) as connection:
+            self._task_schema(connection)
+            row = connection.execute(
+                "SELECT a.id FROM task_authorizations a JOIN task_budget_chains c ON c.chain=a.chain WHERE c.task=? AND a.run=?",
+                (binding.scope.task_id, binding.scope.execution_id),
+            ).fetchone()
+            if row:
+                return row[0]
+            row = connection.execute(
+                "SELECT a.id FROM task_authorizations a JOIN task_budget_chains c ON c.chain=a.chain WHERE c.task=? AND a.run IS NULL ORDER BY a.rowid DESC LIMIT 1",
+                (binding.scope.task_id,),
+            ).fetchone()
+            return row[0] if row else fallback
+
+    @_closed
+    def authorize_task_continuation(
+        self,
+        request: TaskContinuation,
+        prices: tuple[PaidPriceLimit, ...],
+        *,
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        if not self.task_authorization_enabled:
+            raise PaidBudgetError(
+                "CONTINUATION_AUTH_UNSUPPORTED", "task authorization disabled"
+            )
+        # 共用原authorize的价格/最坏成本验证；不另开总账或临时授权。
+        self._validate_prices(prices)
+        with closing(self._db()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE" if confirm else "BEGIN")
+            self._task_schema(connection)
+            parent = connection.execute(
+                "SELECT a.chain,c.limits,c.identity,b.plan,b.stopped,a.run FROM task_authorizations a JOIN task_budget_chains c ON c.chain=a.chain JOIN budgets b ON b.id=a.id WHERE a.id=? AND c.task=?",
+                (request.continuation_of, request.task_id),
+            ).fetchone()
+            if not parent:
+                raise PaidBudgetError(
+                    "TASK_AUTHORIZATION_REQUIRED", "parent authorization not in task"
+                )
+            previous = PaidBudgetPlan(**json.loads(parent[3]))
+            limits = json.loads(parent[1])
+            for key in limits:
+                if getattr(request, key) > limits[key]:
+                    raise PaidBudgetError(
+                        "TASK_LIMIT_EXPANSION",
+                        "continuation cannot increase task limits",
+                    )
+            canonical = json.dumps(
+                {
+                    "request": asdict(request),
+                    "prices": sorted(
+                        (asdict(p) for p in prices),
+                        key=lambda p: (p["provider"], p["model"]),
+                    ),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            request_hash = hashlib.sha256(canonical.encode()).hexdigest()
+            authorization_id = "task-auth-" + request_hash
+            existing = connection.execute(
+                "SELECT id FROM task_authorizations WHERE request_hash=?",
+                (request_hash,),
+            ).fetchone()
+            result = {
+                "task_id": request.task_id,
+                "chain_id": parent[0],
+                "authorization_id": authorization_id,
+                "continuation_of": request.continuation_of,
+                "limits": {key: getattr(request, key) for key in limits},
+                "expires_at_epoch_ms": request.expires_at_epoch_ms,
+            }
+            if existing:
+                return result
+            now = int(time.time() * 1000)
+            if not now < request.expires_at_epoch_ms <= now + MAX_RUN_DURATION_MS:
+                raise PaidBudgetError(
+                    "INVALID_PLAN", "continuation window must be within ten minutes"
+                )
+            if not parent[4] and now < previous.deadline_epoch_ms:
+                raise PaidBudgetError(
+                    "TASK_AUTHORIZATION_ACTIVE", "parent authorization is still active"
+                )
+            if connection.execute(
+                "SELECT 1 FROM task_authorizations WHERE parent=?",
+                (request.continuation_of,),
+            ).fetchone():
+                raise PaidBudgetError(
+                    "TASK_CONTINUATION_CONFLICT", "parent already has a successor"
+                )
+            root_models = {
+                (r[0], r[1])
+                for r in connection.execute(
+                    "SELECT p.provider,p.model FROM prices p JOIN task_budget_chains c ON c.root_bid=p.bid WHERE c.chain=?",
+                    (parent[0],),
+                )
+            }
+            if any((p.provider, p.model) not in root_models for p in prices):
+                raise PaidBudgetError(
+                    "UNKNOWN_PRICE", "continuation model outside original authorization"
+                )
+            self._task_provider_check(
+                connection, {p.provider for p in prices}, previous.max_429_responses
+            )
+            totals = self._task_totals(connection, parent[0])
+            if (
+                totals["calls"] >= request.max_total_http
+                or totals["cost_microunits"] >= request.max_total_cost_microunits
+                or any(
+                    totals[d + "_tokens"] > getattr(request, "max_" + d + "_tokens")
+                    for d in ("input", "output", "reasoning")
+                )
+            ):
+                raise PaidBudgetError(
+                    "TASK_BUDGET_EXHAUSTED", "task cumulative budget exhausted"
+                )
+            if confirm:
+                plan = replace(
+                    previous,
+                    budget_id=authorization_id,
+                    max_calls=request.max_total_http,
+                    max_cost_microunits=request.max_total_cost_microunits,
+                    deadline_epoch_ms=request.expires_at_epoch_ms,
+                    max_run_calls=min(previous.max_run_calls, request.max_total_http),
+                    max_run_cost_microunits=min(
+                        previous.max_run_cost_microunits,
+                        request.max_total_cost_microunits,
+                    ),
+                    max_input_tokens=request.max_input_tokens,
+                    max_output_tokens=request.max_output_tokens,
+                    max_reasoning_tokens=request.max_reasoning_tokens,
+                    max_run_input_tokens=min(
+                        previous.max_run_input_tokens, request.max_input_tokens
+                    ),
+                    max_run_output_tokens=min(
+                        previous.max_run_output_tokens, request.max_output_tokens
+                    ),
+                    max_run_reasoning_tokens=min(
+                        previous.max_run_reasoning_tokens, request.max_reasoning_tokens
+                    ),
+                )
+                connection.execute(
+                    "UPDATE budgets SET stopped=COALESCE(stopped,'expired') WHERE id=?",
+                    (request.continuation_of,),
+                )
+                if parent[5] is not None:
+                    tenant = json.loads(parent[2])["tenant_id"]
+                    connection.execute(
+                        "UPDATE execution_runs SET stopped=COALESCE(stopped,'expired') WHERE tenant=? AND run=?",
+                        (tenant, parent[5]),
+                    )
+                connection.execute(
+                    "INSERT INTO budgets(id,plan) VALUES(?,?)",
+                    (authorization_id, json.dumps(asdict(plan))),
+                )
+                connection.executemany(
+                    "INSERT INTO prices(bid,provider,model,req,out,cost,src,pricing) VALUES(?,?,?,?,?,?,?,?)",
+                    [
+                        (
+                            authorization_id,
+                            p.provider,
+                            p.model,
+                            p.max_request_bytes,
+                            p.max_output_tokens,
+                            p.max_cost_microunits_per_attempt,
+                            p.pricing_source,
+                            json.dumps(asdict(p)),
+                        )
+                        for p in prices
+                    ],
+                )
+                connection.execute(
+                    "INSERT INTO task_authorizations(id,chain,parent,request_hash,identity) VALUES(?,?,?,?,?)",
+                    (
+                        authorization_id,
+                        parent[0],
+                        request.continuation_of,
+                        request_hash,
+                        parent[2],
+                    ),
+                )
+                connection.execute(
+                    "UPDATE task_budget_chains SET limits=? WHERE chain=?",
+                    (json.dumps(result["limits"]), parent[0]),
+                )
+            return result
+
+    @_closed
+    def __init__(
+        self,
+        path: Path,
+        *,
+        read_only: bool = False,
+        task_authorization_enabled: bool = False,
+    ) -> None:
+        if type(task_authorization_enabled) is not bool:
+            raise PaidBudgetError(
+                "INVALID_PLAN", "explicit task authorization feature flag required"
+            )
+        self._task_authorization_enabled = task_authorization_enabled
         self.path = Path(path).resolve()
         self.read_only = read_only
         if not read_only:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             self._init()
+
+    @property
+    def task_authorization_enabled(self) -> bool:
+        return self._task_authorization_enabled
 
     def _db(self) -> sqlite3.Connection:
         c = (
@@ -296,6 +812,51 @@ class SqlitePaidBudgetLedger:
             raise PaidBudgetError(
                 "INVALID_PLAN", "explicit token authorization required"
             )
+        self._validate_prices(prices)
+        c = self._db()
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            if c.execute(
+                "SELECT 1 FROM budgets WHERE id=?", (plan.budget_id,)
+            ).fetchone():
+                raise PaidBudgetError("BUDGET_EXISTS", "budget id already exists")
+
+            if self.task_authorization_enabled:
+                self._task_schema(c)
+                self._task_provider_check(
+                    c, {p.provider for p in prices}, plan.max_429_responses
+                )
+            c.execute("UPDATE budgets SET stopped='superseded' WHERE stopped IS NULL")
+            c.execute(
+                "INSERT INTO budgets(id,plan) VALUES (?,?)",
+                (plan.budget_id, json.dumps(plan.__dict__)),
+            )
+            c.executemany(
+                "INSERT INTO prices(bid,provider,model,req,out,cost,src,pricing) VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        plan.budget_id,
+                        p.provider,
+                        p.model,
+                        p.max_request_bytes,
+                        p.max_output_tokens,
+                        p.max_cost_microunits_per_attempt,
+                        p.pricing_source,
+                        json.dumps(p.__dict__),
+                    )
+                    for p in prices
+                ],
+            )
+            c.commit()
+        except BaseException:
+            c.rollback()
+            raise
+        finally:
+            c.close()
+
+    def _validate_prices(self, prices: tuple[PaidPriceLimit, ...]) -> None:
+        if not prices or len({(p.provider, p.model) for p in prices}) != len(prices):
+            raise PaidBudgetError("INVALID_PRICE", "unique verified prices required")
         for price in prices:
             if (
                 not price.pricing_version.strip()
@@ -324,41 +885,6 @@ class SqlitePaidBudgetLedger:
                 raise PaidBudgetError(
                     "INVALID_PRICE", "attempt cost cap below worst case"
                 )
-        c = self._db()
-        try:
-            c.execute("BEGIN IMMEDIATE")
-            if c.execute(
-                "SELECT 1 FROM budgets WHERE id=?", (plan.budget_id,)
-            ).fetchone():
-                raise PaidBudgetError("BUDGET_EXISTS", "budget id already exists")
-
-            c.execute("UPDATE budgets SET stopped='superseded' WHERE stopped IS NULL")
-            c.execute(
-                "INSERT INTO budgets(id,plan) VALUES (?,?)",
-                (plan.budget_id, json.dumps(plan.__dict__)),
-            )
-            c.executemany(
-                "INSERT INTO prices(bid,provider,model,req,out,cost,src,pricing) VALUES (?,?,?,?,?,?,?,?)",
-                [
-                    (
-                        plan.budget_id,
-                        p.provider,
-                        p.model,
-                        p.max_request_bytes,
-                        p.max_output_tokens,
-                        p.max_cost_microunits_per_attempt,
-                        p.pricing_source,
-                        json.dumps(p.__dict__),
-                    )
-                    for p in prices
-                ],
-            )
-            c.commit()
-        except BaseException:
-            c.rollback()
-            raise
-        finally:
-            c.close()
 
     @_closed
     def active_budget_id(self) -> str | None:
@@ -414,6 +940,37 @@ class SqlitePaidBudgetLedger:
                         "frozen workload plan stopped or exhausted",
                     )
             plan = PaidBudgetPlan(**json.loads(encoded))
+            task_totals = None
+            if c.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_authorizations'"
+            ).fetchone():
+                chain = c.execute(
+                    "SELECT a.chain,c.limits FROM task_authorizations a JOIN task_budget_chains c ON c.chain=a.chain WHERE a.id=?",
+                    (bid,),
+                ).fetchone()
+                if chain:
+                    if not self.task_authorization_enabled:
+                        raise PaidBudgetError(
+                            "CONTINUATION_AUTH_UNSUPPORTED",
+                            "task authorization disabled",
+                        )
+                    self._task_provider_check(
+                        c, {w.provider for w in requirements}, plan.max_429_responses
+                    )
+                    task_totals = self._task_totals(c, chain[0])
+                    task_limits = json.loads(chain[1])
+                    used_calls, used_cost = (
+                        task_totals["calls"],
+                        task_totals["cost_microunits"],
+                    )
+                    plan = replace(
+                        plan,
+                        max_calls=min(plan.max_calls, task_limits["max_total_http"]),
+                        max_cost_microunits=min(
+                            plan.max_cost_microunits,
+                            task_limits["max_total_cost_microunits"],
+                        ),
+                    )
             now = int(time.time() * 1000)
             if stopped or now >= plan.deadline_epoch_ms:
                 raise PaidBudgetError("BUDGET_STOPPED", "budget stopped or expired")
@@ -498,6 +1055,8 @@ class SqlitePaidBudgetLedger:
                     occupied[dimension] += amount
                     existing[dimension] += amount
             for dimension, amount in tokens.items():
+                if task_totals is not None:
+                    occupied[dimension] = task_totals[dimension + "_tokens"]
                 if occupied[dimension] + amount > getattr(
                     plan, "max_" + dimension + "_tokens"
                 ):
@@ -656,6 +1215,7 @@ class SqlitePaidBudgetLedger:
         *,
         input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
+        task_binding: TaskPaidBinding | None = None,
     ) -> PaidReservation:
         _pos(request_bytes, "request_bytes", True)
         _pos(output_tokens, "output_tokens", True)
@@ -835,6 +1395,17 @@ class SqlitePaidBudgetLedger:
                         "WORKLOAD_PLAN_EXHAUSTED", "aggregate workload plan exhausted"
                     )
                 deadline = min(deadline, workload[6])
+            task_deadline = self._task_reserve(
+                c,
+                bid,
+                task_binding,
+                frozen,
+                (input_tokens, output_tokens, reasoning_tokens),
+                now,
+            )
+            if task_deadline is not None:
+                deadline = min(deadline, task_deadline)
+            if workload:
                 c.execute(
                     "UPDATE workload_plans SET calls=calls+1,cost=cost+? WHERE id=?",
                     (price[2], workload[0]),
@@ -1076,12 +1647,27 @@ class SqlitePaidBudgetLedger:
 
     @_closed
     def check_live(self, reservation_id: str) -> None:
-        c = self._db()
-        r = c.execute(
-            "SELECT r.deadline,r.active,b.stopped,s.stopped FROM reservations r JOIN budgets b ON b.id=r.bid JOIN scopes s ON s.bid=r.bid AND s.scope=r.scope WHERE r.id=?",
-            (reservation_id,),
-        ).fetchone()
-        c.close()
+        with closing(self._db()) as c:
+            r = c.execute(
+                "SELECT r.deadline,r.active,b.stopped,s.stopped,r.bid,r.provider,b.plan FROM reservations r JOIN budgets b ON b.id=r.bid JOIN scopes s ON s.bid=r.bid AND s.scope=r.scope WHERE r.id=?",
+                (reservation_id,),
+            ).fetchone()
+            if (
+                r
+                and c.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_authorizations'"
+                ).fetchone()
+                and c.execute(
+                    "SELECT 1 FROM task_authorizations WHERE id=?", (r[4],)
+                ).fetchone()
+            ):
+                if not self.task_authorization_enabled:
+                    raise PaidBudgetError(
+                        "CONTINUATION_AUTH_UNSUPPORTED", "task authorization disabled"
+                    )
+                self._task_provider_check(
+                    c, {r[5]}, json.loads(r[6])["max_429_responses"]
+                )
         if not r or not r[1] or r[2] or r[3] or int(time.time() * 1000) >= r[0]:
             raise PaidBudgetError("BUDGET_STOPPED", "reservation expired")
 
@@ -1090,7 +1676,7 @@ class SqlitePaidBudgetLedger:
         c = self._db()
         c.execute("BEGIN IMMEDIATE")
         r = c.execute(
-            "SELECT bid FROM reservations WHERE id=? AND status IS NULL",
+            "SELECT bid,provider FROM reservations WHERE id=? AND status IS NULL",
             (reservation_id,),
         ).fetchone()
         if r:
@@ -1105,6 +1691,28 @@ class SqlitePaidBudgetLedger:
             c.execute(
                 "UPDATE reservations SET status=? WHERE id=?", (status, reservation_id)
             )
+            if (
+                status in {402, 429}
+                and c.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='task_authorizations'"
+                ).fetchone()
+                and c.execute(
+                    "SELECT 1 FROM task_authorizations WHERE id=?", (r[0],)
+                ).fetchone()
+            ):
+                threshold = c.execute(
+                    "SELECT MIN(json_extract(b.plan,'$.max_429_responses')) FROM budgets b JOIN prices p ON p.bid=b.id WHERE p.provider=?",
+                    (r[1],),
+                ).fetchone()[0]
+                cumulative = c.execute(
+                    "SELECT COUNT(*) FROM reservations WHERE provider=? AND status=429",
+                    (r[1],),
+                ).fetchone()[0]
+                if status == 402 or cumulative >= threshold:
+                    c.execute(
+                        "UPDATE budgets SET stopped=COALESCE(stopped,?) WHERE id IN (SELECT bid FROM prices WHERE provider=?)",
+                        (str(status), r[1]),
+                    )
         c.commit()
         c.close()
 

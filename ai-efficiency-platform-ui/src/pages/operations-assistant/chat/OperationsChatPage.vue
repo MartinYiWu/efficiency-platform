@@ -9,6 +9,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons-vue';
 import OperationProgress from '../../../features/operation-chat/OperationProgress.vue';
+import ContextUsagePanel from '../../../features/memory-context/ContextUsagePanel.vue';
 import StreamingAssistantContent from '../../../features/operation-chat/StreamingAssistantContent.vue';
 import { useOperationChat } from '../../../features/operation-chat/useOperationChat';
 import OperationDelivery from '../../../widgets/operation-delivery/OperationDelivery.vue';
@@ -24,6 +25,11 @@ const currentAssistant = computed(() =>
   state.value.messages.at(-1)?.role === 'assistant' ? state.value.messages.at(-1) : null,
 );
 const activelyStreaming = computed(() => ['submitting', 'streaming'].includes(state.value.status));
+const contextSessionId = computed(() => {
+  void state.value.status;
+  return new URLSearchParams(window.location.search).get('conversationId');
+});
+const contextRunId = computed(() => state.value.runId);
 const showThinking = computed(
   () => activelyStreaming.value && !currentAssistant.value?.content.trim(),
 );
@@ -118,6 +124,12 @@ watch(
         >
       </div>
     </header>
+    <ContextUsagePanel
+      top-agent="operations"
+      :session-id="contextSessionId"
+      :run-id="contextRunId"
+      :refresh-key="state.status"
+    />
     <div
       ref="viewport"
       :class="styles.messageViewport"

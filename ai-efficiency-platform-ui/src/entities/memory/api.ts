@@ -20,6 +20,9 @@ const errorMessages: Record<string, string> = {
   MEMORY_VALUE_INVALID: '当前策略不支持此偏好值',
   MEMORY_KEY_UNAVAILABLE: '记忆暂不可用，请稍后重试',
   MEMORY_STORAGE_UNAVAILABLE: '记忆服务暂不可用，请稍后重试',
+  MEMORY_PROPOSAL_REVISION_CONFLICT: '候选版本已变化，请重新加载后核对',
+  MEMORY_PROPOSAL_STALE: '候选来源已变化，无法保存旧候选',
+  MEMORY_PROPOSAL_SUPPRESSED: '已停止学习此字段，请先明确重新授权',
 };
 export class MemoryApiError extends Error {
   constructor(

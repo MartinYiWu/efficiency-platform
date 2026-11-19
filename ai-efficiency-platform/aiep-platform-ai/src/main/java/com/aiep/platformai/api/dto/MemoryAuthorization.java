@@ -10,13 +10,31 @@ public record MemoryAuthorization(Policy policy,
         @JsonProperty("packet_digest") String packetDigest,
         @JsonProperty("semantic_snapshot_digest") String semanticSnapshotDigest,
         @JsonProperty("request_digest") String requestDigest,
-        @JsonProperty("input_dependencies") List<MemoryContextPacket.Dependency> inputDependencies) {
+        @JsonProperty("input_dependencies") List<MemoryContextPacket.Dependency> inputDependencies,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        @JsonProperty("summary_context_json") String summaryContextJson,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        @JsonProperty("derive_template_json") String deriveTemplateJson,
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        @JsonProperty("knowledge_context_json") String knowledgeContextJson) {
+    public MemoryAuthorization(Policy policy,List<ExecutionGrant> grants,long deadline,String digest,String semantic,String request,List<MemoryContextPacket.Dependency> inputDependencies,String summaryContextJson,String deriveTemplateJson) {
+        this(policy,grants,deadline,digest,semantic,request,inputDependencies,summaryContextJson,deriveTemplateJson,null);
+    }
+    public MemoryAuthorization(Policy policy,List<ExecutionGrant> grants,long deadline,String digest,String semantic,String request,List<MemoryContextPacket.Dependency> inputDependencies,String summaryContextJson) {
+        this(policy,grants,deadline,digest,semantic,request,inputDependencies,summaryContextJson,null);
+    }
+    public MemoryAuthorization(Policy policy,List<ExecutionGrant> grants,long deadline,String digest,String semantic,String request,List<MemoryContextPacket.Dependency> inputDependencies) {
+        this(policy,grants,deadline,digest,semantic,request,inputDependencies,null);
+    }
     public MemoryAuthorization(Policy policy,List<ExecutionGrant> grants,long deadline,String digest,String semantic,String request) {
         this(policy,grants,deadline,digest,semantic,request,List.of());
     }
     public MemoryAuthorization {
         inputDependencies=List.copyOf(inputDependencies);
         executionGrants = List.copyOf(executionGrants);
+        if(summaryContextJson!=null&&(summaryContextJson.isBlank()||summaryContextJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>524288))throw new IllegalArgumentException("MEMORY_SUMMARY_CONTEXT_INVALID");
+        if(deriveTemplateJson!=null&&(deriveTemplateJson.isBlank()||deriveTemplateJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>524288))throw new IllegalArgumentException("MEMORY_SUMMARY_CONTEXT_INVALID");
+        if(knowledgeContextJson!=null&&(knowledgeContextJson.isBlank()||knowledgeContextJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length>524288))throw new IllegalArgumentException("MEMORY_KNOWLEDGE_CONTEXT_INVALID");
         if (policy == null || !policy.enabled() || executionGrants.isEmpty() || deadlineEpochSeconds <= 0
                 || executionGrants.stream().map(ExecutionGrant::nodeId).distinct().count() != executionGrants.size()
                 || executionGrants.stream().anyMatch(grant -> !policy.agentIds().contains(grant.executionAgentId())))

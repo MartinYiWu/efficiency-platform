@@ -249,7 +249,7 @@ class DocumentChunkRepository:
                 "SELECT p.parent_id::text,p.knowledge_base_id::text,p.document_id::text,"
                 "p.document_version_id::text,m.index_release_id::text,p.document_title,"
                 "p.version_no,p.section_path,p.page_start,p.page_end,p.content,p.content_hash,"
-                "p.token_count,p.block_kind,p.evidence_mode,p.parent_no,p.source_table_id "
+                "p.token_count,p.block_kind,p.evidence_mode,p.parent_no,p.source_table_id,m.document_sha256 "
                 "FROM customer_service.document_parent p "
                 "JOIN customer_service.index_release_document m "
                 "ON m.document_version_id=p.document_version_id "
@@ -281,6 +281,7 @@ class DocumentChunkRepository:
                 evidence_mode=row[14] or "FULL_ONLY",
                 parent_no=int(row[15]),
                 source_table_id=None if row[16] is None else int(row[16]),
+                document_sha256=str(row[17]) if len(row)>17 else None,
             )
             for row in await _rows(result)
         )
@@ -349,7 +350,7 @@ class DocumentChunkRepository:
                 "c.document_version_id::text,m.index_release_id::text,c.document_title,"
                 "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
                 "c.parent_id::text,c.start_offset,c.end_offset,"
-                "1-(c.embedding <=> %s) AS score "
+                "1-(c.embedding <=> %s) AS score,m.document_sha256 "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
                 "ON m.document_version_id=c.document_version_id "
@@ -382,7 +383,7 @@ class DocumentChunkRepository:
                 "c.document_version_id::text,m.index_release_id::text,c.document_title,"
                 "c.version_no,c.section_path,c.page_no,c.content,c.content_hash,"
                 "c.parent_id::text,c.start_offset,c.end_offset,"
-                "ts_rank_cd(to_tsvector('simple',c.content), plainto_tsquery('simple',%s)) AS score "
+                "ts_rank_cd(to_tsvector('simple',c.content), plainto_tsquery('simple',%s)) AS score,m.document_sha256 "
                 "FROM customer_service.document_chunk c "
                 "JOIN customer_service.index_release_document m "
                 "ON m.document_version_id=c.document_version_id "
@@ -419,6 +420,7 @@ class DocumentChunkRepository:
                 hit_start_offset=None if row[12] is None else int(row[12]),
                 hit_end_offset=None if row[13] is None else int(row[13]),
                 score=float(row[14]),
+                document_sha256=str(row[15]) if len(row)>15 else None,
             )
             for row in rows
         )

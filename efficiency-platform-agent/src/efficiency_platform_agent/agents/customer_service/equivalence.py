@@ -233,6 +233,11 @@ async def verify_equivalence(
 
 def _input(child: Evidence, parent: ParentEvidence) -> dict[str, object]:
     return {
+        "knowledge_base_id": str(parent.knowledge_base_id),
+        "index_release_id": str(parent.index_release_id),
+        "document_id": str(parent.document_id),
+        "document_version_id": str(parent.document_version_id),
+        "document_sha256": parent.document_sha256,
         "chunk_id": str(child.chunk_id),
         "parent_id": str(parent.parent_id),
         "content": parent.content,

@@ -41,8 +41,19 @@ public class MemoryPolicyService {
  }
  public static void requireArtifactPolicy(MemoryMapper.PolicyPO row){
   if(row==null||!"memory-policy/1".equals(row.schemaVersion()))throw new MemoryException("FEATURE_DISABLED");
-  try{requireUnprovisionedIndex(new ObjectMapper().readTree(row.policyJson()));}
+  try{var root=new ObjectMapper().readTree(row.policyJson());if("PROVISIONED".equals(root.path("artifacts").path("index_mode").asText()))requireProvisionedIndex(root);else requireUnprovisionedIndex(root);}
   catch(MemoryException failure){throw failure;}catch(Exception failure){throw new MemoryException("FEATURE_DISABLED");}
+ }
+ public static void requireProvisionedIndex(JsonNode root){
+  var artifacts=root==null?null:root.get("artifacts");
+  if(artifacts==null||!artifacts.isObject())throw new MemoryException("FEATURE_DISABLED");
+  var names=new HashSet<String>();artifacts.fieldNames().forEachRemaining(names::add);
+  if(!names.equals(Set.of("schema_version","index_mode","index_backends"))
+    ||!"memory-artifacts/1".equals(artifacts.path("schema_version").asText())
+    ||!"PROVISIONED".equals(artifacts.path("index_mode").asText())
+    ||!artifacts.path("index_backends").isArray()||artifacts.path("index_backends").size()!=1
+    ||!artifacts.path("index_backends").get(0).isTextual()
+    ||!"agent-pg-memory-index/1".equals(artifacts.path("index_backends").get(0).textValue()))throw new MemoryException("FEATURE_DISABLED");
  }
  public void requireVersionArtifacts(byte[] tenant,List<MemoryMapper.VersionIdentityPO> versions){
   if(versions.isEmpty())return;

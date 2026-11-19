@@ -2,6 +2,7 @@
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import MemoryDeletionPanel from '../../features/memory-preferences/MemoryDeletionPanel.vue';
+import ContextUsagePanel from '../../features/memory-context/ContextUsagePanel.vue';
 import {
   createMemoryApi,
   fieldLabels,
@@ -120,6 +121,11 @@ onBeforeUnmount(() => {
       </div>
     </header>
     <a-alert v-if="error" type="error" :message="error" show-icon />
+    <ContextUsagePanel
+      v-if="scope && scope.topAgent !== 'hr'"
+      :top-agent="scope.topAgent"
+      :session-id="scope.sessionId"
+    />
     <p v-if="loading" role="status">正在读取偏好详情…</p>
     <MemoryDeletionPanel
       v-if="scope"

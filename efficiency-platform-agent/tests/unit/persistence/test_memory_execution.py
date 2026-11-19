@@ -31,3 +31,21 @@ def test_snapshot_cipher_never_contains_plaintext_and_binds_full_identity():
 def test_missing_key_has_no_plaintext_fallback(keys):
     with pytest.raises(ValueError, match="MEMORY_ENCRYPTION_KEY_REQUIRED"):
         MemorySnapshotCipher("v1", keys)
+
+
+def test_schema_format_is_explicit_and_legacy_cannot_open_refresh_journal():
+    from efficiency_platform_agent.persistence.memory_context_refresh import (
+        MySqlMemoryContextRefreshStore,
+    )
+    from efficiency_platform_agent.persistence.memory_execution import (
+        MySqlMemoryExecutionStore,
+    )
+
+    cipher = MemorySnapshotCipher("v1", {"v1": bytes(range(32))})
+    legacy = MySqlMemoryExecutionStore(None, cipher)
+    assert legacy.refresh_schema_required is False
+    with pytest.raises(PermissionError, match="MEMORY_REFRESH_SCHEMA_REQUIRED"):
+        MySqlMemoryContextRefreshStore(legacy)
+    strict = MySqlMemoryExecutionStore(None, cipher, refresh_schema_required=True)
+    with pytest.raises(ValueError, match="MEMORY_REFRESH_SCHEMA_REQUIRED"):
+        strict._decode({"state": "ACTIVE"})

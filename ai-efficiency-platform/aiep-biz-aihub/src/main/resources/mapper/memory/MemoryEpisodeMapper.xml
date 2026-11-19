@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryEpisodeMapper">
+ <sql id="episodeColumns">tenant_id,id,owner_id,domain,session_id,execution_id,scope_json,dependencies_json,policy_id,policy_version_id,status,revision,expires_at,key_version,encrypted_payload,nonce,auth_tag,content_hmac,share_scope_id,share_owner_session_ref,shared_key_version,shared_payload,shared_nonce,shared_tag,shared_hmac,share_approver_id,request_id,fingerprint</sql>
+ <sql id="promotionColumns">tenant_id,id,episode_id,owner_id,target_type,target_definition_id,target_version_id,candidate_digest,status,revision,request_id,fingerprint,regression_suite_id,regression_suite_version,regression_report_sha256,total_cases,passed_cases,regression_reviewer_id,publisher_id</sql>
+ <select id="lockEpisode" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$EpisodePO">SELECT <include refid="episodeColumns"/> FROM ai_memory_episode WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <select id="findEpisodeRequest" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$EpisodePO">SELECT <include refid="episodeColumns"/> FROM ai_memory_episode WHERE tenant_id=#{tenant} AND request_id=#{request} FOR UPDATE</select>
+ <select id="listEpisodes" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$EpisodePO">SELECT <include refid="episodeColumns"/> FROM ai_memory_episode WHERE tenant_id=#{tenant} AND owner_id=#{user} AND domain=#{domain} AND session_id&lt;=>#{session,jdbcType=VARBINARY} ORDER BY id LIMIT 100</select>
+ <select id="listShared" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$EpisodePO">SELECT <include refid="episodeColumns"/> FROM ai_memory_episode WHERE tenant_id=#{tenant} AND share_scope_id=#{scope} AND status IN ('SHARE_PENDING','SHARED') ORDER BY id LIMIT 100</select>
+ <insert id="insertEpisode">INSERT INTO ai_memory_episode(tenant_id,id,owner_id,domain,session_id,execution_id,scope_json,dependencies_json,policy_id,policy_version_id,status,revision,expires_at,key_version,encrypted_payload,nonce,auth_tag,content_hmac,request_id,fingerprint) VALUES(#{row.tenantId},#{row.id},#{row.ownerId},#{row.domain},#{row.sessionId,jdbcType=VARBINARY},#{row.executionId},#{row.scopeJson},#{row.dependenciesJson},#{row.policyId},#{row.policyVersionId},'CANDIDATE',0,#{row.expiresAt},#{row.keyVersion},#{row.encryptedPayload},#{row.nonce},#{row.authTag},#{row.contentHmac},#{row.requestId},#{row.fingerprint})</insert>
+ <update id="transition">UPDATE ai_memory_episode SET status=#{status},revision=revision+1 WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND revision=#{row.revision} AND status=#{row.status}</update>
+ <update id="requestShare">UPDATE ai_memory_episode SET status='SHARE_PENDING',revision=revision+1,share_scope_id=#{scope},share_owner_session_ref=#{ownerSession},shared_key_version=#{sealed.keyVersion},shared_payload=#{sealed.payload},shared_nonce=#{sealed.nonce},shared_tag=#{sealed.tag},shared_hmac=#{sealed.hmac} WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND status='CONFIRMED' AND revision=#{row.revision} AND share_scope_id IS NULL</update>
+ <update id="approveShare">UPDATE ai_memory_episode SET status='SHARED',revision=revision+1,share_approver_id=#{actor} WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND status='SHARE_PENDING' AND revision=#{row.revision}</update>
+ <update id="scrub">UPDATE ai_memory_episode SET status='REVOKED',revision=revision+1,encrypted_payload=NULL,nonce=NULL,auth_tag=NULL,content_hmac=NULL,shared_payload=NULL,shared_nonce=NULL,shared_tag=NULL,shared_hmac=NULL WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND revision=#{row.revision} AND status&lt;&gt;'REVOKED'</update>
+ <insert id="insertLike">INSERT INTO ai_memory_episode_like(tenant_id,episode_id,user_id) VALUES(#{tenant},#{episode},#{user}) ON DUPLICATE KEY UPDATE user_id=user_id</insert>
+ <select id="countLikes" resultType="long">SELECT COUNT(*) FROM ai_memory_episode_like WHERE tenant_id=#{tenant} AND episode_id=#{episode}</select>
+ <select id="lockPromotion" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$PromotionPO">SELECT <include refid="promotionColumns"/> FROM ai_memory_promotion WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <select id="findPromotionRequest" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$PromotionPO">SELECT <include refid="promotionColumns"/> FROM ai_memory_promotion WHERE tenant_id=#{tenant} AND request_id=#{request} FOR UPDATE</select>
+ <select id="listPromotions" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$PromotionPO">
+  SELECT p.tenant_id,p.id,p.episode_id,p.owner_id,p.target_type,p.target_definition_id,p.target_version_id,p.candidate_digest,p.status,p.revision,p.request_id,p.fingerprint,p.regression_suite_id,p.regression_suite_version,p.regression_report_sha256,p.total_cases,p.passed_cases,p.regression_reviewer_id,p.publisher_id
+  FROM ai_memory_promotion p JOIN ai_memory_episode e ON e.tenant_id=p.tenant_id AND e.id=p.episode_id
+  JOIN ai_memory_sharing_scope acl ON acl.tenant_id=e.tenant_id AND acl.id=e.share_scope_id
+  JOIN ai_memory_sharing_member m ON m.tenant_id=acl.tenant_id AND m.scope_id=acl.id AND m.user_id=#{user}
+  WHERE p.tenant_id=#{tenant} AND e.status='SHARED' AND e.expires_at&gt;UTC_TIMESTAMP(6)
+    AND acl.status='ACTIVE' AND acl.expires_at&gt;UTC_TIMESTAMP(6) AND m.status='ACTIVE'
+    AND (p.owner_id=#{user}
+      OR (#{canReview}=TRUE AND p.status='DRAFT' AND p.owner_id&lt;&gt;#{user})
+      OR (#{canPublish}=TRUE AND p.status='REGRESSION_PASSED' AND p.owner_id&lt;&gt;#{user} AND p.regression_reviewer_id&lt;&gt;#{user}))
+  ORDER BY p.id LIMIT 100
+ </select>
+ <insert id="insertPromotion">INSERT INTO ai_memory_promotion(tenant_id,id,episode_id,owner_id,target_type,target_definition_id,target_version_id,candidate_digest,status,revision,request_id,fingerprint) VALUES(#{row.tenantId},#{row.id},#{row.episodeId},#{row.ownerId},#{row.targetType},#{row.targetDefinitionId},#{row.targetVersionId},#{row.candidateDigest},'DRAFT',0,#{row.requestId},#{row.fingerprint})</insert>
+ <update id="regression">UPDATE ai_memory_promotion SET status='REGRESSION_PASSED',revision=revision+1,regression_suite_id=#{command.suiteId},regression_suite_version=#{command.suiteVersion},regression_report_sha256=#{command.reportSha256},total_cases=#{command.totalCases},passed_cases=#{command.passedCases},regression_reviewer_id=#{actor} WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND revision=#{row.revision} AND status='DRAFT'</update>
+ <update id="finishPromotion">UPDATE ai_memory_promotion SET status=#{status},revision=revision+1,publisher_id=CASE WHEN #{status}='PUBLISHED' THEN #{actor} ELSE publisher_id END WHERE tenant_id=#{row.tenantId} AND id=#{row.id} AND revision=#{row.revision} AND status=#{row.status}</update>
+ <select id="findAssetPromotion" resultType="com.aiep.aihub.repository.memory.MemoryEpisodeMapper$PromotionPO">SELECT <include refid="promotionColumns"/> FROM ai_memory_promotion WHERE target_version_id=#{version} AND <choose><when test="type == 'PROMPT'">target_type='PROMPT'</when><otherwise>target_type IN ('SKILL','WORKFLOW')</otherwise></choose> FOR UPDATE</select>
+ <select id="assetSourcesCurrent" resultType="int">
+  SELECT COUNT(*) FROM ai_memory_episode e JOIN ai_memory_sharing_scope acl ON acl.tenant_id=e.tenant_id AND acl.id=e.share_scope_id
+  JOIN ai_memory_policy p ON p.tenant_id=e.tenant_id AND p.id=e.policy_id AND p.current_version_id=e.policy_version_id
+  WHERE e.tenant_id=#{tenant} AND e.id=#{episode} AND e.status='SHARED' AND e.expires_at&gt;UTC_TIMESTAMP(6) AND acl.status='ACTIVE' AND acl.expires_at&gt;UTC_TIMESTAMP(6) AND p.enabled=TRUE
+    AND EXISTS(SELECT 1 FROM ai_memory_dependency d WHERE d.tenant_id=e.tenant_id AND d.target_type='EPISODE' AND d.target_id=e.id)
+    AND NOT EXISTS(SELECT 1 FROM ai_memory_dependency d LEFT JOIN ai_memory_source s ON s.tenant_id=d.tenant_id AND s.id=d.source_id
+      WHERE d.tenant_id=e.tenant_id AND d.target_type='EPISODE' AND d.target_id=e.id AND
+       (s.id IS NULL OR s.retention_deadline IS NULL OR s.retention_deadline&lt;=UTC_TIMESTAMP(6) OR s.grant_epoch&lt;&gt;d.grant_epoch OR s.source_epoch&lt;&gt;d.source_epoch OR s.deletion_epoch&lt;&gt;d.deletion_epoch OR <include refid="com.aiep.aihub.repository.memory.MemoryMapper.sourceRestoreBlocked"/>
+        OR (s.source_type IN ('MESSAGE','CURRENT_USER_MESSAGE') AND NOT EXISTS(SELECT 1 FROM ai_operation_message message JOIN ai_operation_conversation conversation ON conversation.id=message.conversation_id
+          WHERE e.domain='operations' AND CAST(message.tenant_id AS BINARY)=e.tenant_id AND CAST(conversation.tenant_id AS BINARY)=e.tenant_id
+            AND CAST(conversation.user_id AS BINARY)=e.owner_id AND CAST(conversation.id AS BINARY)=CAST(JSON_UNQUOTE(JSON_EXTRACT(e.scope_json,'$.session_id')) AS BINARY)
+            AND CAST(message.id AS BINARY)=s.source_object_ref AND CAST(SHA2(CAST(message.content AS BINARY),256) AS BINARY)=s.source_version))))
+ </select>
+</mapper>

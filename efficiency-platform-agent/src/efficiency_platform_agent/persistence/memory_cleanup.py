@@ -19,11 +19,21 @@ from .memory_execution import _fingerprint
 
 
 class MySqlMemoryCleanupJournal:
-    def __init__(self, engine: AsyncEngine):
+    def __init__(self, engine: AsyncEngine, *, refresh_schema_required: bool = False):
         self.engine = engine
+        self.refresh_schema_required = refresh_schema_required
         self.runtime_scrubber: (
             Callable[[MemoryExecutionRecord], Awaitable[bool]] | None
         ) = None
+
+    async def _verify_refresh_erasure(self, connection, params):
+        if not self.refresh_schema_required:
+            return
+        remaining = (await connection.execute(
+            text("SELECT COUNT(*) FROM agent_memory_context_refresh WHERE tenant_id=:tenant AND execution_id=:execution AND (body_ciphertext IS NOT NULL OR body_nonce IS NOT NULL OR body_scrub_event_id IS NULL)"),params,
+        )).scalar_one()
+        if remaining:
+            raise ValueError("MEMORY_CLEANUP_PROOF_REQUIRED")
 
     @staticmethod
     def _parameters(
@@ -144,6 +154,7 @@ class MySqlMemoryCleanupJournal:
             )
             if execution is None or execution["state"] != "SCRUBBED":
                 return {}
+            await self._verify_refresh_erasure(connection,params)
             raw = execution["scrub_authority"]
             authority = json.loads(raw) if isinstance(raw, str) else raw
             if (
@@ -388,6 +399,7 @@ class MySqlMemoryCleanupJournal:
                 ):
                     raise ValueError("MEMORY_CLEANUP_PROOF_REQUIRED")
                 if execution["state"] == "SCRUBBED":
+                    await self._verify_refresh_erasure(connection,params)
                     return row["scrub_receipt"]
                 if execution["state"] != "REVOKED":
                     raise ValueError("MEMORY_REVOCATION_NOT_PERSISTED")
@@ -504,6 +516,10 @@ class MySqlMemoryCleanupJournal:
                         asdict(dep) for dep in packet.safety_dependencies
                     ],
                 }
+                if self.refresh_schema_required:
+                    await connection.execute(
+                        text("UPDATE agent_memory_context_refresh SET body_ciphertext=NULL,body_nonce=NULL,body_scrub_event_id=:event WHERE tenant_id=:tenant AND execution_id=:execution AND body_ciphertext IS NOT NULL"),params,
+                    )
                 await connection.execute(
                     text(
                         "UPDATE agent_memory_execution SET state='SCRUBBED',snapshot_ciphertext=NULL,snapshot_nonce=NULL,scrub_event_id=:event,scrub_authority=CAST(:authority AS JSON) WHERE tenant_id=:tenant AND execution_id=:execution"

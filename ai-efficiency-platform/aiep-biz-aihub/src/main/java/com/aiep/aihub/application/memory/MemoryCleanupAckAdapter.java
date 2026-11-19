@@ -19,14 +19,26 @@ public class MemoryCleanupAckAdapter implements RevocationAckPort {
  private final MemoryPacketMapper packets;
  private final AiInvokeFacade ai;
  private final MemoryLocalCleanupProof localProof;
+ private final IndexDeletionPort indexDeletion;
  private static final ObjectMapper JSON=new ObjectMapper();
- public MemoryCleanupAckAdapter(MemoryPacketMapper packets,AiInvokeFacade ai,MemoryLocalCleanupProof localProof){this.packets=packets;this.ai=ai;this.localProof=localProof;}
+ public record IndexDeletionProof(boolean neverProvisioned,String receiptRef) {}
+ public interface IndexDeletionPort {IndexDeletionProof acknowledgeIndex(RevocationRequest request);}
+ public MemoryCleanupAckAdapter(MemoryPacketMapper packets,AiInvokeFacade ai,MemoryLocalCleanupProof localProof){this(packets,ai,localProof,(IndexDeletionPort)null);}
+ public MemoryCleanupAckAdapter(MemoryPacketMapper packets,AiInvokeFacade ai,MemoryLocalCleanupProof localProof,IndexDeletionPort indexDeletion){this.packets=packets;this.ai=ai;this.localProof=localProof;this.indexDeletion=indexDeletion;}
+ @org.springframework.beans.factory.annotation.Autowired
+ public MemoryCleanupAckAdapter(MemoryPacketMapper packets,AiInvokeFacade ai,MemoryLocalCleanupProof localProof,org.springframework.beans.factory.ObjectProvider<IndexDeletionPort> indexDeletion){this(packets,ai,localProof,indexDeletion.getIfAvailable());}
  public Acknowledgement acknowledge(RevocationRequest request){
   if(TransactionSynchronizationManager.isActualTransactionActive())throw new IllegalStateException("MEMORY_CLEANUP_OUTSIDE_TRANSACTION_REQUIRED");
   var local=localProof.verify(request);
   var refs=new EnumMap<CleanupTarget,String>(CleanupTarget.class);
   if(local.projectionsRevoked())refs.put(CleanupTarget.HISTORY,opaque("HISTORY",request.tenantId(),request.eventId()));
-  if(local.indexUnprovisioned())refs.put(CleanupTarget.INDEX,opaque("INDEX_NOT_PROVISIONED",request.tenantId(),request.eventId()));
+  if(indexDeletion!=null){
+   try {
+    var index=indexDeletion.acknowledgeIndex(request);
+    if(index!=null&&index.receiptRef()!=null&&index.receiptRef().matches("[A-Za-z0-9:_-]{16,160}"))refs.put(CleanupTarget.INDEX,index.receiptRef());
+    else if(index!=null&&index.neverProvisioned()&&local.indexUnprovisioned())refs.put(CleanupTarget.INDEX,opaque("INDEX_NOT_PROVISIONED",request.tenantId(),request.eventId()));
+   }catch(RuntimeException pending){/* 原待删Job保持，未获得精确CPU回执不能假报无索引。 */}
+  }else if(local.indexUnprovisioned())refs.put(CleanupTarget.INDEX,opaque("INDEX_NOT_PROVISIONED",request.tenantId(),request.eventId()));
   if(local.projectionsRevoked()&&local.noExecutions()){
    for(var target:List.of(CleanupTarget.DERIVED,CleanupTarget.AGENT_STOP,CleanupTarget.THREADS))refs.put(target,opaque("NO_EXECUTION_"+target.name(),request.tenantId(),request.eventId()));
    return new Acknowledgement(request.eventId(),request.deletionEpoch(),refs);

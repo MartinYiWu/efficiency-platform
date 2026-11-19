@@ -1,10 +1,75 @@
 """最终付费发送门禁的中立异步上下文。"""
 
 from collections.abc import Awaitable, Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import AbstractAsyncContextManager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Protocol
+
+
+class ResultPublishDenied(PermissionError):
+    code = "MEMORY_RESULT_PUBLISH_DENIED"
+
+
+class ResultPublishGuard(Protocol):
+    async def check(self, run_id: str) -> None: ...
+
+
+_result_publish_guard: ContextVar[ResultPublishGuard | None] = ContextVar(
+    "result_publish_guard", default=None
+)
+_result_publish_required: ContextVar[bool] = ContextVar(
+    "result_publish_required", default=False
+)
+
+
+def current_result_publish_guard() -> ResultPublishGuard | None:
+    return _result_publish_guard.get()
+
+
+def result_publish_guard_required() -> bool:
+    return _result_publish_required.get()
+
+
+@contextmanager
+def require_result_publish_guard() -> Iterator[None]:
+    token = _result_publish_required.set(True)
+    try:
+        yield
+    finally:
+        _result_publish_required.reset(token)
+
+
+@contextmanager
+def bind_result_publish_guard(guard: ResultPublishGuard) -> Iterator[None]:
+    token = _result_publish_guard.set(guard)
+    try:
+        with require_result_publish_guard():
+            yield
+    finally:
+        _result_publish_guard.reset(token)
+
+
+class ContextSendLease(Protocol):
+    def acquire(self) -> AbstractAsyncContextManager[object]: ...
+
+
+_send_lease: ContextVar[ContextSendLease | None] = ContextVar(
+    "context_send_lease", default=None
+)
+
+
+@contextmanager
+def bind_context_send_lease(lease: ContextSendLease) -> Iterator[None]:
+    token = _send_lease.set(lease)
+    try:
+        yield
+    finally:
+        _send_lease.reset(token)
+
+
+def current_context_send_lease() -> ContextSendLease | None:
+    return _send_lease.get()
 
 
 class ContextSendGuard(Protocol):

@@ -29,6 +29,8 @@ public interface AiManagementMappers {
     void insertPromptDefinition(PromptDefinitionPO value);
     List<PromptVersionPO> listPromptVersions(String promptId);
     PromptVersionPO findPromptVersion(String id);
+    /** 回滚只解析历史快照的精确版本，不借用Agent当前绑定。 */
+    List<PromptVersionPO> findPromptVersionsBySnapshot(String promptKey,String semanticVersion,String checksum);
     void insertPromptVersion(PromptVersionPO value);
     void updatePromptVersion(PromptVersionPO value);
     List<PromptMessageTemplatePO> listPromptMessages(String promptVersionId);

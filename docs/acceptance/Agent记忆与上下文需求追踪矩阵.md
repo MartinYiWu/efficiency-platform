@@ -1,6 +1,6 @@
 # Agent记忆与上下文需求追踪矩阵
 
-状态：M1-A真实合成接口和模块回归已执行，D09任务评审中；后续阶段仍未验。负责人：Codex；更新时间：2026-11-13；范围：总设计I/T隔离与跨模块合同、上下文协议C场景。依据为同日设计、协议及D01—D32实施计划；文档自查不等于验收通过。
+状态：保留历史M1-A证据；D30已补真实发送边界的分域policy与专家传递血缘接合，后续完整发布/真实供应商仍未验。负责人：Codex；更新时间：2026-11-19；范围：总设计I/T隔离与跨模块合同、上下文协议C场景。历史阶段不因D30代码自动升级；文档自查不等于验收通过。
 
 ## 隔离需求
 
@@ -10,7 +10,7 @@
 | I02 | 同用户不同顶层Agent默认拒绝 | D02/D08/D11/D17 | T06/C17 | scope拒绝/允许用例与HTTP隔离回执 | M1-A默认跨Agent拒绝通过；共享成功待D28 |
 | I03 | 不同用户拒绝 | D02/D08/D09/D11 | T06/C05 | scope拒绝/允许用例与HTTP隔离回执 | M1-A通过：真实Identity/业务HTTP跨user404及Python受控边界 |
 | I04 | 不同tenant拒绝 | D02/D08/D09/D11 | T06/C05 | scope拒绝/允许用例与HTTP隔离回执 | M1-A通过：真实跨tenant404/403及二进制存储隔离 |
-| I05 | 11专家仅父任务受权切片 | D05/D07/D09 | T03/C13 | scope拒绝/允许用例与HTTP隔离回执 | M1-A定向通过：专家切片/部分覆盖模块与实际统一发送动态；长期来源待D13 |
+| I05 | 11专家仅父任务受权切片 | D05/D07/D09/D30 | T03/C13 | scope拒绝/允许用例与HTTP隔离回执 | D30最终发送Fake矩阵已验：typed父plan/request hash＋实际task切片；不发父history正文，继承父plan真实输入闭包与上游最终Manifest。外部Tool/research/profile可信映射未接仍拒绝 |
 | I06 | HR等TASK_ONLY不读取历史 | D02/D07/D08/D09 | T15/C17 | scope拒绝/允许用例与HTTP隔离回执 | M1-A真实HR TASK_ONLY/历史字段拒绝通过；恢复待D16 |
 | I07 | 同Agent跨会话仅已确认私有偏好 | D11/D12/D13/D17 | T07/C15 | scope拒绝/允许用例与HTTP隔离回执 | 未运行 |
 | I08 | 跨Agent仅显式授权偏好白名单 | D28/D30/D31 | T06/C05 | scope拒绝/允许用例与HTTP隔离回执 | 未运行 |
@@ -75,3 +75,21 @@
 这些是分层验收：模块层不冒称真实供应商或后续M1-B/M2/M3成功。生产context_enabled仍需显式发布真实已核实模型容量/Schema/策略资产及持久库；Fake容量不用于正式启用。
 
 D09矩阵补齐最终证据：CSR四actor/八session/18发送；HR四actor/八成功TASK_ONLY加一UNKNOWN/11发送，共29安全清单，25stage、9快照。跨actor同run/op真实红测经D09P持久归属修复后拒绝，原缓存/截止/次数不转移。D09HJ确保实际Java HR也签发可信TASK_ONLY包。最终证据在green/D09-business-http.json和各独立review。
+
+## D30分域实现与能力覆盖（2026-11-19）
+
+以下区分代码接线、默认开关、Fake发送边界与尚不支持项；不把该表当生产开启或全入口业务HTTP已验。
+
+| 入口 | 已接真实代码路径 | 记忆/事实边界 | 默认与当前验收 | 剩余边界 |
+| --- | --- | --- | --- | --- |
+| OPS Direct/intent | OperationAssistantService→MemoryAgentPolicyService→原PacketService→ServerDispatchAuthority | intent完整原请求继承真实input_dependencies，不读未选偏好；Direct只注入已确认白名单偏好，原摘要/候选沿已有原task机会 | packet/summary/proposals全局默认off；新agent-policy-binding默认false保原兼容，启用后须context.agentModes.operations=PRIVATE_MEMORY；Fake发送矩阵通过 | 真实供应商未验；M2完整真实闭环由独立D23报告决定 |
+| OPS Supervisor与11专家 | ScenarioSupervisorAdapter/_ScenarioDispatch→server-owned Slice registry→ModelBackedOperationSpecialist→Authority/Controller→原Provider | 子payload只含goal/条件/所需上游，不发父history/checkpoint；可信父requestDigest+typed TaskSpec/OperationPlan digest绑定实际task input；父plan已读原请求所以传递继承context.input_dependencies，不使用全packet授权集合；最终prepared Manifest所选偏好回填上游结果闭包 | Python ContextPublication.specialist_lineage_enabled默认false，Java原发布context.specialistLineageEnabled也须真bool；25项最终发送矩阵包含11专家＋多轮传递源及未知授权源排除 | 实际研究/Tool/profile/外部制品缺source receipt映射时发送前明确拒绝，不以parent包有sources放过；专家摘要/派生不另开机会 |
+| CSR GENERAL_QUERY | CustomerServiceApplicationService/EventProjector→分域policy→原packet/Authority | 当前问题/合法历史/已确认白名单偏好；JSON请求完整必保，不substring裁剪 | context.agentModes.customer-service=PRIVATE_MEMORY才按新分域gate读记忆；Fake发送边界通过 | 无history时摘要NOT_APPLICABLE；有history的CSR自动摘要尚缺带messageID完整组的结构化JSON投影/原frame模板接合，不宣称自动摘要已支持 |
+| CSR正式知识/混合知识 | 原CSR检索/证据完整性路径保留；新增KnowledgeFacade.currentSourceSnapshot | 知识模块当前Identity.refresh原ref、knowledge:read权限、真实tenant/KB可见部门、当前发布release成员目录、docVersion/fileSHA逐项校验；新Facade只元数据，不输出正文 | 新metadata权威默认off；PRIVATE_MEMORY知识模型阶段仍MEMORY_KNOWLEDGE_LINEAGE_ADAPTER_REQUIRED且Fake证实0 Provider | 当前KB元数据目录已具体实现；还需将该当前目录签入原packet的逐文档授权源、检索owner对实际每段Evidence/ToolProjection绑定其doc/version/hash并回写完整Manifest。releaseID不能代替全目录授权；未接前可显式CURRENT_FACTS_ONLY沿原正式知识流程，不伪造长期记忆 |
+| HR 6101—6110 | HrSemanticGateway→当前业务HrActorAuthority/SourceAuthorization→已发布事实/规则/asOfDate→原Skill/受控Provider | 永远TASK_ONLY、session=null、memory_mode=DISABLED；仅当前任务事实，不读聊天history、不提炼长期候选、不把界面语言/详略偏好用于评分 | 新分域gate开启须context.agentModes.hr=CURRENT_FACTS_ONLY和显式hrSkillIds数组；10个synthetic事实阶段最终发送矩阵通过，既有真实HR历史证据仍独立保留 | 不声称HR长记忆/技术经验自动端口已完成；HR群体/候选人长期印象禁止 |
+| 跨Agent偏好/共享案例 | 已有D28 projection/grant/member与D29人工案例 | 仅已授权白名单偏好；专家安全源来自实际选到的manifest而非授权packet全量。案例必须原owner人工重写/独立审批与来源用途 | 全部默认off，代码/组件证据见D28JAVA/D29JAVA | 不能据此把source授权扩成源业务正文权限或生产已部署 |
+| 行政 | 无运行入口 | NOT_IMPLEMENTED，只登记未来统一scope/policy/权限准入 | 未实现/未启用 | 不列为已覆盖业务Agent |
+
+11专家固定登记为research.insight、channel.content、ip.strategy、quality.review、campaign.plan、user_growth.plan、brand.strategy、product.plan、analytics.review、community.plan、content.create（实际ID均以operation.前缀）。`tests/unit/context/test_memory_agent_policy_matrix.py`最终25通过：实际ServerDispatchAuthority→ContextController→ControlledModelProvider→FakeProvider，技术授权/Manifest为明确Fake边界，无DB/网络/付费；不是11专家各自全业务Graph/研究质量/真实供应商矩阵。
+
+D30共享树AST定向曾报5个非D30文件依赖越界，已告对应owner；不放宽架构矩阵。当前最终全树门禁应以root后续统一冻结结果为准。精确代码/命令/限制见`.local-acceptance/agent-memory-implementation/reports/D30.md`。

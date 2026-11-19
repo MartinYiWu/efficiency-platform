@@ -7,15 +7,21 @@ import hashlib
 import logging
 import traceback
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass, field
+from contextlib import ExitStack
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from time import monotonic, perf_counter, time
 from typing import Any, Literal, Protocol
 from uuid import UUID, uuid4
 
 from efficiency_platform_agent.contracts.memory_context import MemoryContextEnvelope
-from efficiency_platform_agent.core.execution_control import RunControl, execution_scope
+from efficiency_platform_agent.core.execution_control import (
+    RunControl,
+    current_run_control,
+    execution_scope,
+)
 from efficiency_platform_agent.core.memory_execution import (
+    MemoryExecutionContext,
     MemoryExecutionRecord,
     MemoryExecutionStore,
 )
@@ -24,10 +30,12 @@ from efficiency_platform_agent.core.run_context_binding import (
     bind_run_context,
     current_conversation_scope,
     current_memory_context,
+    current_run_context,
 )
 
 from .graph import CustomerServiceGraph, GraphResult
 from .intent import StructuredStageGateway
+from .model_gateway import ReleaseStructuredModelGateway
 from .release_bundle import CustomerServiceReleaseBundle, KnowledgeBinding
 from .renderer import answer_deltas
 from .retrieval_snapshot_repository import (
@@ -94,6 +102,8 @@ class CustomerServiceRunService:
     ) -> None:
         self.context_required = context_required
         self.memory_execution_store = memory_execution_store
+        self.memory_index_runtime: Any | None = None
+        self.memory_derive_coordinator: Any | None = None
         self.graph = graph
         self.releases = releases
         self.gateway_factory = gateway_factory
@@ -249,6 +259,106 @@ class CustomerServiceRunService:
             async with asyncio.timeout(5):
                 await run.control.close()
         run.stop_confirmed = True
+
+    async def refresh_memory_binding(
+        self, original: MemoryExecutionRecord, updated: MemoryExecutionContext
+    ) -> bool:
+        if original.runtime_kind != "CUSTOMER_SERVICE" or original.state != "ACTIVE":
+            return False
+        try:
+            runtime_id = UUID(original.runtime_id)
+        except ValueError:
+            return False
+        old = original.context
+        normalized = replace(
+            updated.packet,
+            packet_revision=old.packet.packet_revision,
+            execution_revision=old.packet.execution_revision,
+            issued_at=old.packet.issued_at,
+            expires_at=old.packet.expires_at,
+        )
+        if (
+            normalized != old.packet
+            or replace(updated, packet=old.packet, packet_digest=old.packet_digest)
+            != old
+            or updated.packet.packet_revision <= old.packet.packet_revision
+            or updated.packet.execution_revision != original.execution_revision
+            or updated.packet.expires_at > original.deadline_epoch_seconds
+        ):
+            return False
+        async with self._lock:
+            run = self._runs.get(runtime_id)
+            if (
+                run is None
+                or self._closing
+                or run.scrub_anchor is not None
+                or run.task is None
+                or run.task.done()
+                or run.stop_confirmed
+                or run.control is None
+                or run.context_binding is None
+                or run.context_binding.memory_context not in (old, updated)
+                or run.context_binding.deadline_epoch_seconds
+                != original.deadline_epoch_seconds
+                or run.request.tenant_id != old.packet.scope.tenant_id
+                or run.request.user_id != old.packet.scope.user_id
+                or str(run.request.conversation_id) != old.packet.scope.session_id
+                or hashlib.sha256(run.request.model_dump_json().encode()).hexdigest()
+                != original.request_fingerprint
+            ):
+                return False
+            try:
+                run.control.check()
+            except Exception:  # noqa: BLE001 -- 已停止控制器不应获新绑定。
+                return False
+            run.context_binding = replace(run.context_binding, memory_context=updated)
+            return True
+
+    async def notify_context_wait(
+        self, record: MemoryExecutionRecord, wait_event_id: str
+    ) -> bool:
+        from efficiency_platform_agent.core.memory import require_id
+
+        require_id(wait_event_id)
+        if record.runtime_kind != "CUSTOMER_SERVICE" or record.state != "ACTIVE":
+            return False
+        try:
+            runtime_id = UUID(record.runtime_id)
+        except ValueError:
+            return False
+        async with self._lock:
+            run = self._runs.get(runtime_id)
+            if (
+                run is None
+                or self._closing
+                or run.scrub_anchor is not None
+                or run.task is None
+                or run.task.done()
+                or run.control is None
+                or run.context_binding is None
+                or run.context_binding.memory_context != record.context
+            ):
+                return False
+            try:
+                run.control.check()
+            except Exception:  # noqa: BLE001 -- 原运行已停止时不发布等待通知。
+                return False
+            self._append(
+                run,
+                "context_refresh_required",
+                RunStatus.RUNNING,
+                RunEventPayload(context_wait_ref=wait_event_id),
+            )
+            return True
+
+    async def notify_memory_derive(self,record:MemoryExecutionRecord,payload:dict[str,str])->bool:
+        if set(payload)!={"plan_id","baseline_ref"} or record.runtime_kind!="CUSTOMER_SERVICE" or record.state!="ACTIVE":return False
+        async with self._lock:
+            run=self._runs.get(UUID(record.runtime_id))
+            if run is None or self._closing or run.stop_confirmed or run.task is None or run.task.done() or run.control is None or run.context_binding is None or run.context_binding.memory_context!=record.context:return False
+            run.control.check()
+            self._append(run,"memory_derive_required",RunStatus.RUNNING,RunEventPayload(derive_plan_id=payload["plan_id"],derive_baseline_ref=payload["baseline_ref"]))
+            return True
 
     async def scrub_memory_execution(self, record: MemoryExecutionRecord) -> bool:
         if record.runtime_kind != "CUSTOMER_SERVICE" or record.state != "REVOKED":
@@ -499,11 +609,73 @@ class CustomerServiceRunService:
             ),
         }
 
+    def _run_gateway(
+        self, run: _Run, bundle: CustomerServiceReleaseBundle
+    ) -> StructuredStageGateway:
+        gateway = self.gateway_factory(bundle)
+        original = run.context_binding
+        if (
+            original is None
+            or original.memory_context is None
+            or not isinstance(gateway, ReleaseStructuredModelGateway)
+        ):
+            return gateway
+        control, task = run.control, run.task
+        runtime_id, request = run.view.run_id, run.request
+        control_deadline = control.deadline if control is not None else None
+        shell = replace(original, memory_context=None)
+
+        def latest_binding() -> RunContextBinding:
+            current, latest = current_run_context(), run.context_binding
+            if (
+                self._closing
+                or self._runs.get(runtime_id) is not run
+                or run.view.run_id != runtime_id
+                or run.request != request
+                or run.scrub_anchor is not None
+                or run.stop_confirmed
+                or task is None
+                or task.done()
+                or run.task is not task
+                or control is None
+                or run.control is not control
+                or current_run_control() is not control
+                or control.deadline != control_deadline
+                or current is None
+                or current.memory_context is None
+                or latest is None
+                or latest.memory_context is None
+                or replace(current, memory_context=None) != shell
+                or replace(latest, memory_context=None) != shell
+            ):
+                raise PermissionError("MEMORY_RUN_BINDING_REQUIRED")
+            control.check()
+            return latest
+
+        gateway.bind_run_context_supplier(latest_binding)
+        return gateway
+
     async def _execute(self, run: _Run) -> None:
+        if run.context_binding is not None and run.context_binding.memory_context is not None and run.control is None:
+            raise CustomerServiceScopeError("DERIVE_ORIGINAL_RUN_CONTROL_REQUIRED")
         control = run.control or RunControl()
         run.control = control
         try:
-            with bind_run_context(run.context_binding), execution_scope(control):
+            with (
+                bind_run_context(run.context_binding),
+                execution_scope(control),
+                ExitStack() as memory_frames,
+            ):
+                index_runtime = getattr(self, "memory_index_runtime", None)
+                if index_runtime is not None and run.context_binding is not None:
+                    memory_frames.enter_context(index_runtime.for_run())
+                coordinator=self.memory_derive_coordinator
+                if coordinator is not None and run.context_binding is not None and run.context_binding.memory_context is not None:
+                    if self.memory_execution_store is None:raise CustomerServiceScopeError("DERIVE_ORIGINAL_EXECUTION_REQUIRED")
+                    record=await self.memory_execution_store.get(run.request.tenant_id,run.context_binding.execution_id)
+                    if record is None or record.runtime_id!=str(run.view.run_id) or record.context!=run.context_binding.memory_context:
+                        raise CustomerServiceScopeError("DERIVE_ORIGINAL_EXECUTION_REQUIRED")
+                    memory_frames.enter_context(coordinator.for_run(record))
                 async with asyncio.timeout(max(0, control.deadline - monotonic())):
                     run.view = run.view.model_copy(update={"status": RunStatus.RUNNING})
                     self._append(
@@ -524,7 +696,7 @@ class CustomerServiceRunService:
                         result = await self.graph.run(
                             run.request,
                             bundle,
-                            self.gateway_factory(bundle),
+                            self._run_gateway(run, bundle),
                             on_answer_block=lambda block, mode: (
                                 self._stream_answer_block(run, block, mode)
                             ),
@@ -544,7 +716,7 @@ class CustomerServiceRunService:
                         )
                     else:
                         result = await self.graph.run(
-                            run.request, bundle, self.gateway_factory(bundle)
+                            run.request, bundle, self._run_gateway(run, bundle)
                         )
                     control.check()
                     await self.retrieval_snapshots.save(run.view.run_id, result)

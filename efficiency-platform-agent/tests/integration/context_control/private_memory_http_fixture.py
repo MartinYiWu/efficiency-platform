@@ -83,9 +83,11 @@ class SafeFailureRecorder:
         if record.error_code is None:
             return
         values = {}
-        for key, pattern in (("error_code", r"[A-Z][A-Z0-9_]{0,127}"),
-                             ("error_type", r"[A-Za-z][A-Za-z0-9_]{0,127}"),
-                             ("error_location", r"[A-Za-z0-9_.-]+:[0-9]+:[A-Za-z0-9_<>]+")):
+        for key, pattern in (
+            ("error_code", r"[A-Z][A-Z0-9_]{0,127}"),
+            ("error_type", r"[A-Za-z][A-Za-z0-9_]{0,127}"),
+            ("error_location", r"[A-Za-z0-9_.-]+:[0-9]+:[A-Za-z0-9_<>]+"),
+        ):
             value = getattr(record, key, None)
             if isinstance(value, str) and re.fullmatch(pattern, value):
                 values[key] = value
@@ -95,7 +97,11 @@ class SafeFailureRecorder:
 def failure_code(value):
     raw = json.loads(value) if isinstance(value, str) else value
     code = (raw.get("failure") or {}).get("code")
-    return code if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code) else None
+    return (
+        code
+        if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", code)
+        else None
+    )
 
 
 class FixedBoundary(FakeModelProvider):
@@ -170,7 +176,7 @@ class FixedBoundary(FakeModelProvider):
         )
 
 
-async def main():
+async def main(*, refresh_setup=None):
     if os.environ.get("MEMORY_IT_ENABLED") != "1":
         raise ValueError("MEMORY_IT_LOCAL_ONLY")
     engine = create_async_engine(configured_url())
@@ -189,10 +195,19 @@ async def main():
     )
     from tests.integration.memory.lifecycle_postgres import production_memory_runtime
 
-    pg_context = production_memory_runtime(engine, cipher)
+    pg_context = production_memory_runtime(
+        engine, cipher, refresh_enabled=refresh_setup is not None
+    )
     components = await pg_context.__aenter__()
     memory_store = components.store
-    manifest_store = MySqlContextManifestStore(engine)
+    manifest_store = MySqlContextManifestStore(
+        engine,
+        memory_execution_store=memory_store.store
+        if refresh_setup is not None
+        else None,
+    )
+    if refresh_setup is not None:
+        manifest_store.install_result_authority(components.send_authority)
     published = {}
     for model in ("synthetic-fast", "synthetic-balanced", "synthetic-strong"):
         capacity = ModelCapacity(
@@ -281,7 +296,9 @@ async def main():
     provider = FixedBoundary()
     bundle = build_local_agent_application(
         settings,
-        provider=FencedModelProvider(provider, components.registry, "official"),
+        provider=provider
+        if refresh_setup is not None
+        else FencedModelProvider(provider, components.registry, "official"),
         test_mode=True,
         context_dispatch=dispatch,
     )
@@ -298,14 +315,32 @@ async def main():
     bundle.runtime.event_store = MySqlRunEventStore(engine)
     bundle.runtime.memory_execution_store = memory_store
     releases = MySqlReleaseRepository(engine)
-    await releases.save(RELEASE, release_bundle())
+    release_payload = release_bundle()
+    if refresh_setup is not None:
+        payload = release_payload.model_dump(mode="json")
+        payload["model_policy"]["read_timeout_ms"] = 15000
+        release_payload = type(release_payload).model_validate(payload)
+        release_payload = release_payload.model_copy(
+            update={"snapshot_checksum": release_payload.computed_checksum()}
+        )
+        release_payload.assert_checksum()
+    await releases.save(RELEASE, release_payload)
     customer_provider = ControlledModelProvider(
-        FencedModelProvider(provider, components.registry, "NO_CHECKPOINT"),
+        provider
+        if refresh_setup is not None
+        else FencedModelProvider(provider, components.registry, "NO_CHECKPOINT"),
         dispatch,
         "deepseek",
         MODEL,
         paid_transport=False,
     )
+    if refresh_setup is not None:
+        customer_provider = FencedModelProvider(
+            customer_provider,
+            components.registry,
+            "NO_CHECKPOINT",
+            send_authority=components.send_authority,
+        )
     customer = CustomerServiceRunService(
         CustomerServiceGraph(None),
         releases,
@@ -314,6 +349,11 @@ async def main():
         context_required=True,
         memory_execution_store=memory_store,
     )
+    refresh_proof = None
+    if refresh_setup is not None:
+        refresh_proof = await refresh_setup(
+            components, controller, dispatch, customer, provider, bundle
+        )
     app = create_app(
         bundle.runtime,
         conversation_service=bundle.conversation,
@@ -326,8 +366,19 @@ async def main():
         memory_erase_threads=components.erasure.prepare_and_erase,
         memory_cleanup_journal=components.journal,
         memory_resume_execution=components.registry.resume,
+        memory_refresh_service=components.refresh_service,
+        memory_derive_endpoint=bundle.runtime.memory_derive_coordinator.handler
+        if bundle.runtime.memory_derive_coordinator is not None
+        else None,
+        memory_derive_coordinator=bundle.runtime.memory_derive_coordinator,
         runtime_mode="d13_real_mysql_fixed_provider",
     )
+    if refresh_proof is not None:
+
+        @app.middleware("http")
+        async def refresh_http_observer(request, call_next):
+            refresh_proof.observe_http(request)
+            return await call_next(request)
 
     @app.exception_handler(RequestValidationError)
     async def schema_error(request: Request, error: RequestValidationError):
@@ -392,6 +443,7 @@ async def main():
                 {"id": str(run.view.run_id), "status": run.view.status.value}
                 for run in customer._runs.values()
             ],
+            **({"refresh_proof": await refresh_proof()} if refresh_proof else {}),
         }
 
     @app.post("/__memory_it__/shutdown")
@@ -416,6 +468,8 @@ async def main():
         await server.serve()
     finally:
         await bundle.close()
+        if refresh_proof is not None and hasattr(refresh_proof, "close"):
+            await refresh_proof.close()
         await pg_context.__aexit__(None, None, None)
         await engine.dispose()
 

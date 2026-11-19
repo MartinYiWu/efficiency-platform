@@ -13,6 +13,7 @@ import {
 import type { Citation, Conversation } from '../../entities/customer-service/model';
 import CitationDrawer from '../../features/customer-service-chat/CitationDrawer.vue';
 import CustomerServiceAnswer from '../../features/customer-service-chat/CustomerServiceAnswer.vue';
+import ContextUsagePanel from '../../features/memory-context/ContextUsagePanel.vue';
 import CustomerServiceProgress from '../../features/customer-service-chat/CustomerServiceProgress.vue';
 import FeedbackControl from '../../features/customer-service-chat/FeedbackControl.vue';
 import { useCustomerServiceChat } from '../../features/customer-service-chat/useCustomerServiceChat';
@@ -39,6 +40,9 @@ const viewport = ref<HTMLDivElement>();
 const following = ref(true);
 const readingConversation = ref<string>();
 const showLatest = computed(() => readingConversation.value === (state.value.conversationId ?? ''));
+const contextRunId = computed(
+  () => [...state.value.messages].reverse().find((item) => item.message.runId)?.message.runId,
+);
 function scrollToLatest() {
   following.value = true;
   readingConversation.value = undefined;
@@ -200,6 +204,12 @@ async function select(id: string) {
           ><template #icon><PlusOutlined /></template
         ></a-button>
       </header>
+      <ContextUsagePanel
+        top-agent="customer-service"
+        :session-id="state.conversationId"
+        :run-id="contextRunId"
+        :refresh-key="String(busy)"
+      />
       <div :class="styles.messageArea">
         <div
           ref="viewport"

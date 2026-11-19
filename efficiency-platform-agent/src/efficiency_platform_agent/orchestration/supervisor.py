@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import replace
+from hashlib import sha256
 from typing import Any
 
 from efficiency_platform_agent.agents.factory import AgentFactory
@@ -53,6 +54,10 @@ from efficiency_platform_agent.capabilities.research.contracts import (
 from efficiency_platform_agent.capabilities.research.request_policy import (
     requested_source_count,
 )
+from efficiency_platform_agent.context.specialist_lineage import (
+    lineage_session,
+    register_task_slice,
+)
 from efficiency_platform_agent.contracts.referenced_inputs import (
     ReferencedRankedInput,
 )
@@ -70,6 +75,7 @@ from efficiency_platform_agent.core.operation_progress import (
     report_operation_progress,
 )
 from efficiency_platform_agent.core.run import ExecutionBudget, JsonObject, RunResult
+from efficiency_platform_agent.core.run_context_binding import current_run_context
 from efficiency_platform_agent.strategies.multi_agent.scheduler import BoundedScheduler
 from efficiency_platform_agent.strategies.multi_agent.state import (
     OperationSupervisorState,
@@ -86,6 +92,14 @@ class _ScenarioDispatch:
 
     def build(self, node, selected, **kwargs):
         request = self.request
+        binding=current_run_context()
+        if binding is not None and binding.memory_context is not None and (
+            request.task_spec.tenant_id!=binding.conversation.tenant_id
+            or request.task_spec.user_id!=binding.conversation.user_id
+            or request.request.request.tenant_id!=binding.conversation.tenant_id
+            or request.request.request.user_id!=binding.conversation.user_id
+        ):
+            raise ValueError("MEMORY_SPECIALIST_PARENT_IDENTITY_MISMATCH")
         platform = (
             node.task_id.replace("-", "_")
             if node.task_type == "operation.channel_content"
@@ -151,7 +165,14 @@ class _ScenarioDispatch:
             }
         )
         kwargs["input_data"] = value
-        return self.delegate.build(node, selected, **kwargs)
+        dispatch = self.delegate.build(node, selected, **kwargs)
+        register_task_slice(
+            dispatch.task,
+            goal=request.request.request.input_text,
+            upstream=tuple(task_id for task_id in node.depends_on if task_id in self.results),
+            parent_plan_digest=sha256(repr((request.task_spec,request.operation_plan)).encode()).hexdigest(),
+        )
+        return dispatch
 
 
 def compile_runtime_plan(plan):
@@ -313,6 +334,7 @@ class ScenarioSupervisorAdapter:
         )
         return replace(request, evidence_pack=pack)
 
+    @lineage_session
     async def execute_scenario(
         self, request: ScenarioSupervisorRequest
     ) -> ScenarioExecutionResult:
@@ -341,6 +363,14 @@ class ScenarioSupervisorAdapter:
                 tasks=nodes,
                 topological_order=tuple(node.task_id for node in nodes),
             )
+        binding = current_run_context()
+        if binding is not None and binding.memory_context is not None and (
+            request.task_spec.requires_research
+            or request.referenced_inputs
+            or request.operation_context.profile_references
+            or request.evidence_pack is not None and request.evidence_pack.records
+        ):
+            raise ValueError("MEMORY_SPECIALIST_EXTERNAL_SOURCE_PROJECTION_REQUIRED")
         request = await self._prepare_research(request, graph)
         ledger = BudgetLedger.allocate(
             self.budget,

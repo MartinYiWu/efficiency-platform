@@ -4,10 +4,14 @@ import hashlib
 import json
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from .memory import ConversationScope, require_count, require_id
 from .memory_execution import MemoryExecutionContext
+
+if TYPE_CHECKING:
+    from .context_control import ContextManifest
+    from .memory_execution import MemoryExecutionRecord
 
 
 class WaitPhase(StrEnum):
@@ -491,8 +495,15 @@ class MemoryContextResumeReceipt:
 
 
 class MemoryContextRefreshPort(Protocol):
+    async def validate_execution_manifest(
+        self, manifest: "ContextManifest", current_record: "MemoryExecutionRecord"
+    ) -> bool: ...
+
     async def get_wait(
-        self, scope: ConversationScope, execution_id: str
+        self,
+        scope: ConversationScope,
+        execution_id: str,
+        wait_event_id: str | None = None,
     ) -> MemoryContextWait | None: ...
 
     async def resume(

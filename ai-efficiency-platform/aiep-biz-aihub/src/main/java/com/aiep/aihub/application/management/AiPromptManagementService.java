@@ -23,6 +23,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AiPromptManagementService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private MemoryPromotionAssetGuard promotionGuard;
     private static final String USER_ID = "1";
     private static final Pattern VARIABLE = Pattern.compile("\\{\\{([a-zA-Z][a-zA-Z0-9_]*)}}");
     private static final Set<String> ROLES = Set.of("SYSTEM", "DEVELOPER", "USER", "ASSISTANT");
@@ -65,12 +67,18 @@ public class AiPromptManagementService {
 
     @Transactional
     public PromptVersionPO createVersion(String promptId, String semanticVersion, String changeSummary) {
+        return createVersion(promptId,semanticVersion,changeSummary,USER_ID);
+    }
+
+    /** 受权内部晋升保留真实actor；旧管理入口兼容原签名。 */
+    @Transactional
+    public PromptVersionPO createVersion(String promptId,String semanticVersion,String changeSummary,String actorId) {
         requiredDefinition(promptId);
         PromptVersionPO value = new PromptVersionPO(
                 UUID.randomUUID().toString(), promptId,
                 AiAgentManagementService.required(semanticVersion, "版本号"), "DRAFT",
                 "0".repeat(64), AiAgentManagementService.required(changeSummary, "变更说明"),
-                USER_ID, LocalDateTime.now(), null);
+                AiAgentManagementService.required(actorId,"操作人"), LocalDateTime.now(), null);
         repository.insertPromptVersion(value);
         return value;
     }
@@ -130,8 +138,18 @@ public class AiPromptManagementService {
 
     @Transactional
     public PromptVersionPO transition(String versionId, String targetStatus) {
+        return transition(versionId,targetStatus,null);
+    }
+
+    /** memory晋升需当前真实发布者；legacy入口不能跳过来源/人工审批。 */
+    @Transactional
+    public PromptVersionPO transition(String versionId,String targetStatus,com.aiep.identity.api.IdentityFacade.Subject actor) {
         PromptVersionPO current = requiredVersion(versionId);
         String target = AiAgentManagementService.required(targetStatus, "目标状态").toUpperCase();
+        if(current.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)) {
+            if(promotionGuard==null)throw new AiManagementException("MEMORY_PROMOTION_APPROVAL_ROUTE_REQUIRED","经验资产必须经原审批路径");
+            promotionGuard.transition("PROMPT",versionId,target,actor);
+        }
         String expected = switch (current.status()) {
             case "DRAFT" -> "VALIDATED";
             case "VALIDATED" -> "PUBLISHED";

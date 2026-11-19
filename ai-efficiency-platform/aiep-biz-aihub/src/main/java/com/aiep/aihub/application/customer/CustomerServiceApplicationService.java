@@ -36,6 +36,8 @@ import reactor.core.publisher.Flux;
 
 @Service
 public class CustomerServiceApplicationService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryAgentPolicyService memoryAgentPolicies;
     private static final ObjectMapper STAGE_MAPPER = new ObjectMapper();
     private final CustomerServiceMappers repository;
     private final AiManagementMappers management;
@@ -131,7 +133,7 @@ public class CustomerServiceApplicationService {
                     conversation.tenantId(), conversation.userId(), "customer-service");
             var request = new CustomerServiceRunRequest("customer-service-run/1", pending.run().id(), conversationId,
                     tenantId, userId, release.id(), message, history, scopes.envelope(memoryScope));
-            if (memoryPackets != null && memoryPackets.enabled()) {
+            if (memoryPackets != null && memoryPackets.enabled()&&(memoryAgentPolicies==null||memoryAgentPolicies.privateMemory(memoryScope))) {
                 var candidates = repository.listCompletedHistory(conversationId,tenantId,12).stream()
                     .filter(item -> !item.id().equals(pending.userMessage().id()))
                     .map(item -> com.aiep.aihub.application.memory.MemoryHistoryProjection.message(memoryScope,item.id(),item.role(),item.content())).toList();
@@ -141,7 +143,8 @@ public class CustomerServiceApplicationService {
                 history = selected.stream().map(item -> new CustomerServiceRunRequest.HistoryMessage(item.role(),item.content())).toList();
                 request = new CustomerServiceRunRequest("customer-service-run/1",pending.run().id(),conversationId,tenantId,userId,release.id(),message,history,scopes.envelope(memoryScope));
                 request = new CustomerServiceRunRequest("customer-service-run/1",pending.run().id(),conversationId,tenantId,userId,release.id(),message,history,
-                        memoryPackets.issueMessage(memoryScope,pending.run().id(),pending.userMessage().id(),new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(request),closure));
+                        memoryPackets.issueMessage(memoryScope,pending.run().id(),pending.userMessage().id(),new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(request),closure,
+                            selected.stream().map(item->new com.aiep.platformai.api.dto.MemoryHistoryMessage(item.id(),item.version(),item.role(),item.content(),memoryDependencies.dependencies(memoryScope,"MESSAGE",item.id(),item.version()))).toList()));
             }
             CustomerServiceRunView agent = ai.submitCustomerServiceMessage(conversationId,
                     request);

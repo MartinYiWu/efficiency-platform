@@ -65,7 +65,8 @@ class ArchitectureContractTest {
                 "publishCustomerServiceRelease", "submitCustomerServiceIngest",
                 "queryCustomerServiceIngest", "verifyCustomerServiceIndex",
                 "submitCustomerServiceMessage", "streamCustomerServiceRunEvents",
-                "cancelCustomerServiceRun", "debugCustomerServiceRag", "queryMemoryManifest", "cleanupMemoryExecution", "resumeMemoryExecution");
+                "cancelCustomerServiceRun", "debugCustomerServiceRag", "queryMemoryManifest", "queryMemoryWait", "cleanupMemoryExecution", "resumeMemoryExecution",
+                "deriveMemory", "queryMemoryDerivePlan", "finishMemoryDerive", "upsertMemoryIndex", "deleteMemoryIndex", "recallMemory");
     }
 
     @Test

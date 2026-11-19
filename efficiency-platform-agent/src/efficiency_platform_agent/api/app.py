@@ -27,6 +27,9 @@ if TYPE_CHECKING:
     from efficiency_platform_agent.capabilities.document.service import (
         DocumentIngestionService,
     )
+    from efficiency_platform_agent.capabilities.model.memory_derive_handler import (
+        MemoryDeriveHandler,
+    )
     from efficiency_platform_agent.conversation.service import ConversationService
     from efficiency_platform_agent.harness.live_acceptance import (
         LiveAcceptanceService,
@@ -56,6 +59,10 @@ def create_app(
     memory_erase_threads: Callable | None = None,
     memory_cleanup_journal: MemoryCleanupJournal | None = None,
     memory_resume_execution: Callable | None = None,
+    memory_refresh_service=None,
+    memory_derive_coordinator=None,
+    memory_derive_endpoint: MemoryDeriveHandler | None = None,
+    memory_index_runtime=None,
     runtime_mode: str = "s2_fake_in_memory",
     dependency_probe: Callable[[], Awaitable[None]] | None = None,
 ) -> FastAPI:
@@ -69,6 +76,27 @@ def create_app(
         allow_credentials=False,
     )
     app.state.runtime_service = service
+    if memory_index_runtime is not None:
+        from efficiency_platform_agent.harness.memory_index_runtime import (
+            MemoryIndexCleanupRuntime,
+        )
+
+        if context_internal_authorizer is None or (
+            not memory_enabled
+            and type(memory_index_runtime) is not MemoryIndexCleanupRuntime
+        ):
+            raise ValueError("MEMORY_INDEX_AUTHORITY_REQUIRED")
+        from .memory_index_routes import build_memory_index_router
+
+        app.include_router(
+            build_memory_index_router(memory_index_runtime, context_internal_authorizer)
+        )
+        app.router.add_event_handler(
+            "startup", memory_index_runtime.expiry_worker.start
+        )
+        app.router.add_event_handler(
+            "shutdown", memory_index_runtime.expiry_worker.close
+        )
     if memory_enabled:
         from efficiency_platform_agent.core.memory_execution import (
             MemoryExecutionRecord,
@@ -79,14 +107,24 @@ def create_app(
         if memory_execution_store is None or context_internal_authorizer is None:
             raise ValueError("MEMORY_AUTHORITY_REQUIRED")
         if memory_cleanup_journal is not None:
+
             async def scrub_memory_runtime(record: MemoryExecutionRecord) -> bool:
-                if record.runtime_kind == "CUSTOMER_SERVICE" and customer_service_run_service is not None:
-                    return await cast("CustomerServiceRunService", customer_service_run_service).scrub_memory_execution(record)
+                if (
+                    record.runtime_kind == "CUSTOMER_SERVICE"
+                    and customer_service_run_service is not None
+                ):
+                    return await cast(
+                        "CustomerServiceRunService", customer_service_run_service
+                    ).scrub_memory_execution(record)
                 if record.runtime_kind == "OPERATIONS":
                     if not await service.scrub_memory_execution(record):
                         return False
-                    return conversation_service is not None and await conversation_service.scrub_memory_execution(record)
+                    return (
+                        conversation_service is not None
+                        and await conversation_service.scrub_memory_execution(record)
+                    )
                 return False
+
             memory_cleanup_journal.runtime_scrubber = scrub_memory_runtime
 
         async def stop_memory_execution(record: MemoryExecutionRecord) -> None:
@@ -99,9 +137,9 @@ def create_app(
             ):
                 from uuid import UUID
 
-                await cast("CustomerServiceRunService", customer_service_run_service).stop_memory_execution(
-                    UUID(record.runtime_id)
-                )  # type: ignore[attr-defined]
+                await cast(
+                    "CustomerServiceRunService", customer_service_run_service
+                ).stop_memory_execution(UUID(record.runtime_id))  # type: ignore[attr-defined]
             elif record.runtime_kind == "HR" and hr_skill_endpoint is not None:
                 await hr_skill_endpoint.cancel(tenant, record.context.packet.task_id)  # type: ignore[attr-defined]
                 raise ValueError("MEMORY_STOP_PENDING")
@@ -117,6 +155,8 @@ def create_app(
                 memory_erase_threads,
                 memory_cleanup_journal,
                 memory_resume_execution,
+                refresh_service=memory_refresh_service,
+                memory_derive_coordinator=memory_derive_coordinator,
             )
         )
     from .hr_skill_routes import build_hr_skill_router
@@ -126,6 +166,8 @@ def create_app(
             cast("HrSkillEndpoint | None", hr_skill_endpoint),
             hr_skill_authorizer,
             memory_enabled=memory_enabled,  # type: ignore[arg-type]
+            memory_derive_endpoint=memory_derive_endpoint,
+            memory_derive_authorize=context_internal_authorizer,
         )  # type: ignore[arg-type]
     )
     resolved_event_hub = event_hub or getattr(service, "event_hub", None)

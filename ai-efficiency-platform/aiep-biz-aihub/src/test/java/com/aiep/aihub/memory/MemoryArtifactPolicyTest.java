@@ -13,6 +13,16 @@ import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 
 class MemoryArtifactPolicyTest {
+    @org.junit.jupiter.api.Test void provisionedBackendIsReadableButNeverProvesNoIndex() throws Exception {
+        var json=new com.fasterxml.jackson.databind.ObjectMapper();
+        var root=json.readTree("{\"artifacts\":{\"schema_version\":\"memory-artifacts/1\",\"index_mode\":\"PROVISIONED\",\"index_backends\":[\"agent-pg-memory-index/1\"]}}");
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(()->MemoryPolicyService.requireProvisionedIndex(root));
+        org.junit.jupiter.api.Assertions.assertThrows(com.aiep.aihub.api.memory.MemoryContracts.MemoryException.class,()->MemoryPolicyService.requireUnprovisionedIndex(root));
+        var row=new com.aiep.aihub.repository.memory.MemoryMapper.PolicyPO(new byte[]{1},new byte[]{2},root.toString(),null,"memory-policy/1");
+        org.junit.jupiter.api.Assertions.assertDoesNotThrow(()->MemoryPolicyService.requireArtifactPolicy(row));
+        ((com.fasterxml.jackson.databind.node.ObjectNode)root.path("artifacts")).putArray("index_backends").add("unknown");
+        org.junit.jupiter.api.Assertions.assertThrows(com.aiep.aihub.api.memory.MemoryContracts.MemoryException.class,()->MemoryPolicyService.requireProvisionedIndex(root));
+    }
     private static final ObjectMapper JSON=new ObjectMapper();
     static String withArtifacts(String json){
         try{

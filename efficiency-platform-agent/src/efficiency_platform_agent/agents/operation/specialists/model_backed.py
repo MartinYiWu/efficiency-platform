@@ -48,6 +48,7 @@ from efficiency_platform_agent.capabilities.quality.deliverable_v2 import (
     project_set_v2_to_v1,
     render_copy_text,
 )
+from efficiency_platform_agent.context.specialist_lineage import lineage_input
 from efficiency_platform_agent.context.stages import stage_entry
 from efficiency_platform_agent.contracts.deliverables import (
     ActionPlanDeliverableV2,
@@ -300,6 +301,7 @@ class ModelBackedOperationSpecialist:
             spec.checkpoint_version,
         )
 
+    @lineage_input
     @stage_entry(
         "operation-specialist",
         inputs=("task.input_data", "task.target_agent"),

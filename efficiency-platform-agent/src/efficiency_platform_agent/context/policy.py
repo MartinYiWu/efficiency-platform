@@ -1,5 +1,6 @@
 """节点发布策略与不可分割的模型消息组；均为不可变服务端值。"""
 
+import json
 from dataclasses import dataclass, field
 
 from efficiency_platform_agent.core.memory import (
@@ -42,6 +43,7 @@ class ContextPolicy:
     memory_token_limit: int = 2048
     summary_token_limit: int = 1000
     capsule_token_limit: int = 1000
+    json_history: "JsonHistoryProjection | None" = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         require_id(self.node_id)
@@ -71,6 +73,7 @@ class ContextPiece:
     priority: int = 0
     kind: str = "optional"
     covered_message_ids: tuple[str, ...] = ()
+    projection_aliases: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         require_id(self.piece_id)
@@ -122,3 +125,56 @@ class ContextPiece:
                 for message in self.messages
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class JsonHistoryProjection:
+    """只替换原CSR消息内严格解码的history数组；其他消息/JSON字段原值保留。"""
+
+    message_index: int
+    prefix: str
+    suffix: str
+    input_json: str = field(repr=False)
+    original_message: ProviderMessage = field(repr=False)
+
+    def render(self, pieces: tuple[ContextPiece, ...]) -> tuple[ProviderMessage, ...]:
+        original = json.loads(self.input_json)
+        history: list[dict[str,object]] = []
+        messages: list[ProviderMessage] = []
+        body = None
+        for piece in pieces:
+            if piece.kind in {"history", "summary"}:
+                history.extend(
+                    {"role": message.role, "content": message.content}
+                    for message in piece.messages
+                )
+            elif piece.piece_id == "csr-json-body":
+                if body is not None or len(piece.messages) != 1:
+                    raise ValueError("CONTEXT_JSON_HISTORY_CHANGED")
+                body = len(messages)
+                messages.append(self.original_message)
+            else:
+                messages.extend(piece.messages)
+        if body is None:
+            raise ValueError("CONTEXT_JSON_HISTORY_BODY_REQUIRED")
+        if history == original.get("history"):
+            content = self.original_message.content
+        else:
+            value = {**original, "history": history}
+            content = (
+                self.prefix
+                + json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+                + self.suffix
+            )
+        from dataclasses import replace
+
+        messages[body] = replace(self.original_message, content=content)
+        return tuple(messages)
+
+
+def render_context_messages(
+    policy: ContextPolicy, pieces: tuple[ContextPiece, ...]
+) -> tuple[ProviderMessage, ...]:
+    if policy.json_history is not None:
+        return policy.json_history.render(pieces)
+    return tuple(message for piece in pieces for message in piece.messages)

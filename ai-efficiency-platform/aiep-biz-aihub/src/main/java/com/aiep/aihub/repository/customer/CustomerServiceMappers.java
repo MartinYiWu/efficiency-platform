@@ -29,6 +29,7 @@ public interface CustomerServiceMappers {
 
     void insertRun(RunPO value);
     RunPO findRun(String id, String tenantId);
+    RunPO findRunForUpdate(String id,String tenantId);
     RunPO findRunByUserMessage(String userMessageId, String tenantId);
     void bindAgentRun(String id, String agentRunId, String status);
     boolean advanceRun(String id, long expectedSequence, long nextSequence, String status,

@@ -3,12 +3,40 @@ package com.aiep.platformai.facade;
 import com.aiep.platformai.agent.AgentClient;
 import com.aiep.platformai.agent.CustomerServiceAgentClient;
 import com.aiep.platformai.api.AiInvokeFacade;
+import com.aiep.platformai.api.AiInvocationException;
 import com.aiep.platformai.api.dto.*;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 
 @Service
 public class AiInvokeFacadeImpl implements AiInvokeFacade {
+    @Override public MemorySemanticTransport.Receipt upsertMemoryIndex(String tenantId,MemorySemanticTransport.Upsert request){try{return agentClient.upsertMemoryIndex(tenantId,request);}catch(com.aiep.platformai.agent.AgentTransportException error){throw new AiInvocationException(error.getStatusCode(),error.getErrorCode(),"记忆索引暂不可用");}}
+    @Override public MemorySemanticTransport.Receipt deleteMemoryIndex(String tenantId,MemorySemanticTransport.Delete request){try{return agentClient.deleteMemoryIndex(tenantId,request);}catch(com.aiep.platformai.agent.AgentTransportException error){throw new AiInvocationException(error.getStatusCode(),error.getErrorCode(),"记忆索引清理暂不可用");}}
+    @Override public MemorySemanticTransport.RecallResult recallMemory(String tenantId,MemorySemanticTransport.Recall request){try{return agentClient.recallMemory(tenantId,request);}catch(com.aiep.platformai.agent.AgentTransportException error){throw new AiInvocationException(error.getStatusCode(),error.getErrorCode(),"记忆召回暂不可用");}}
+    @Override public MemoryDeriveRequest queryMemoryDerivePlan(String tenantId,String executionId) {
+        try { return agentClient.queryMemoryDerivePlan(tenantId,executionId); }
+        catch(com.aiep.platformai.agent.AgentTransportException error) {
+            throw new com.aiep.platformai.api.AiInvocationException(error.getStatusCode(),error.getErrorCode(),"摘要计划读取未完成");
+        }
+    }
+    @Override public void finishMemoryDerive(String tenantId,String executionId,String planId,String planFingerprint,String status) {
+        try { agentClient.finishMemoryDerive(tenantId,executionId,planId,planFingerprint,status); }
+        catch(com.aiep.platformai.agent.AgentTransportException error) {
+            throw new com.aiep.platformai.api.AiInvocationException(error.getStatusCode(),error.getErrorCode(),"摘要等待处理未完成");
+        }
+    }
+    @Override public MemoryDeriveResponse deriveMemory(String tenantId,MemoryDeriveRequest request) {
+        try { return agentClient.deriveMemory(tenantId,request); }
+        catch(com.aiep.platformai.agent.AgentTransportException error) {
+            throw new com.aiep.platformai.api.AiInvocationException(error.getStatusCode(),error.getErrorCode(),"摘要处理未完成");
+        }
+    }
+    @Override public MemoryContextWait queryMemoryWait(String tenantId,String executionId) {
+        return agentClient.queryMemoryWait(tenantId,executionId);
+    }
+    @Override public MemoryContextWait queryMemoryWait(String tenantId,String executionId,String eventRef) {
+        return agentClient.queryMemoryWait(tenantId,executionId,eventRef);
+    }
     @Override public MemoryResumeReceipt resumeMemoryExecution(String tenantId,String executionId,MemoryResumeRequest request) {
         return agentClient.resumeMemoryExecution(tenantId,executionId,request);
     }

@@ -30,13 +30,22 @@ def _fingerprint(value: object) -> str:
 
 
 class MySqlMemoryExecutionStore:
-    def __init__(self, engine: AsyncEngine, cipher: MemorySnapshotCipher):
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        cipher: MemorySnapshotCipher,
+        *,
+        refresh_schema_required: bool = False,
+    ):
         self.engine = engine
         self.cipher = cipher
+        self.refresh_schema_required = refresh_schema_required
 
     def _decode(self, row: Any) -> MemoryExecutionRecord:
         if row["state"] == "SCRUBBED":
             raise ValueError("MEMORY_ACCESS_REVOKED")
+        if self.refresh_schema_required and "current_context_fingerprint" not in row:
+            raise ValueError("MEMORY_REFRESH_SCHEMA_REQUIRED")
         tenant, execution, runtime = (
             bytes(row[key]).decode("utf-8")
             for key in ("tenant_id", "execution_id", "runtime_id")
@@ -55,7 +64,12 @@ class MySqlMemoryExecutionStore:
         if (
             context.packet.scope.tenant_id != tenant
             or context.packet.execution_id != execution
-            or _fingerprint(context.metadata()) != row.get("current_context_fingerprint", row["context_fingerprint"])
+            or _fingerprint(context.metadata())
+            != row[
+                "current_context_fingerprint"
+                if self.refresh_schema_required
+                else "context_fingerprint"
+            ]
         ):
             raise ValueError("MEMORY_SNAPSHOT_UNAVAILABLE")
         return MemoryExecutionRecord(
@@ -69,6 +83,7 @@ class MySqlMemoryExecutionStore:
             row["grant_epoch"],
             row["source_epoch"],
             row["deletion_epoch"],
+            row["key_version"],
         )
 
     async def get(
@@ -137,9 +152,19 @@ class MySqlMemoryExecutionStore:
                 await connection.execute(
                     text(
                         "INSERT INTO agent_memory_execution (tenant_id,execution_id,runtime_id,runtime_kind,request_fingerprint,"
-                        "context_fingerprint,current_context_fingerprint,snapshot_ciphertext,snapshot_nonce,key_version,original_deadline,execution_revision,"
+                        + (
+                            "context_fingerprint,current_context_fingerprint,"
+                            if self.refresh_schema_required
+                            else "context_fingerprint,"
+                        )
+                        + "snapshot_ciphertext,snapshot_nonce,key_version,original_deadline,execution_revision,"
                         "grant_epoch,source_epoch,deletion_epoch,state) VALUES (:tenant,:execution,:runtime,:kind,:fingerprint,"
-                        ":context_fingerprint,:context_fingerprint,:ciphertext,:nonce,:key_version,:deadline,:revision,:grant,:source,:deletion,'ACTIVE')"
+                        + (
+                            ":context_fingerprint,:context_fingerprint,"
+                            if self.refresh_schema_required
+                            else ":context_fingerprint,"
+                        )
+                        + ":ciphertext,:nonce,:key_version,:deadline,:revision,:grant,:source,:deletion,'ACTIVE')"
                     ),
                     params,
                 )
@@ -154,6 +179,7 @@ class MySqlMemoryExecutionStore:
                 packet.grant_epoch,
                 packet.source_epoch,
                 packet.deletion_epoch,
+                sealed.key_version,
             ), True
         except IntegrityError:
             original = await self.get(tenant, execution)
@@ -167,8 +193,13 @@ class MySqlMemoryExecutionStore:
             if original.state != "ACTIVE":
                 raise ValueError("MEMORY_ACCESS_REVOKED") from None
             return original, False
-        except SQLAlchemyError:
-            raise ValueError("MEMORY_AUTHORITY_UNAVAILABLE") from None
+        except SQLAlchemyError as exc:
+            code = getattr(getattr(exc, "orig", None), "args", (None,))[0]
+            raise ValueError(
+                "MEMORY_REFRESH_SCHEMA_REQUIRED"
+                if self.refresh_schema_required and code in {1054, 1146}
+                else "MEMORY_AUTHORITY_UNAVAILABLE"
+            ) from None
 
     async def invalidate(self, event: MemoryInvalidation) -> str:
         params = {

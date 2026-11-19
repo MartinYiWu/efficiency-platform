@@ -12,6 +12,10 @@ from efficiency_platform_agent.agents.hr.service import (
     HrRunControlStore,
     HrSkillService,
 )
+from efficiency_platform_agent.capabilities.model.memory_derive_handler import (
+    MEMORY_DERIVE_SKILL_ID,
+    MemoryDeriveHandler,
+)
 from efficiency_platform_agent.contracts.hr import HrSkillRequest
 from efficiency_platform_agent.core.memory_execution import MemoryExecutionStore
 from efficiency_platform_agent.core.paid_budget import PaidBudgetError
@@ -204,6 +208,8 @@ def build_hr_skill_router(
     authorize: Callable[[Request], Awaitable[str]] | None,
     *,
     memory_enabled: bool = False,
+    memory_derive_endpoint: MemoryDeriveHandler | None = None,
+    memory_derive_authorize: Callable[[Request], Awaitable[str]] | None = None,
 ) -> APIRouter:
     import json
 
@@ -211,16 +217,11 @@ def build_hr_skill_router(
 
     @router.post("/skill/execute", response_model=None)
     async def execute(request: Request) -> JSONResponse:
-        if endpoint is None or authorize is None:
+        if authorize is None and memory_derive_authorize is None:
             return JSONResponse(
                 status_code=503, content={"code": "HR_CONFIG_SERVICE_UNAVAILABLE"}
             )
         try:
-            tenant = await authorize(request)
-            if not tenant or tenant != request.headers.get("X-Tenant-ID"):
-                return JSONResponse(
-                    status_code=403, content={"code": "HR_PERMISSION_TENANT_MISMATCH"}
-                )
             raw = bytearray()
             async for chunk in request.stream():
                 if len(raw) + len(chunk) > 145000000:
@@ -228,6 +229,36 @@ def build_hr_skill_router(
                         status_code=413, content={"code": "HR_FILE_HTTP_SIZE_LIMIT"}
                     )
                 raw.extend(chunk)
+            routing = json.loads(raw)
+            if not isinstance(routing, dict) or type(routing.get("skillId")) is not int:
+                raise ValueError("HR_CONFIG_SKILL_UNKNOWN")
+            if routing["skillId"] == MEMORY_DERIVE_SKILL_ID:
+                from .memory_derive_routes import execute_memory_derive
+
+                if memory_derive_authorize is None:
+                    return JSONResponse(
+                        status_code=503,
+                        content={"code": "MEMORY_DERIVE_FEATURE_DISABLED"},
+                    )
+                tenant = await memory_derive_authorize(request)
+                if not tenant or tenant != request.headers.get("X-Tenant-ID"):
+                    return JSONResponse(
+                        status_code=403, content={"code": "DERIVE_SCOPE_MISMATCH"}
+                    )
+                return await execute_memory_derive(raw, tenant, memory_derive_endpoint)
+            internal_authorize = authorize or memory_derive_authorize
+            assert internal_authorize is not None
+            tenant = await internal_authorize(request)
+            if not tenant or tenant != request.headers.get("X-Tenant-ID"):
+                return JSONResponse(
+                    status_code=403, content={"code": "HR_PERMISSION_TENANT_MISMATCH"}
+                )
+            if routing["skillId"] not in SKILLS:
+                raise ValueError("HR_CONFIG_SKILL_UNKNOWN")
+            if endpoint is None or authorize is None:
+                return JSONResponse(
+                    status_code=503, content={"code": "HR_CONFIG_SERVICE_UNAVAILABLE"}
+                )
             body = SkillExecuteRequest.model_validate_json(raw)
             payload = HrSkillRequest.model_validate_json(body.input)
             scope = await authorize_memory_context(

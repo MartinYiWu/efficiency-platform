@@ -17,6 +17,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AiAgentManagementService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private MemoryPromotionAssetGuard promotionGuard;
     private static final String USER_ID = "1";
     private static final Map<String, String> NEXT_STATUS = Map.of(
             "DRAFT", "VALIDATED", "VALIDATED", "RELEASED", "RELEASED", "RETIRED");
@@ -58,11 +60,18 @@ public class AiAgentManagementService {
     public AgentVersionPO createVersion(
             String agentId, String semanticVersion, String graphKey,
             String graphVersion, String changeSummary, String sourceVersionId) {
+        return createVersion(agentId,semanticVersion,graphKey,graphVersion,changeSummary,sourceVersionId,USER_ID);
+    }
+
+    /** 内部有权晋升沿现草稿管线，实际操作者不再冒用legacy USER_ID。 */
+    @Transactional
+    public AgentVersionPO createVersion(String agentId,String semanticVersion,String graphKey,
+            String graphVersion,String changeSummary,String sourceVersionId,String actorId) {
         requiredAgent(agentId);
         AgentVersionPO value = new AgentVersionPO(
                 UUID.randomUUID().toString(), agentId, required(semanticVersion, "版本号"),
                 required(graphKey, "Graph 编码"), required(graphVersion, "Graph 版本"),
-                "DRAFT", required(changeSummary, "变更说明"), USER_ID,
+                "DRAFT", required(changeSummary, "变更说明"), required(actorId,"操作人"),
                 LocalDateTime.now(), null);
         repository.insertAgentVersion(value);
         if (sourceVersionId != null && !sourceVersionId.isBlank()) {
@@ -109,6 +118,8 @@ public class AiAgentManagementService {
             String id, String semanticVersion, String graphKey,
             String graphVersion, String changeSummary) {
         AgentVersionPO current = requiredVersion(id);
+        if(current.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)&&!current.changeSummary().equals(changeSummary))
+            throw new AiManagementException("MEMORY_PROMOTION_APPROVAL_ROUTE_REQUIRED","经验候选不允许移除来源标记");
         mutable(current.status());
         AgentVersionPO value = new AgentVersionPO(
                 current.id(), current.agentDefinitionId(), required(semanticVersion, "版本号"),
@@ -121,8 +132,17 @@ public class AiAgentManagementService {
 
     @Transactional
     public AgentVersionPO transition(String id, String targetStatus) {
+        return transition(id,targetStatus,null);
+    }
+
+    @Transactional
+    public AgentVersionPO transition(String id,String targetStatus,com.aiep.identity.api.IdentityFacade.Subject actor) {
         AgentVersionPO current = requiredVersion(id);
         String target = required(targetStatus, "目标状态").toUpperCase();
+        if(current.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)) {
+            if(promotionGuard==null)throw new AiManagementException("MEMORY_PROMOTION_APPROVAL_ROUTE_REQUIRED","经验资产必须经原审批路径");
+            promotionGuard.transition("AGENT",id,target,actor);
+        }
         if (!target.equals(NEXT_STATUS.get(current.status()))) {
             throw new AiManagementException("AI_ASSET_STATE_INVALID", "Agent 版本状态流转无效");
         }

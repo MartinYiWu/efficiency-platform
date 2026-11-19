@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.aiep.aihub.repository.memory.MemoryLifecycleMapper">
+ <select id="episodeScrubbed" resultType="int">SELECT COUNT(*) FROM ai_memory_episode WHERE tenant_id=#{tenant} AND id=#{id} AND #{version}=_binary'1' AND status='REVOKED' AND encrypted_payload IS NULL AND nonce IS NULL AND auth_tag IS NULL AND content_hmac IS NULL AND shared_payload IS NULL AND shared_nonce IS NULL AND shared_tag IS NULL AND shared_hmac IS NULL</select>
+ <select id="proposalScrubbed" resultType="int">SELECT COUNT(*) FROM ai_memory_proposal WHERE tenant_id=#{tenant} AND id=#{id} AND id=#{version} AND status&lt;&gt;'PENDING' AND encrypted_payload IS NULL AND nonce IS NULL AND auth_tag IS NULL AND content_hmac IS NULL AND index_status='NOT_REQUESTED'</select>
  <select id="sourceTombstone" resultType="int">SELECT COUNT(*) FROM ai_memory_tombstone WHERE tenant_id=#{tenant} AND target_type='SOURCE' AND target_id=#{source} AND deletion_epoch&gt;=#{epoch}</select>
  <select id="versionProofs" resultType="com.aiep.aihub.repository.memory.MemoryLifecycleMapper$VersionProof">
   SELECT v.status,p.policy_json FROM ai_memory_version v LEFT JOIN ai_memory_policy_version p ON p.tenant_id=v.tenant_id AND p.policy_id=v.policy_id AND p.version_id=v.policy_version_id WHERE v.tenant_id=#{tenant} AND v.item_id=#{item} <if test="version != null">AND v.id=#{version}</if> ORDER BY v.id

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemoryIndexMapper">
+ <sql id="columns">tenant_id,id,user_id,domain,item_id,version_id,generation,deletion_epoch,source_fingerprint,embedding_model,dimension,policy_version,execution_id,task_id,execution_scope_json,expires_at,state,request_id,request_fingerprint,delete_epoch,delete_receipt_ref</sql>
+ <select id="find" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE tenant_id=#{tenant} AND id=#{id} FOR UPDATE</select>
+ <select id="requested" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE tenant_id=#{tenant} AND request_id=#{request} FOR UPDATE</select>
+ <select id="ready" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE tenant_id=#{tenant} AND user_id=#{user} AND domain=#{domain} AND state='READY' AND expires_at&gt;UTC_TIMESTAMP(6) ORDER BY item_id,generation DESC LIMIT 10001</select>
+ <select id="itemJobs" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE tenant_id=#{tenant} AND item_id=#{item} ORDER BY id FOR UPDATE</select>
+ <insert id="insert">INSERT INTO ai_memory_index_job(<include refid="columns"/>) VALUES(#{row.tenantId},#{row.id},#{row.userId},#{row.domain},#{row.itemId},#{row.versionId},#{row.generation},#{row.deletionEpoch},#{row.sourceFingerprint},#{row.embeddingModel},#{row.dimension},#{row.policyVersion},#{row.executionId},#{row.taskId},#{row.executionScopeJson},#{row.expiresAt},#{row.state},#{row.requestId},#{row.requestFingerprint},#{row.deleteEpoch},#{row.deleteReceiptRef,jdbcType=VARCHAR})</insert>
+ <update id="transition">UPDATE ai_memory_index_job SET state=#{state} WHERE tenant_id=#{tenant} AND id=#{id} AND state=#{expected}</update>
+ <update id="completeOutbox">UPDATE ai_memory_outbox SET status='SUCCEEDED',revision=revision+1 WHERE tenant_id=#{tenant} AND event_id=#{id} AND event_type='MEMORY_INDEX_REQUESTED' AND status='QUEUED'</update>
+ <select id="indexTablePresent" resultType="int">SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='ai_memory_index_job'</select>
+ <select id="pendingDeletes" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE state='DELETE_PENDING' ORDER BY tenant_id,id LIMIT #{limit}</select>
+ <select id="expiredReady" resultType="com.aiep.aihub.repository.memory.MemoryIndexMapper$Job">SELECT <include refid="columns"/> FROM ai_memory_index_job WHERE state='READY' AND expires_at&lt;=UTC_TIMESTAMP(6) ORDER BY expires_at,tenant_id,id LIMIT #{limit}</select>
+ <update id="markDelete">UPDATE ai_memory_index_job SET state='DELETE_PENDING',delete_epoch=GREATEST(delete_epoch,#{epoch}) WHERE tenant_id=#{tenant} AND id=#{id} AND state IN ('QUEUED','SENDING','READY','UNKNOWN')</update>
+ <update id="confirmDeleted">UPDATE ai_memory_index_job SET state='DELETED',delete_receipt_ref=#{receipt} WHERE tenant_id=#{tenant} AND id=#{id} AND state='DELETE_PENDING' AND delete_epoch=#{epoch}</update>
+</mapper>

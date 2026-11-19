@@ -108,6 +108,12 @@ public class JdbcAiManagementMappers implements AiManagementMappers {
         return jdbc.query("SELECT * FROM ai_prompt_version WHERE prompt_definition_id=? ORDER BY created_at DESC", PROMPT_VERSION, promptId);
     }
     @Override public PromptVersionPO findPromptVersion(String id) { return one("SELECT * FROM ai_prompt_version WHERE id=?", PROMPT_VERSION, id); }
+    @Override public List<PromptVersionPO> findPromptVersionsBySnapshot(String key,String semanticVersion,String checksum) {
+        return jdbc.query("SELECT v.id,v.prompt_definition_id,v.semantic_version,v.status,v.checksum,v.change_summary,v.created_by,v.created_at,v.published_at "
+                +"FROM ai_prompt_version v JOIN ai_prompt_definition d ON d.id=v.prompt_definition_id "
+                +"WHERE CAST(d.prompt_key AS BINARY)=CAST(? AS BINARY) AND CAST(v.semantic_version AS BINARY)=CAST(? AS BINARY) "
+                +"AND CAST(v.checksum AS BINARY)=CAST(? AS BINARY) LIMIT 2",PROMPT_VERSION,key,semanticVersion,checksum);
+    }
     @Override public void insertPromptVersion(PromptVersionPO v) {
         jdbc.update("INSERT INTO ai_prompt_version (id,prompt_definition_id,semantic_version,status,checksum,change_summary,created_by,created_at,published_at) VALUES (?,?,?,?,?,?,?,?,?)",
                 v.id(), v.promptDefinitionId(), v.semanticVersion(), v.status(), v.checksum(), v.changeSummary(), v.createdBy(), v.createdAt(), v.publishedAt());

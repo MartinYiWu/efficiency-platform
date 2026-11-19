@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from hashlib import sha256
 from time import perf_counter
 from typing import TypeVar
@@ -18,6 +19,8 @@ from efficiency_platform_agent.core.execution_control import (
     RunControl,
     current_run_control,
 )
+from efficiency_platform_agent.core.knowledge_lineage import knowledge_stage_input
+from efficiency_platform_agent.core.memory import SourceDependency
 from efficiency_platform_agent.core.paid_budget import PaidBudgetError
 from efficiency_platform_agent.core.ports import ModelProvider, StreamingModelProvider
 from efficiency_platform_agent.core.run import (
@@ -26,8 +29,13 @@ from efficiency_platform_agent.core.run import (
     ProviderMessage,
     ProviderRequest,
 )
+from efficiency_platform_agent.core.run_context_binding import (
+    RunContextBinding,
+    bind_run_context,
+)
 
 from .chunking import count_tokens
+from .memory_lineage import stage_dependencies
 from .release_bundle import CustomerServiceReleaseBundle, ModelPolicy, PromptMessage
 
 T = TypeVar("T", bound=BaseModel)
@@ -186,6 +194,8 @@ class ReleaseStructuredModelGateway:
         self.bundle = bundle
         self.model_policy = bundle.model_policy
         self._control = current_run_control() or RunControl()
+        self._binding_supplier: Callable[[], RunContextBinding] | None = None
+        self._knowledge_seen: set[SourceDependency] = set()
 
     def with_model_policy(self, policy: ModelPolicy) -> ReleaseStructuredModelGateway:
         if policy not in (
@@ -196,7 +206,24 @@ class ReleaseStructuredModelGateway:
         gateway = ReleaseStructuredModelGateway(self.provider, self.bundle)
         gateway.model_policy = policy
         gateway._control = self._control
+        gateway._binding_supplier = self._binding_supplier
+        gateway._knowledge_seen = self._knowledge_seen
         return gateway
+
+    def bind_run_context_supplier(
+        self, supplier: Callable[[], RunContextBinding]
+    ) -> None:
+        if self._binding_supplier is not None:
+            raise PermissionError("MEMORY_RUN_BINDING_CONFLICT")
+        self._binding_supplier = supplier
+
+    @contextmanager
+    def _binding_scope(self) -> Iterator[None]:
+        if self._binding_supplier is None:
+            yield
+        else:
+            with bind_run_context(self._binding_supplier()):
+                yield
 
     def _operation_key(
         self, stage_key: str, input_value: object, output_type: type[BaseModel]
@@ -244,13 +271,14 @@ class ReleaseStructuredModelGateway:
         input_value: object,
         output_type: type[T],
     ) -> T:
-        control = current_run_control() or self._control
-        result = await control.execute(
-            self._operation_key(stage_key, input_value, output_type),
-            lambda: self._complete(stage_key, input_value, output_type),
-            recoverable_codes=RECOVERABLE_CODES,
-        )
-        return result.model_copy(deep=True)
+        with self._binding_scope():
+            control = current_run_control() or self._control
+            result = await control.execute(
+                self._operation_key(stage_key, input_value, output_type),
+                lambda: self._complete(stage_key, input_value, output_type),
+                recoverable_codes=RECOVERABLE_CODES,
+            )
+            return result.model_copy(deep=True)
 
     async def _complete(
         self,
@@ -299,14 +327,16 @@ class ReleaseStructuredModelGateway:
                         ),
                     ),
                 )
-            result = await self.provider.complete(
-                ProviderRequest(
-                    contract_version="provider-request/1",
-                    messages=attempt_messages,
-                    options=options,
-                    timeout_ms=policy.read_timeout_ms,
-                )
+            actual_request = ProviderRequest(
+                contract_version="provider-request/1",
+                messages=attempt_messages,
+                options=options,
+                timeout_ms=policy.read_timeout_ms,
             )
+            with knowledge_stage_input(
+                actual_request, stage_dependencies(input_value, self._knowledge_seen)
+            ):
+                result = await self.provider.complete(actual_request)
             if result.error is not None:
                 if result.error.category == "budget":
                     raise PaidBudgetError(result.error.code, result.error.safe_message)
@@ -354,21 +384,22 @@ class ReleaseStructuredModelGateway:
         output_type: type[T],
         on_content: Callable[[str], None],
     ) -> T:
-        if not isinstance(self.provider, StreamingModelProvider):
-            return await self.complete(stage_key, input_value, output_type)
-        control = current_run_control() or self._control
-        key = self._operation_key(stage_key, input_value, output_type)
-        shared = key in control.results or key in control.pending
-        result = await control.execute(
-            key,
-            lambda: self._stream_complete(
-                stage_key, input_value, output_type, on_content
-            ),
-            recoverable_codes=RECOVERABLE_CODES,
-        )
-        if shared:
-            on_content(result.model_dump_json())
-        return result.model_copy(deep=True)
+        with self._binding_scope():
+            if not isinstance(self.provider, StreamingModelProvider):
+                return await self.complete(stage_key, input_value, output_type)
+            control = current_run_control() or self._control
+            key = self._operation_key(stage_key, input_value, output_type)
+            shared = key in control.results or key in control.pending
+            result = await control.execute(
+                key,
+                lambda: self._stream_complete(
+                    stage_key, input_value, output_type, on_content
+                ),
+                recoverable_codes=RECOVERABLE_CODES,
+            )
+            if shared:
+                on_content(result.model_dump_json())
+            return result.model_copy(deep=True)
 
     async def _stream_complete(
         self,
@@ -408,15 +439,23 @@ class ReleaseStructuredModelGateway:
         )
         parts: list[str] = []
         finished = False
-        async for chunk in self.provider.stream(request):
-            if chunk.error is not None:
-                if chunk.error.category == "budget":
-                    raise PaidBudgetError(chunk.error.code, chunk.error.safe_message)
-                raise StructuredModelError(chunk.error.code, chunk.error.safe_message)
-            if chunk.delta:
-                parts.append(chunk.delta)
-                on_content("".join(parts))
-            finished = finished or chunk.finish_reason is not None
+        with knowledge_stage_input(
+            request, stage_dependencies(input_value, self._knowledge_seen)
+        ):
+            iterator = self.provider.stream(request)
+            async for chunk in iterator:
+                if chunk.error is not None:
+                    if chunk.error.category == "budget":
+                        raise PaidBudgetError(
+                            chunk.error.code, chunk.error.safe_message
+                        )
+                    raise StructuredModelError(
+                        chunk.error.code, chunk.error.safe_message
+                    )
+                if chunk.delta:
+                    parts.append(chunk.delta)
+                    on_content("".join(parts))
+                finished = finished or chunk.finish_reason is not None
         if not finished:
             raise StructuredModelError(
                 "PROVIDER_RESPONSE_TRUNCATED", "模型流未正常结束"

@@ -9,6 +9,8 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcKnowledgeMappers implements KnowledgeMappers {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private KnowledgeSourceEventRepository memoryEvents;
     private static final DataClassRowMapper<KnowledgeBasePO> BASE_ROW = DataClassRowMapper.newInstance(KnowledgeBasePO.class);
     private static final DataClassRowMapper<KnowledgeDirectoryPO> DIRECTORY_ROW = DataClassRowMapper.newInstance(KnowledgeDirectoryPO.class);
     private static final DataClassRowMapper<KnowledgeDocumentPO> DOCUMENT_ROW = DataClassRowMapper.newInstance(KnowledgeDocumentPO.class);
@@ -29,9 +31,11 @@ public class JdbcKnowledgeMappers implements KnowledgeMappers {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public void updateBase(KnowledgeBasePO v) {
         jdbc.update("UPDATE kb_knowledge_base SET name=?,description=?,knowledge_type=?,status=?,updated_by=?,updated_at=? WHERE id=? AND tenant_id=?",
                 v.name(), v.description(), v.knowledgeType(), v.status(), v.updatedBy(), v.updatedAt(), v.id(), v.tenantId());
+        if(memoryEvents!=null)memoryEvents.changed(v.id(),"BASE_POLICY_CHANGED");
     }
 
     @Override public KnowledgeBasePO findBase(String tenantId, String id) {
@@ -99,8 +103,9 @@ public class JdbcKnowledgeMappers implements KnowledgeMappers {
         jdbc.update("INSERT INTO kb_document_version (id,document_id,version_no,file_id,file_sha256,content_type,change_summary,effective_date,status,parse_metadata,error_code,error_message,created_by,created_at,published_at,evidence_mode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 v.id(), v.documentId(), v.versionNo(), v.fileId(), v.fileSha256(), v.contentType(), v.changeSummary(), v.effectiveDate(), v.status(), v.parseMetadata(), v.errorCode(), v.errorMessage(), v.createdBy(), v.createdAt(), v.publishedAt(), v.evidenceMode());
     }
-    @Override public void updateVersionState(String id, String status, String errorCode, String errorMessage) {
+    @Override @org.springframework.transaction.annotation.Transactional public void updateVersionState(String id, String status, String errorCode, String errorMessage) {
         jdbc.update("UPDATE kb_document_version SET status=?,error_code=?,error_message=? WHERE id=?", status, errorCode, errorMessage, id);
+        if(memoryEvents!=null)memoryEvents.versionChanged(id);
     }
     @Override public KnowledgeDocumentVersionPO findVersion(String id) { return one("SELECT * FROM kb_document_version WHERE id=?", VERSION_ROW, id); }
     @Override public List<KnowledgeDocumentVersionPO> listVersions(String documentId) { return jdbc.query("SELECT * FROM kb_document_version WHERE document_id=? ORDER BY version_no DESC", VERSION_ROW, documentId); }

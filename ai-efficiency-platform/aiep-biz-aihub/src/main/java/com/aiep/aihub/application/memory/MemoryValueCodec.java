@@ -43,13 +43,15 @@ public class MemoryValueCodec {
   cipher.updateAAD(MemoryMapper.aad(tenant,item,version,current));byte[] all=cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
   return new Sealed(Arrays.copyOf(all,all.length-16),nonce,Arrays.copyOfRange(all,all.length-16,all.length),hmac(tenant,"value",value),current);
  }catch(GeneralSecurityException failure){throw new MemoryException("MEMORY_KEY_UNAVAILABLE");}}
- public String open(MemoryMapper.VersionRow row){require();try{
-  byte[] key=keys.get(row.keyVersion());if(key==null)throw new GeneralSecurityException();
-  Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,row.nonce()));
-  cipher.updateAAD(MemoryMapper.aad(row.tenantId(),row.itemId(),row.id(),row.keyVersion()));
-  byte[] all=ByteBuffer.allocate(row.encryptedPayload().length+row.authTag().length).put(row.encryptedPayload()).put(row.authTag()).array();
+ public String open(MemoryMapper.VersionRow row){return openSealed(row.tenantId(),row.itemId(),row.id(),new Sealed(row.encryptedPayload(),row.nonce(),row.authTag(),row.contentHmac(),row.keyVersion()));}
+ /** 摘要计划/段使用独立AAD对象前缀；调用方先核归属、状态和来源，解密不授予访问权。 */
+ public String openSealed(byte[] tenant,byte[] object,byte[] version,Sealed sealed){require();try{
+  byte[] key=keys.get(sealed.keyVersion());if(key==null||sealed.payload()==null||sealed.tag()==null||sealed.nonce()==null||sealed.hmac()==null)throw new GeneralSecurityException();
+  Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.DECRYPT_MODE,new SecretKeySpec(key,"AES"),new GCMParameterSpec(128,sealed.nonce()));
+  cipher.updateAAD(MemoryMapper.aad(tenant,object,version,sealed.keyVersion()));
+  byte[] all=ByteBuffer.allocate(sealed.payload().length+sealed.tag().length).put(sealed.payload()).put(sealed.tag()).array();
   String value=new String(cipher.doFinal(all),StandardCharsets.UTF_8);
-  if(!MessageDigest.isEqual(row.contentHmac(),hmac(row.tenantId(),"value",value)))throw new GeneralSecurityException();return value;
+  if(!MessageDigest.isEqual(sealed.hmac(),hmac(tenant,"value",value)))throw new GeneralSecurityException();return value;
  }catch(GeneralSecurityException|IllegalArgumentException failure){throw new MemoryException("MEMORY_KEY_UNAVAILABLE");}}
  public record Sealed(byte[] payload,byte[] nonce,byte[] tag,byte[] hmac,String keyVersion){}
 }

@@ -4,8 +4,16 @@ from collections.abc import Mapping
 from dataclasses import replace
 from time import time
 
+from efficiency_platform_agent.context.controller import (
+    ExactHistoryContextPolicy,
+    OriginalHistorySnapshot,
+)
 from efficiency_platform_agent.context.dispatch import DispatchPlan
-from efficiency_platform_agent.context.policy import ContextPiece, ContextPolicy
+from efficiency_platform_agent.context.policy import (
+    ContextPiece,
+    ContextPolicy,
+    render_context_messages,
+)
 from efficiency_platform_agent.core.context_dispatch import current_model_stage
 from efficiency_platform_agent.core.context_ports import (
     ContextMetadata,
@@ -15,10 +23,19 @@ from efficiency_platform_agent.core.execution_control import (
     current_operation_key,
     current_run_control,
 )
+from efficiency_platform_agent.core.knowledge_lineage import (
+    current_knowledge_stage_input,
+)
 from efficiency_platform_agent.core.memory import ExecutionScope
 from efficiency_platform_agent.core.memory_execution import MemoryExecutionStore
+from efficiency_platform_agent.core.memory_lineage import current_specialist_input
 from efficiency_platform_agent.core.run import ProviderMessage, ProviderRequest
 from efficiency_platform_agent.core.run_context_binding import current_run_context
+from efficiency_platform_agent.harness.memory_summary_context import (
+    MemorySummaryContextPort,
+    project_csr_original_messages,
+    project_original_messages,
+)
 from efficiency_platform_agent.memory.execution_authority import (
     StoredMemoryPacketValidator,
 )
@@ -34,6 +51,8 @@ class ServerDispatchAuthority:
         execution_agents: Mapping[str, tuple[str, str]] | None = None,
         *,
         memory_execution_store: MemoryExecutionStore | None = None,
+        summary_context_port: MemorySummaryContextPort | None = None,
+        specialist_lineage_enabled: bool = False,
     ):
         self._published = {
             key: value if isinstance(value, tuple) else (value,)
@@ -41,6 +60,8 @@ class ServerDispatchAuthority:
         }
         self._execution_agents = dict(execution_agents or {})
         self.memory_execution_store = memory_execution_store
+        self.summary_context_port = summary_context_port
+        self.specialist_lineage_enabled = specialist_lineage_enabled
 
     @staticmethod
     def _validate_limits(metadata: ContextMetadata) -> None:
@@ -175,16 +196,46 @@ class ServerDispatchAuthority:
             if self.memory_execution_store is None:
                 raise ValueError("MEMORY_AUTHORITY_REQUIRED")
             context = binding.memory_context
+            specialist = None
+            knowledge = None
+            if (
+                binding.conversation.domain == "customer-service"
+                and context.knowledge_context_json is not None
+            ):
+                knowledge = current_knowledge_stage_input()
+                if (
+                    knowledge is None
+                    or knowledge.request != request
+                    or not set(knowledge.dependencies).issubset(
+                        context.packet.safety_dependencies
+                    )
+                ):
+                    raise ValueError("MEMORY_KNOWLEDGE_LINEAGE_ADAPTER_REQUIRED")
             if binding.conversation.domain == "customer-service" and node_id not in {
                 "customer-service:intent",
                 "customer-service:answer_general",
             }:
-                raise ValueError("MEMORY_KNOWLEDGE_LINEAGE_ADAPTER_REQUIRED")
+                knowledge = current_knowledge_stage_input()
+                if (
+                    context.knowledge_context_json is None
+                    or knowledge is None
+                    or knowledge.request != request
+                    or not set(knowledge.dependencies).issubset(
+                        context.packet.safety_dependencies
+                    )
+                ):
+                    raise ValueError("MEMORY_KNOWLEDGE_LINEAGE_ADAPTER_REQUIRED")
             if binding.conversation.domain == "operations" and node_id not in {
                 "intent",
                 "direct",
             }:
-                raise ValueError("MEMORY_EXPERT_LINEAGE_ADAPTER_REQUIRED")
+                specialist = current_specialist_input()
+                if (
+                    not self.specialist_lineage_enabled
+                    or specialist is None
+                    or specialist.slice.scope != scope
+                ):
+                    raise ValueError("MEMORY_EXPERT_LINEAGE_ADAPTER_REQUIRED")
             if any(
                 message.role == "tool" or message.tool_calls
                 for message in request.messages
@@ -202,10 +253,65 @@ class ServerDispatchAuthority:
                 else frozenset(),
                 operation,
             )
-            input_dependencies = context.input_dependencies
+            input_dependencies = (
+                knowledge.dependencies
+                if knowledge is not None
+                else specialist.slice.source_dependencies
+                if specialist is not None
+                else context.input_dependencies
+            )
             if not input_dependencies:
                 raise ValueError("MEMORY_CURRENT_INPUT_DEPENDENCIES_REQUIRED")
             pieces = (replace(pieces[0], safety_dependencies=input_dependencies),)
+            if (
+                self.summary_context_port is not None
+                and binding.conversation.domain == "operations"
+                and node_id == "direct"
+                and request.contract_version == "general-conversation/1"
+            ):
+                projections = await self.summary_context_port.original_messages(
+                    scope, packet
+                )
+                projected = project_original_messages(
+                    request,
+                    scope,
+                    projections,
+                    required_dependencies=input_dependencies,
+                )
+                if projected is not None and all(
+                    set(piece.safety_dependencies).issubset(packet.safety_dependencies)
+                    for piece in projected
+                ):
+                    pieces = projected
+                    policy = ExactHistoryContextPolicy(
+                        metadata.node_id,
+                        metadata.policy_version,
+                        scope,
+                        allowed_message_ids=frozenset(
+                            identifier
+                            for piece in projected
+                            for identifier in piece.covered_message_ids
+                        ),
+                        original_history_snapshot=OriginalHistorySnapshot(
+                            scope,
+                            packet.packet_id,
+                            packet.packet_revision,
+                            request.messages,
+                            frozenset(
+                                identifier
+                                for piece in projected
+                                for identifier in piece.covered_message_ids
+                            ),
+                        ),
+                    )
+            if self.summary_context_port is not None and binding.conversation.domain=="customer-service" and node_id=="customer-service:answer_general" and context.summary_context_json is not None:
+                projections=await self.summary_context_port.original_messages(scope,packet)
+                projected_csr=project_csr_original_messages(request,scope,projections,required_dependencies=input_dependencies)
+                if projected_csr is not None:
+                    pieces,renderer=projected_csr
+                    policy=ExactHistoryContextPolicy(metadata.node_id,metadata.policy_version,scope,
+                        allowed_message_ids=frozenset(identifier for piece in pieces for identifier in piece.covered_message_ids),
+                        original_history_snapshot=OriginalHistorySnapshot(scope,packet.packet_id,packet.packet_revision,request.messages,frozenset(identifier for piece in pieces for identifier in piece.covered_message_ids)),json_history=renderer)
             for item in selection.items:
                 message = ProviderMessage(
                     "user",
@@ -226,9 +332,7 @@ class ServerDispatchAuthority:
             policy = replace(policy, authorized_dependencies=packet.safety_dependencies)
             final_request = replace(
                 request,
-                messages=tuple(
-                    message for piece in pieces for message in piece.messages
-                ),
+                messages=render_context_messages(policy,pieces),
             )
             return DispatchPlan(
                 scope, policy, pieces, metadata, operation, packet, final_request

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.aiep.aihub.repository.memory.MemorySummaryMapper">
+ <sql id="wmColumns">tenant_id,scope_key,user_id,domain,top_level_agent_id,session_id,revision,source_revision,next_sequence,commit_revision,covered_through,deletion_epoch</sql>
+ <sql id="planColumns">tenant_id,scope_key,id,execution_id,task_id,original_session_ref,policy_id,policy_version_id,session_revision,source_revision,commit_revision,original_deadline,expires_at,fingerprint,key_version,encrypted_payload,nonce,auth_tag,content_hmac,state,transport_fingerprint</sql>
+ <sql id="segmentColumns">tenant_id,scope_key,id,plan_id,first_sequence,last_sequence,commit_revision,expires_at,payload_digest,key_version,encrypted_payload,nonce,auth_tag,content_hmac,state</sql>
+ <insert id="ensureWatermark">
+  INSERT INTO ai_memory_summary_watermark(tenant_id,scope_key,user_id,domain,top_level_agent_id,session_id)
+  VALUES(#{row.tenantId},#{row.scopeKey},#{row.userId},#{row.domain},#{row.topLevelAgentId},#{row.sessionId})
+  ON DUPLICATE KEY UPDATE scope_key=VALUES(scope_key)
+ </insert>
+ <select id="lockWatermark" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$WatermarkPO">
+  SELECT <include refid="wmColumns"/> FROM ai_memory_summary_watermark WHERE tenant_id=#{tenant} AND scope_key=#{scope} FOR UPDATE
+ </select>
+ <update id="advanceSource">UPDATE ai_memory_summary_watermark SET revision=revision+1,source_revision=source_revision+1,next_sequence=next_sequence+1
+  WHERE tenant_id=#{row.tenantId} AND scope_key=#{row.scopeKey} AND revision=#{row.revision} AND deletion_epoch=#{row.deletionEpoch}</update>
+ <update id="commitWatermark">UPDATE ai_memory_summary_watermark SET revision=revision+1,commit_revision=commit_revision+1,covered_through=#{last}
+  WHERE tenant_id=#{row.tenantId} AND scope_key=#{row.scopeKey} AND revision=#{row.revision} AND commit_revision=#{expectedCommit}
+   AND covered_through&lt;#{last} AND deletion_epoch=#{row.deletionEpoch}</update>
+ <update id="forgetWatermark">UPDATE ai_memory_summary_watermark SET revision=revision+1,source_revision=source_revision+1,commit_revision=commit_revision+1,deletion_epoch=deletion_epoch+1
+  WHERE tenant_id=#{row.tenantId} AND scope_key=#{row.scopeKey} AND revision=#{row.revision}</update>
+ <sql id="messageFrom">
+  <choose>
+   <when test="domain == 'operations'">FROM ai_operation_message m JOIN ai_operation_conversation c ON c.id=m.conversation_id JOIN ai_operation_run r ON r.id=m.run_id</when>
+   <when test="domain == 'customer-service'">FROM ai_customer_service_message m JOIN ai_customer_service_conversation c ON c.id=m.conversation_id JOIN ai_customer_service_run r ON r.id=m.run_id</when>
+   <otherwise>FROM ai_operation_message m JOIN ai_operation_conversation c ON 1=0 JOIN ai_operation_run r ON 1=0</otherwise>
+  </choose>
+ </sql>
+ <sql id="messageBody"><choose><when test="domain == 'customer-service'">m.content_markdown</when><otherwise>m.content</otherwise></choose></sql>
+ <sql id="messageColumns">CAST(m.id AS BINARY) AS id,CAST(m.run_id AS BINARY) AS run_id,<include refid="messageBody"/> AS body,
+  SHA2(CAST(<include refid="messageBody"/> AS BINARY),256) AS content_hash,m.role,
+  (LOWER(r.status)='succeeded'<if test="domain == 'customer-service'"> AND m.status='COMPLETED'</if>) AS completed</sql>
+ <sql id="messageOwner">CAST(m.tenant_id AS BINARY)=#{tenant} AND CAST(c.tenant_id AS BINARY)=#{tenant} AND CAST(r.tenant_id AS BINARY)=#{tenant}
+  AND CAST(c.user_id AS BINARY)=#{user} AND CAST(c.id AS BINARY)=#{session} AND CAST(r.conversation_id AS BINARY)=#{session}
+  AND c.status IN ('ACTIVE','ARCHIVED') AND LOWER(m.role) IN ('user','assistant')</sql>
+ <select id="lockMessage" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$MessagePO">
+  SELECT <include refid="messageColumns"/> <include refid="messageFrom"/> WHERE <include refid="messageOwner"/> AND CAST(m.id AS BINARY)=#{message} FOR UPDATE
+ </select>
+ <select id="listGroup" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$MessagePO">
+  SELECT <include refid="messageColumns"/> <include refid="messageFrom"/> WHERE <include refid="messageOwner"/> AND CAST(m.run_id AS BINARY)=#{run}
+  ORDER BY m.created_at<if test="domain == 'customer-service'">,CASE WHEN LOWER(m.role)='user' THEN 0 ELSE 1 END</if>,CAST(m.id AS BINARY) FOR UPDATE
+ </select>
+ <select id="lockInputMessage" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$MessagePO">
+  SELECT <include refid="messageColumns"/> <include refid="messageFrom"/>
+  JOIN ai_memory_source s ON s.tenant_id=#{tenant} AND s.source_object_ref=CAST(m.id AS BINARY)
+  WHERE <include refid="messageOwner"/> AND s.id=#{source} AND s.source_type='CURRENT_USER_MESSAGE' AND LOWER(m.role)='user'
+   AND s.source_version=CAST(SHA2(CAST(<include refid="messageBody"/> AS BINARY),256) AS BINARY) FOR UPDATE
+ </select>
+ <select id="findAnchor" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$AnchorPO">
+  SELECT p.execution_id,p.task_id,p.user_id,a.original_session_ref,p.original_deadline FROM ai_memory_packet p
+  JOIN ai_memory_packet_refresh a ON a.tenant_id=p.tenant_id AND a.execution_id=p.execution_id AND a.record_kind='ANCHOR'
+  WHERE p.tenant_id=#{tenant} AND p.execution_id=#{execution} AND a.user_id=p.user_id AND a.original_deadline=p.original_deadline
+ </select>
+ <select id="lockPublishedPolicy" resultType="com.aiep.aihub.repository.memory.MemoryMapper$PolicyPO">
+  SELECT p.id,v.version_id,v.policy_json,v.content_hmac,v.schema_version FROM ai_memory_policy p JOIN ai_memory_policy_version v
+   ON v.tenant_id=p.tenant_id AND v.policy_id=p.id AND v.version_id=p.current_version_id
+  WHERE p.tenant_id=#{tenant} AND p.domain=#{domain} AND p.enabled=TRUE ORDER BY p.id LIMIT 2 LOCK IN SHARE MODE
+ </select>
+ <select id="findSource" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$SourcePO">
+  SELECT tenant_id,scope_key,message_id,content_hash,sequence_no,group_id,group_members_json,dependencies_json,policy_id,policy_version_id,expires_at
+  FROM ai_memory_summary_source WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND message_id=#{message} FOR UPDATE
+ </select>
+ <insert id="insertSource">INSERT INTO ai_memory_summary_source(tenant_id,scope_key,message_id,content_hash,sequence_no,group_id,group_members_json,dependencies_json,policy_id,policy_version_id,expires_at)
+  VALUES(#{row.tenantId},#{row.scopeKey},#{row.messageId},#{row.contentHash},#{row.sequenceNo},#{row.groupId},#{row.groupMembersJson},#{row.dependenciesJson},#{row.policyId},#{row.policyVersionId},#{row.expiresAt})</insert>
+ <insert id="insertMessageSource">INSERT INTO ai_memory_source(tenant_id,id,source_type,source_object_ref,source_version,trust_level,retention_deadline)
+  VALUES(#{tenant},#{message},'MESSAGE',#{message},#{version},'JAVA_AUTHORIZED',#{expires})</insert>
+ <insert id="insertSummarySource">INSERT INTO ai_memory_source(tenant_id,id,source_type,source_object_ref,source_version,trust_level,retention_deadline)
+  VALUES(#{tenant},#{segment},'SUMMARY',#{segment},#{version},'JAVA_AUTHORIZED',#{expires})</insert>
+ <select id="listSummarySourceIds" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$SummarySourceIdPO">
+  SELECT id AS source_id FROM ai_memory_summary_segment WHERE tenant_id=#{tenant} AND scope_key=#{scope} ORDER BY id
+ </select>
+ <update id="revokeSummarySource">UPDATE ai_memory_source SET grant_epoch=grant_epoch+1,source_epoch=source_epoch+1,deletion_epoch=deletion_epoch+1,
+  retention_deadline=LEAST(retention_deadline,UTC_TIMESTAMP(6)) WHERE tenant_id=#{tenant} AND id=#{id} AND source_type='SUMMARY'</update>
+ <select id="findBasis" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$BasisPO">
+  SELECT s.id AS source_id,d.id AS decision_id,d.item_id,d.target_version_id AS version_id,d.actor_id,d.actor_kind,d.decision_type,
+   i.field_key,i.owner_id,CONVERT(i.domain USING utf8mb4) AS domain,CONVERT(i.origin_top_agent_id USING utf8mb4) AS origin_top_agent_id,
+   CONVERT(i.lifecycle USING utf8mb4) AS lifecycle,i.current_version_id,CONVERT(v.status USING utf8mb4) AS version_status,
+   i.grant_epoch,i.source_epoch,i.deletion_epoch
+  FROM ai_memory_source s JOIN ai_memory_decision d ON d.tenant_id=s.tenant_id AND d.id=s.source_object_ref
+  JOIN ai_memory_item i ON i.tenant_id=d.tenant_id AND i.id=d.item_id
+  JOIN ai_memory_version v ON v.tenant_id=d.tenant_id AND v.item_id=d.item_id AND v.id=d.target_version_id AND v.decision_id=d.id
+  WHERE s.tenant_id=#{tenant} AND s.id=#{source} AND s.source_type='USER_PREFERENCE_DECISION'
+   AND s.source_version=v.id AND d.actor_kind='USER' AND d.decision_type IN ('SAVE','CORRECT','REAUTHORIZE','CONFIRM')
+   AND i.lifecycle='LIVE' AND i.current_version_id=v.id AND v.status='ACTIVE' AND v.expires_at&gt;UTC_TIMESTAMP(6)
+   AND v.grant_epoch=i.grant_epoch AND v.source_epoch=i.source_epoch AND v.deletion_epoch=i.deletion_epoch
+   AND NOT EXISTS(SELECT 1 FROM ai_memory_decision rejected WHERE rejected.tenant_id=d.tenant_id
+    AND rejected.item_id=d.item_id AND rejected.target_version_id=v.id AND rejected.decision_type='REJECT')
+ </select>
+ <select id="findPlan" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$PlanPO">SELECT <include refid="planColumns"/> FROM ai_memory_summary_plan WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND id=#{id}</select>
+ <insert id="insertPlan">INSERT INTO ai_memory_summary_plan(<include refid="planColumns"/>) VALUES(#{row.tenantId},#{row.scopeKey},#{row.id},#{row.executionId},#{row.taskId},#{row.originalSessionRef},#{row.policyId},#{row.policyVersionId},#{row.sessionRevision},#{row.sourceRevision},#{row.commitRevision},#{row.originalDeadline},#{row.expiresAt},#{row.fingerprint},#{row.keyVersion},#{row.encryptedPayload},#{row.nonce},#{row.authTag},#{row.contentHmac},#{row.state},#{row.transportFingerprint,jdbcType=VARCHAR})</insert>
+ <update id="finishPlan">UPDATE ai_memory_summary_plan SET state=#{state} WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND id=#{id} AND state='FROZEN'</update>
+ <update id="bindTransportFingerprint">UPDATE ai_memory_summary_plan SET transport_fingerprint=#{fingerprint}
+  WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND id=#{id} AND state='FROZEN'
+   AND (transport_fingerprint IS NULL OR transport_fingerprint=#{fingerprint})</update>
+ <insert id="insertSegment">INSERT INTO ai_memory_summary_segment(<include refid="segmentColumns"/>) VALUES(#{row.tenantId},#{row.scopeKey},#{row.id},#{row.planId},#{row.firstSequence},#{row.lastSequence},#{row.commitRevision},#{row.expiresAt},#{row.payloadDigest},#{row.keyVersion},#{row.encryptedPayload},#{row.nonce},#{row.authTag},#{row.contentHmac},#{row.state})</insert>
+ <select id="findSegment" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$SegmentPO">SELECT <include refid="segmentColumns"/> FROM ai_memory_summary_segment WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND id=#{id}</select>
+ <select id="findPlanSegment" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$SegmentPO">SELECT <include refid="segmentColumns"/> FROM ai_memory_summary_segment WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND plan_id=#{plan}</select>
+ <select id="listSegments" resultType="com.aiep.aihub.repository.memory.MemorySummaryMapper$SegmentPO">SELECT <include refid="segmentColumns"/> FROM ai_memory_summary_segment WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND state='COMMITTED' AND expires_at&gt;UNIX_TIMESTAMP() ORDER BY last_sequence DESC LIMIT 32</select>
+ <update id="scrubSegments">UPDATE ai_memory_summary_segment SET state='SCRUBBED',encrypted_payload=NULL,nonce=NULL,auth_tag=NULL,content_hmac=NULL WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND state='COMMITTED'</update>
+ <update id="scrubPlans">UPDATE ai_memory_summary_plan SET state='SCRUBBED',encrypted_payload=NULL,nonce=NULL,auth_tag=NULL,content_hmac=NULL WHERE tenant_id=#{tenant} AND scope_key=#{scope} AND state&lt;&gt;'SCRUBBED'</update>
+ <update id="revokeMessageSources">UPDATE ai_memory_source s JOIN ai_memory_summary_source m ON m.tenant_id=s.tenant_id AND m.message_id=s.id
+  SET s.grant_epoch=s.grant_epoch+1,s.source_epoch=s.source_epoch+1,s.deletion_epoch=s.deletion_epoch+1,s.retention_deadline=LEAST(s.retention_deadline,UTC_TIMESTAMP(6))
+  WHERE m.tenant_id=#{tenant} AND m.scope_key=#{scope} AND s.source_type='MESSAGE'</update>
+ <insert id="tombstoneMessageSources">INSERT INTO ai_memory_tombstone(tenant_id,target_type,target_id,deletion_epoch,grant_epoch,source_epoch)
+  SELECT s.tenant_id,'SOURCE',s.id,s.deletion_epoch,s.grant_epoch,s.source_epoch FROM ai_memory_source s JOIN ai_memory_summary_source m ON m.tenant_id=s.tenant_id AND m.message_id=s.id
+  WHERE m.tenant_id=#{tenant} AND m.scope_key=#{scope} AND s.source_type='MESSAGE'
+  ON DUPLICATE KEY UPDATE deletion_epoch=GREATEST(ai_memory_tombstone.deletion_epoch,VALUES(deletion_epoch)),grant_epoch=GREATEST(ai_memory_tombstone.grant_epoch,VALUES(grant_epoch)),source_epoch=GREATEST(ai_memory_tombstone.source_epoch,VALUES(source_epoch))</insert>
+</mapper>

@@ -4,7 +4,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from .task_authorization import TaskPaidBinding
 
 
 class PaidBudgetError(RuntimeError):
@@ -175,6 +178,11 @@ class PaidReservation:
 
 
 class PaidBudgetLedger(Protocol):
+    @property
+    def task_authorization_enabled(self) -> bool: ...
+    def task_budget_id(
+        self, binding: TaskPaidBinding, fallback: str | None
+    ) -> str | None: ...
     def authorize(
         self, plan: PaidBudgetPlan, prices: tuple[PaidPriceLimit, ...]
     ) -> None: ...
@@ -190,6 +198,7 @@ class PaidBudgetLedger(Protocol):
         *,
         input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
+        task_binding: TaskPaidBinding | None = None,
     ) -> PaidReservation: ...
     def settle(self, reservation_id: str, usage: PaidUsage) -> None: ...
     def finish(self, reservation_id: str) -> None: ...

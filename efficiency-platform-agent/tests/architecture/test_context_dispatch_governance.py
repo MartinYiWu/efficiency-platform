@@ -15,7 +15,10 @@ def test_paid_finalization_occurs_after_reserve_before_network():
     source = (ROOT / "providers/paid_http.py").read_text(encoding="utf-8")
     reserve = source.index("reservation = self.ledger.reserve(")
     send = source.index("response = await self.inner.handle_async_request(request)")
-    assert reserve < source.index("await context_guard.before_send(payload)") < send
+    binding = source.index('before_send = getattr(context_guard, "before_send", None)')
+    assert (
+        reserve < binding < source.index("await before_send(payload)", binding) < send
+    )
 
 
 def test_business_stage_boundaries_are_explicit():
@@ -43,7 +46,31 @@ def test_actual_provider_construction_is_only_in_registered_composition_root():
                 and node.func.id in constructors
             ):
                 found.append(path.relative_to(ROOT).as_posix())
-    assert found == ["harness/local_real_factory.py"]
+    assert sorted(found) == [
+        "harness/local_real_factory.py",
+        "harness/memory_derive_factory.py",
+    ]
+    factory = ast.parse(
+        (ROOT / "harness/memory_derive_factory.py").read_text(encoding="utf-8")
+    )
+    constructed = [
+        node
+        for node in ast.walk(factory)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    assert not any(
+        node.func.id
+        in {"AsyncClient", "AsyncOpenAI", "PaidHttpTransport", "SqlitePaidBudgetLedger"}
+        for node in constructed
+    )
+    raw = next(
+        node for node in constructed if node.func.id == "DeepSeekStreamingProvider"
+    )
+    assert isinstance(raw.args[0], ast.Name) and raw.args[0].id == "client"
+    source = ast.unparse(factory)
+    assert "SqliteDeriveOperationStore(ledger)" in source
+    assert "paid_transport=True" in source
+    assert "bind_context_send_lease(self.send_authority)" in source
 
 
 def test_model_dispatch_calls_only_exist_in_registered_boundaries():
@@ -106,13 +133,22 @@ def test_checkpoint_provider_fence_wraps_each_complete_and_stream_call():
                 assert any(
                     isinstance(block, ast.AsyncWith)
                     and any(
-                        ast.unparse(item.context_expr) == "self._guard()"
+                        ast.unparse(item.context_expr) == "self._provider_scope()"
                         for item in block.items
                     )
                     and any(descendant is node for descendant in ast.walk(block))
                     for block in ast.walk(method)
                 )
     assert sorted(calls) == ["complete", "stream"]
+    scope = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_provider_scope"
+    )
+    source = ast.unparse(scope)
+    assert "self._send_authority is not None" in source
+    assert "bind_context_send_lease(self._send_authority)" in source
+    assert "async with self._guard()" in source
 
 
 def test_derive_boundary_requires_original_paid_and_context_chain():

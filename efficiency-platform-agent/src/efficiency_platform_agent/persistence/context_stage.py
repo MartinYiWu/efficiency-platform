@@ -136,6 +136,36 @@ class MySqlContextStageStore:
                     raise ValueError("CONTEXT_STAGE_CONFLICT_409") from None
         raise ValueError("CONTEXT_STAGE_CONCURRENT_CONFLICT")
 
+    async def is_claimed_operation(
+        self, scope: ExecutionScope, stage_id: str, operation_id: str, deadline: int
+    ) -> bool:
+        require_id(operation_id)
+        require_count(deadline)
+        params = self._parameters(scope, stage_id)
+        async with self._engine.begin() as conn:
+            row = (
+                (
+                    await conn.execute(
+                        _statement(
+                            "SELECT scope_hash,deadline,current_slot,status,operation_id_1,operation_id_2,operation_id_3 FROM agent_context_stage WHERE "
+                            + _KEY
+                        ),
+                        params,
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        return (
+            row is not None
+            and row["scope_hash"] == params["scope_hash"]
+            and row["deadline"] == deadline
+            and row["status"] == "CLAIMED"
+            and type(row["current_slot"]) is int
+            and 1 <= row["current_slot"] <= 3
+            and row[f"operation_id_{row['current_slot']}"] == operation_id
+        )
+
     async def transition(
         self,
         scope: ExecutionScope,

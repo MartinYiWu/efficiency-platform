@@ -1,6 +1,7 @@
 """正式 ASGI、Supervisor 与研究图，仅在 HTTP/模型边界提供离线内容。"""
 
 import json
+import re
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 from types import SimpleNamespace
@@ -118,13 +119,16 @@ def recent_rss_response():
     """把共享固定样本的发布时间移入本次真实时钟窗口。"""
     response = rss_response()
     recent = format_datetime(datetime.now(UTC) - timedelta(days=1), usegmt=True)
+    body, count = re.subn(
+        rb"<pubDate>[^<]*</pubDate>",
+        b"<pubDate>" + recent.encode("ascii") + b"</pubDate>",
+        b"".join(response.body_chunks),
+    )
+    assert count > 0
     return response.__class__(
         response.status_code,
         response.headers,
-        tuple(
-            chunk.replace(b"Tue, 15 Sep 2026 00:00:00 GMT", recent.encode("ascii"))
-            for chunk in response.body_chunks
-        ),
+        (body,),
     )
 
 
@@ -152,8 +156,11 @@ async def build_case(monkeypatch, *, admitted=True):
                 "admission": descriptor.admission.model_copy(
                     update={
                         "history_verified": True,
-                        "expires_at": now + timedelta(days=1),
+                        "last_verified_at": now - timedelta(minutes=1),
                     }
+                ),
+                "cost_policy": descriptor.cost_policy.model_copy(
+                    update={"verified_at": now - timedelta(minutes=1)}
                 ),
             }
         )

@@ -40,13 +40,22 @@ class MemorySnapshotCipher:
         ).encode("utf-8")
 
     def seal(
-        self, tenant: str, execution: str, runtime: str, value: bytes
+        self,
+        tenant: str,
+        execution: str,
+        runtime: str,
+        value: bytes,
+        *,
+        key_version: str | None = None,
     ) -> SealedMemorySnapshot:
+        version = self._current if key_version is None else key_version
+        if version not in self._keys:
+            raise ValueError("MEMORY_SNAPSHOT_UNAVAILABLE")
         nonce = os.urandom(12)
-        ciphertext = AESGCM(self._keys[self._current]).encrypt(
-            nonce, value, self._aad(tenant, execution, runtime, self._current)
+        ciphertext = AESGCM(self._keys[version]).encrypt(
+            nonce, value, self._aad(tenant, execution, runtime, version)
         )
-        return SealedMemorySnapshot(ciphertext, nonce, self._current)
+        return SealedMemorySnapshot(ciphertext, nonce, version)
 
     def open(
         self, tenant: str, execution: str, runtime: str, snapshot: SealedMemorySnapshot
@@ -68,7 +77,13 @@ class MemorySnapshotCipher:
         record_id: str,
         kind: str,
         value: bytes,
+        *,
+        binding: str | None = None,
+        key_version: str | None = None,
     ) -> SealedMemorySnapshot:
+        version = self._current if key_version is None else key_version
+        if version not in self._keys:
+            raise ValueError("MEMORY_SNAPSHOT_UNAVAILABLE")
         aad = json.dumps(
             [
                 "memory-refresh-body/1",
@@ -77,16 +92,17 @@ class MemorySnapshotCipher:
                 runtime,
                 record_id,
                 kind,
-                self._current,
-            ],
+                version,
+            ]
+            + ([] if binding is None else [binding]),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
         nonce = os.urandom(12)
         return SealedMemorySnapshot(
-            AESGCM(self._keys[self._current]).encrypt(nonce, value, aad),
+            AESGCM(self._keys[version]).encrypt(nonce, value, aad),
             nonce,
-            self._current,
+            version,
         )
 
     def open_journal(
@@ -97,6 +113,8 @@ class MemorySnapshotCipher:
         record_id: str,
         kind: str,
         snapshot: SealedMemorySnapshot,
+        *,
+        binding: str | None = None,
     ) -> bytes:
         aad = json.dumps(
             [
@@ -107,7 +125,8 @@ class MemorySnapshotCipher:
                 record_id,
                 kind,
                 snapshot.key_version,
-            ],
+            ]
+            + ([] if binding is None else [binding]),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()

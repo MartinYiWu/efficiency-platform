@@ -11,6 +11,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class HrSemanticGateway {
+  @org.springframework.beans.factory.annotation.Autowired(required=false)
+  private com.aiep.aihub.application.memory.MemoryAgentPolicyService memoryAgentPolicies;
   private final AiInvokeFacade ai;
   private final ObjectMapper json;
   private HrActorAuthority authority;
@@ -68,6 +70,7 @@ public class HrSemanticGateway {
   }
 
   public JsonNode execute(HrActor actor, long skillId, String runId, ObjectNode input) {
+    if(memoryAgentPolicies!=null)memoryAgentPolicies.requireHrCurrentFacts(actor.tenantId(),skillId);
     if (authority != null) actor = authority.refresh(actor);
     if (skillId == 6110) HrAccessPolicy.require(actor, "hr:candidate:read");
     if (skillId >= 6101 && skillId <= 6106)

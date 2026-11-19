@@ -16,6 +16,7 @@ class ContextPublication(BaseModel):
     schema_version: Literal["context-publication/1"]
     metadata: tuple[ContextMetadata, ...] = Field(min_length=1, max_length=1024)
     execution_agents: dict[str, tuple[str, str]]
+    specialist_lineage_enabled: bool = False
 
     def published(self) -> dict[tuple[str, str, str], tuple[ContextMetadata, ...]]:
         grouped: dict[tuple[str, str, str], list[ContextMetadata]] = {}

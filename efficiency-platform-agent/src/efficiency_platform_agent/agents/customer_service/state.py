@@ -34,6 +34,13 @@ from .release_bundle import ModelPolicy
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    @model_serializer(mode="wrap")
+    def serialize_optional_document_hash(self, handler):
+        value = handler(self)
+        if value.get("document_sha256", "present") is None:
+            value.pop("document_sha256", None)
+        return value
+
 
 class EvidenceContractError(ValueError):
     def __init__(self, code: str) -> None:
@@ -142,6 +149,7 @@ class QueryRewrite(StrictModel):
 
 
 class Evidence(StrictModel):
+    document_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     rank: int | None = Field(default=None, gt=0)
     query_index: int | None = Field(default=None, gt=0)
     chunk_id: UUID
@@ -164,6 +172,7 @@ class Evidence(StrictModel):
 
 
 class ParentEvidence(StrictModel):
+    document_sha256: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
     parent_no: int | None = Field(default=None, gt=0)
     source_table_id: int | None = Field(default=None, ge=0)
     block_kind: BlockKind = "LIST"
@@ -419,6 +428,9 @@ class RunView(StrictModel):
 
 
 class RunEventPayload(StrictModel):
+    derive_plan_id: str | None = Field(default=None,min_length=1,max_length=128)
+    derive_baseline_ref: str | None = Field(default=None,min_length=1,max_length=128)
+    context_wait_ref: str | None = Field(default=None, min_length=1, max_length=128)
     stage: str | None = None
     phase: Literal["STARTED", "COMPLETED"] | None = None
     progress_percent: int | None = Field(default=None, ge=0, le=100)
@@ -436,6 +448,10 @@ class RunEventPayload(StrictModel):
         value: dict[str, Any] = handler(self)
         if self.conversation_title is None:
             value.pop("conversation_title", None)
+        if self.context_wait_ref is None:
+            value.pop("context_wait_ref", None)
+        for name in ("derive_plan_id","derive_baseline_ref"):
+            if value.get(name) is None:value.pop(name,None)
         return value
 
 

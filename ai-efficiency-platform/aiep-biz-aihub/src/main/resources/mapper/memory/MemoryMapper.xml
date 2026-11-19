@@ -104,12 +104,31 @@
   <sql id="safePreferenceVersion">
     AND NOT <include refid="com.aiep.aihub.repository.memory.MemoryMapper.itemRestoreBlocked"/>
     AND v.grant_epoch=i.grant_epoch AND v.source_epoch=i.source_epoch AND v.deletion_epoch=i.deletion_epoch
-    AND EXISTS(SELECT 1 FROM ai_memory_dependency dep WHERE dep.tenant_id=v.tenant_id
-      AND dep.target_type='MEMORY_VERSION' AND dep.target_id=v.item_id AND dep.target_version=v.id)
+    AND EXISTS(SELECT 1 FROM ai_memory_dependency dep JOIN ai_memory_source user_source
+      ON user_source.tenant_id=dep.tenant_id AND user_source.id=dep.source_id
+      WHERE dep.tenant_id=v.tenant_id AND dep.target_type='MEMORY_VERSION' AND dep.target_id=v.item_id AND dep.target_version=v.id
+        AND user_source.source_type='USER_PREFERENCE_DECISION' AND user_source.source_object_ref=v.decision_id AND user_source.source_version=v.id)
     AND NOT EXISTS(SELECT 1 FROM ai_memory_dependency dep LEFT JOIN ai_memory_source s
       ON s.tenant_id=dep.tenant_id AND s.id=dep.source_id
       WHERE dep.tenant_id=v.tenant_id AND dep.target_type='MEMORY_VERSION' AND dep.target_id=v.item_id AND dep.target_version=v.id
-        AND (s.id IS NULL OR s.source_type&lt;&gt;'USER_PREFERENCE_DECISION' OR s.source_object_ref&lt;&gt;v.decision_id OR s.source_version&lt;&gt;v.id
+        AND (s.id IS NULL
+          OR (s.source_type='USER_PREFERENCE_DECISION' AND s.source_object_ref=v.decision_id AND s.source_version&lt;&gt;v.id)
+          OR s.source_type NOT IN ('USER_PREFERENCE_DECISION','MESSAGE','CURRENT_USER_MESSAGE')
+          OR (s.source_type='USER_PREFERENCE_DECISION' AND NOT EXISTS(
+            SELECT 1 FROM ai_memory_decision source_decision JOIN ai_memory_item source_item
+              ON source_item.tenant_id=source_decision.tenant_id AND source_item.id=source_decision.item_id
+            WHERE source_decision.tenant_id=s.tenant_id AND source_decision.id=s.source_object_ref AND source_decision.actor_kind='USER'
+              AND source_decision.actor_id=i.owner_id AND source_item.owner_id=i.owner_id AND source_item.subject_id=i.subject_id
+              AND source_item.domain=i.domain AND source_item.origin_top_agent_id=i.origin_top_agent_id))
+          OR (s.source_type IN ('MESSAGE','CURRENT_USER_MESSAGE') AND NOT(
+            (i.domain='operations' AND EXISTS(SELECT 1 FROM ai_operation_message msg JOIN ai_operation_conversation conversation ON conversation.id=msg.conversation_id
+              WHERE CAST(msg.tenant_id AS BINARY)=s.tenant_id AND CAST(conversation.tenant_id AS BINARY)=s.tenant_id
+                AND CAST(conversation.user_id AS BINARY)=i.owner_id AND CAST(msg.id AS BINARY)=s.source_object_ref
+                AND CAST(SHA2(CAST(msg.content AS BINARY),256) AS BINARY)=s.source_version))
+            OR (i.domain='customer-service' AND EXISTS(SELECT 1 FROM ai_customer_service_message msg JOIN ai_customer_service_conversation conversation ON conversation.id=msg.conversation_id
+              WHERE CAST(msg.tenant_id AS BINARY)=s.tenant_id AND CAST(conversation.tenant_id AS BINARY)=s.tenant_id
+                AND CAST(conversation.user_id AS BINARY)=i.owner_id AND CAST(msg.id AS BINARY)=s.source_object_ref
+                AND CAST(SHA2(CAST(msg.content_markdown AS BINARY),256) AS BINARY)=s.source_version))))
           OR s.retention_deadline IS NULL OR s.retention_deadline&lt;=UTC_TIMESTAMP(6)
           OR s.grant_epoch&lt;&gt;dep.grant_epoch OR s.source_epoch&lt;&gt;dep.source_epoch OR s.deletion_epoch&lt;&gt;dep.deletion_epoch
           OR <include refid="com.aiep.aihub.repository.memory.MemoryMapper.sourceRestoreBlocked"/>))

@@ -183,6 +183,8 @@ class ContextManifest:
     summary_adoption_status: str = "not-applied"
     reservation_ref: str | None = None
     usage_ref: str | None = None
+    summary_projection_aliases: tuple[tuple[str, str], ...] = ()
+    derive_binding_json: str | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if (
@@ -239,6 +241,13 @@ class ContextManifest:
                 raise ValueError("MANIFEST_EXCLUSIONS_INVALID")
             for value in exclusion:
                 require_id(value)
+        if self.derive_binding_json is not None and (
+            self.node_id != "memory.derive"
+            or type(self.derive_binding_json) is not str
+            or not self.derive_binding_json
+            or len(self.derive_binding_json.encode("utf-8")) > 16384
+        ):
+            raise ValueError("DERIVE_MANIFEST_BINDING_INVALID")
 
 
 @dataclass(frozen=True, slots=True)

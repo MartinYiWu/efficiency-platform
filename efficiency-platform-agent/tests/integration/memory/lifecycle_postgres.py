@@ -17,7 +17,7 @@ from efficiency_platform_agent.orchestration.memory_saver_factory import (
 
 
 @asynccontextmanager
-async def production_memory_runtime(engine, cipher):
+async def production_memory_runtime(engine, cipher, *, refresh_enabled=False):
     dsn = os.environ.get("MEMORY_IT_POSTGRES_DSN", "")
     if os.environ.get("MEMORY_IT_ALLOW_SCHEMA_DDL") != "1" or conninfo_to_dict(dsn).get(
         "host"
@@ -47,13 +47,14 @@ async def production_memory_runtime(engine, cipher):
         await admin.execute(
             sql.SQL("SET search_path TO {}").format(sql.Identifier(registry))
         )
-        for topic in ("memory_thread_v1", "memory_thread_capability_v1"):
+        topics = ["memory_thread_v1", "memory_thread_capability_v1"]
+        if refresh_enabled:
+            topics.append("memory_thread_refresh_v1")
+        for topic in topics:
             script = (
                 Path(__file__).parents[3] / "sql/bootstrap" / topic / "02-up.sql"
             ).read_text(encoding="utf-8")
-            for statement in script.split(";"):
-                if statement.strip():
-                    await admin.execute(statement)
+            await admin.execute(script, prepare=False)
         await admin.execute(
             sql.SQL("SET search_path TO {}").format(sql.Identifier(official))
         )
@@ -74,6 +75,7 @@ async def production_memory_runtime(engine, cipher):
             registry_schema=registry,
             official_schema=official,
             owned_schema=owned,
+            refresh_enabled=refresh_enabled,
         )
         yield components
     finally:

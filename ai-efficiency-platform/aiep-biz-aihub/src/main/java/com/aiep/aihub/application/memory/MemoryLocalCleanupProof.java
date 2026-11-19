@@ -39,7 +39,9 @@ public class MemoryLocalCleanupProof {
     boolean noExecutions=true,index=true;record Target(byte[] item,byte[] version){}var items=new TreeMap<String,Target>();
     byte[] own=request.itemId().getBytes(StandardCharsets.UTF_8);items.put(request.itemId(),new Target(own,null));
     for(var dep:current){
-     if(!Set.of("MEMORY_VERSION","MESSAGE","EXECUTION").contains(dep.targetType()))return new Proof(false,false,false);
+     if(!Set.of("MEMORY_VERSION","MESSAGE","EXECUTION","PROPOSAL","EPISODE").contains(dep.targetType()))return new Proof(false,false,false);
+     if("PROPOSAL".equals(dep.targetType())&&lifecycle.proposalScrubbed(tenant,dep.targetId(),dep.targetVersion())!=1)return new Proof(false,false,false);
+     if("EPISODE".equals(dep.targetType())&&lifecycle.episodeScrubbed(tenant,dep.targetId(),dep.targetVersion())!=1)return new Proof(false,false,false);
      if("EXECUTION".equals(dep.targetType())||dep.executionId()!=null&&dep.executionId().length>0)noExecutions=false;
      if("MEMORY_VERSION".equals(dep.targetType())&&!Arrays.equals(own,dep.targetId()))items.put(HexFormat.of().formatHex(dep.targetId())+":"+HexFormat.of().formatHex(dep.targetVersion()),new Target(dep.targetId(),dep.targetVersion()));
      if(dep.rootThreadRef()!=null||dep.childThreadRef()!=null||dep.checkpointNamespace()!=null)noExecutions=false;

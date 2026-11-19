@@ -345,6 +345,11 @@ async def build_evidence_pack(
                     available = max(0, limit - reserved - cost(selected))
                     value = {
                         "question": question,
+                        "knowledge_base_id":str(parent.knowledge_base_id),
+                        "index_release_id":str(parent.index_release_id),
+                        "document_id":str(parent.document_id),
+                        "document_version_id":str(parent.document_version_id),
+                        "document_sha256":parent.document_sha256,
                         "parent_id": str(parent.parent_id),
                         "sentences": [s.model_dump(mode="json") for s in sentences],
                         "available_tokens": available,

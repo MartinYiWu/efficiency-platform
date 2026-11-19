@@ -3,7 +3,11 @@
 from dataclasses import dataclass, field, replace
 
 from efficiency_platform_agent.context.budget import evaluate_window, window_pressure
-from efficiency_platform_agent.context.policy import ContextPiece, ContextPolicy
+from efficiency_platform_agent.context.policy import (
+    ContextPiece,
+    ContextPolicy,
+    render_context_messages,
+)
 from efficiency_platform_agent.core.context_control import (
     ContextFragmentCounter,
     ModelCapacity,
@@ -49,7 +53,7 @@ def select_context(
         raise ValueError("CONTEXT_SOURCE_LIMIT")
     if len({p.piece_id for p in sources}) != len(sources):
         raise ValueError("CONTEXT_PIECE_ID_DUPLICATE")
-    if tuple(m for p in sources for m in p.messages) != request_template.messages:
+    if render_context_messages(policy,sources) != request_template.messages:
         raise ValueError("CONTEXT_TEMPLATE_MISMATCH")
     if (
         not capacity.verified
@@ -135,7 +139,7 @@ def select_context(
         ordered_pieces = sorted(pieces, key=sources.index)
         return replace(
             request_template,
-            messages=tuple(m for p in ordered_pieces for m in p.messages),
+            messages=render_context_messages(policy,tuple(ordered_pieces)),
         )
 
     def measure(pieces: list[ContextPiece]) -> TokenMeasurement:
@@ -147,7 +151,8 @@ def select_context(
     def measure_slot(pieces: list[ContextPiece]) -> TokenMeasurement:
         if not isinstance(counter, ContextFragmentCounter):
             return measure(pieces)
-        measurement = counter.measure_messages(request_for(pieces).messages, capacity)
+        slot_messages=tuple(message for piece in pieces for message in piece.messages) if policy.json_history is not None else request_for(pieces).messages
+        measurement = counter.measure_messages(slot_messages, capacity)
         if not isinstance(measurement, TokenMeasurement) or not measurement.verified:
             raise ValueError("CONTEXT_CAPACITY_UNVERIFIED")
         return measurement

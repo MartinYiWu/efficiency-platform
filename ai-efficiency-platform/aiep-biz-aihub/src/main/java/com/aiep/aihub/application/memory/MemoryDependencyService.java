@@ -19,6 +19,8 @@ import org.springframework.transaction.annotation.Transactional;
 /** 仅接受由运行时实际输入manifest给出的闭包；调用者必须先核对签发包及业务归属。 */
 @Service
 public class MemoryDependencyService {
+    @Autowired(required=false)
+    private com.aiep.aihub.repository.memory.MemorySharingMapper sharing;
     private final MemoryPacketMapper mapper;
     private final Clock clock;
     @Autowired public MemoryDependencyService(MemoryPacketMapper mapper) { this(mapper, Clock.systemUTC()); }
@@ -27,6 +29,9 @@ public class MemoryDependencyService {
     public Instant requireCurrent(MemoryScopeDTO scope, List<Dependency> dependencies) {
         Instant earliest = Instant.MAX;
         for (var dependency : dependencies.stream().sorted((left,right) -> Arrays.compareUnsigned(MemoryMapper.identity(left.sourceId()),MemoryMapper.identity(right.sourceId()))).toList()) {
+            if("MEMORY_SHARE_GRANT".equals(dependency.sourceType())&&(sharing==null
+                    ||sharing.projectionCurrent(MemoryMapper.identity(scope.tenantId()),MemoryMapper.identity(dependency.sourceId()),MemoryMapper.identity(scope.userId()),scope.domain())!=1))
+                throw new MemoryException("MEMORY_SOURCE_CHANGED");
             var source = mapper.findSource(MemoryMapper.identity(scope.tenantId()), MemoryMapper.identity(dependency.sourceId()));
             if (source == null || source.blocked() || source.retentionDeadline() == null
                     || !source.retentionDeadline().isAfter(clock.instant())

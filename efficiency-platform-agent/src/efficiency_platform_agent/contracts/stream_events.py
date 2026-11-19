@@ -46,6 +46,8 @@ StreamEventName = Literal[
     "usage_update",
     "stream_error",
     "stream_done",
+    "context_refresh_required",
+    "memory_derive_required",
 ]
 _OPERATION_VISIBLE_PHASES = frozenset(get_args(OperationVisiblePhase))
 
@@ -68,6 +70,21 @@ class RunStreamEventV1(BaseModel):
     @model_validator(mode="after")
     def validate_visible_phase(self) -> RunStreamEventV1:
         """禁止事件载荷透传内部阶段，并约束可选进度计数。"""
+        if self.event == "memory_derive_required":
+            from efficiency_platform_agent.core.memory import require_id
+
+            if set(self.payload) != {"plan_id", "baseline_ref"}:
+                raise ValueError("MEMORY_DERIVE_EVENT_INVALID")
+            for value in self.payload.values():
+                require_id(value)
+            return self
+        if self.event == "context_refresh_required":
+            from efficiency_platform_agent.core.memory import require_id
+
+            if set(self.payload) != {"wait_event_id"}:
+                raise ValueError("MEMORY_WAIT_EVENT_INVALID")
+            require_id(self.payload["wait_event_id"])
+            return self
 
         progress: dict[str, int] = {}
         for key in ("completed", "target"):

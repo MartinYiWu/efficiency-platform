@@ -8,6 +8,8 @@ import org.springframework.stereotype.Repository;
 
 @Repository
 public class JdbcKnowledgeReleaseMappers implements KnowledgeReleaseMappers {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private KnowledgeSourceEventRepository memoryEvents;
     private static final DataClassRowMapper<KnowledgeIndexReleasePO> RELEASE_ROW =
             DataClassRowMapper.newInstance(KnowledgeIndexReleasePO.class);
     private static final DataClassRowMapper<KnowledgeIndexReleaseDocumentPO> DOCUMENT_ROW =
@@ -91,6 +93,7 @@ public class JdbcKnowledgeReleaseMappers implements KnowledgeReleaseMappers {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public boolean activate(String knowledgeBaseId, String expectedCurrentId, String targetId) {
         int switched;
         if (expectedCurrentId == null) {
@@ -107,6 +110,7 @@ public class JdbcKnowledgeReleaseMappers implements KnowledgeReleaseMappers {
         if (switched != 1) {
             return false;
         }
+        if(memoryEvents!=null)memoryEvents.changed(knowledgeBaseId,"INDEX_RELEASE_CHANGED");
         if (expectedCurrentId != null) {
             jdbc.update("UPDATE kb_index_release SET status='RETIRED' WHERE id=? AND status='PUBLISHED'",
                     expectedCurrentId);

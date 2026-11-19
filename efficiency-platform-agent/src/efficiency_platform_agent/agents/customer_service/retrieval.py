@@ -14,6 +14,7 @@ from .conflict_screen import ConflictScreen, screen_conflicts
 from .equivalence import EquivalenceDecision, validate_parents, verify_equivalence
 from .evidence_assembly import EvidenceAssembly, assemble_evidence
 from .intent import StructuredStageGateway
+from .memory_lineage import directory, validate_evidence
 from .release_bundle import CustomerServiceReleaseBundle
 from .state import (
     Evidence,
@@ -111,6 +112,14 @@ class CustomerServiceRetrieval:
         bundle: CustomerServiceReleaseBundle,
         planned_queries: tuple[str, ...] | None = None,
     ) -> RetrievalTrace:
+        catalog = directory()
+        if catalog is not None:
+            expected = {
+                (str(item.knowledge_base_id), str(item.index_release_id))
+                for item in bundle.knowledge_bindings
+            }
+            if expected != {key[:2] for key in catalog}:
+                raise ValueError("MEMORY_KNOWLEDGE_RELEASE_BINDING_MISMATCH")
         policy = bundle.rag_policy
         if planned_queries:
             queries = planned_queries[: policy.rewrite_query_limit]
@@ -175,6 +184,7 @@ class CustomerServiceRetrieval:
             )
         )
         for query_index, (vector_items, fts_items) in enumerate(search_results, 1):
+            validate_evidence((*vector_items, *fts_items))
             if enhanced:
                 vector_items = tuple(
                     item.model_copy(update={"rank": rank, "query_index": query_index})
@@ -301,6 +311,7 @@ class CustomerServiceRetrieval:
                 index_release_ids=release_ids,
                 parent_ids=tuple(item for item in parent_ids if item is not None),
             )
+            validate_evidence(parents)
             if enhanced:
                 validate_parents(evidence, parents)
                 try:

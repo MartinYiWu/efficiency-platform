@@ -373,7 +373,13 @@ class DocumentationContractTest(unittest.TestCase):
             ).iterdir()
             if path.is_dir()
             and path.name
-            not in {"__pycache__", "conversation", "operation", "customer_service"}
+            not in {
+                "__pycache__",
+                "conversation",
+                "operation",
+                "customer_service",
+                "hr",
+            }
         )
         operation_root = PROJECT_ROOT / "src/efficiency_platform_agent/agents/operation"
         operation_implementation_directories = tuple(

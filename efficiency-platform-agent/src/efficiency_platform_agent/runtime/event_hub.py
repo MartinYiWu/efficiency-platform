@@ -12,6 +12,13 @@ from efficiency_platform_agent.contracts.stream_events import (
     RunStreamEventV1,
     StreamEventName,
 )
+from efficiency_platform_agent.core.context_dispatch import (
+    ResultPublishDenied,
+    current_result_publish_guard,
+    result_publish_guard_required,
+)
+
+_RESULT_BODY_EVENTS = frozenset({"assistant_delta", "deliverable"})
 
 _SENSITIVE_KEYS = frozenset(
     {
@@ -78,7 +85,9 @@ def _snapshot(event: RunStreamEventV1) -> RunStreamEventV1:
 
 def _closes_run(event: RunStreamEventV1) -> bool:
     """等待补充输入只结束当前 SSE 段，不封死可恢复的 Run。"""
-    return event.event == "stream_done" and event.payload.get("status") != "waiting_input"
+    return (
+        event.event == "stream_done" and event.payload.get("status") != "waiting_input"
+    )
 
 
 class _ReplayBatch(list[RunStreamEventV1]):
@@ -106,6 +115,11 @@ class EventSubscription(AsyncIterator[RunStreamEventV1]):
         event = await self._queue.get()
         if self._closed or event is None or self._hub.is_memory_scrubbed(self.run_id):
             raise StopAsyncIteration
+        if (
+            self._hub.is_memory_publication_blocked(self.run_id)
+            and event.event in _RESULT_BODY_EVENTS
+        ):
+            raise StopAsyncIteration
         self._current = event
         return event
 
@@ -132,6 +146,32 @@ class EventHub:
         self._memory_scrubbed: set[str] = set()
         self._replays: WeakValueDictionary[int, _ReplayBatch] = WeakValueDictionary()
         self._lock = asyncio.Lock()
+        self._blocked_memory_publication: set[str] = set()
+
+    def block_memory_publication(self, run_id: str) -> None:
+        _validate_run_id(run_id)
+        self._blocked_memory_publication.add(run_id)
+
+    def is_memory_publication_blocked(self, run_id: str) -> bool:
+        return run_id in self._blocked_memory_publication
+
+    async def _check_result_event(self, run_id: str, event: str) -> None:
+        if event not in _RESULT_BODY_EVENTS:
+            return
+        guard = current_result_publish_guard()
+        if (
+            self.is_memory_publication_blocked(run_id)
+            or guard is None
+            and result_publish_guard_required()
+        ):
+            self.block_memory_publication(run_id)
+            raise ResultPublishDenied("MEMORY_RESULT_PUBLISH_DENIED")
+        if guard is not None:
+            try:
+                await guard.check(run_id)
+            except ResultPublishDenied:
+                self.block_memory_publication(run_id)
+                raise
 
     async def publish(self, event: RunStreamEventV1) -> None:
         """按 Run 单调追加事件，并同步发送给当前订阅者。"""
@@ -139,7 +179,9 @@ class EventHub:
             raise TypeError("event 必须是 RunStreamEventV1")
         if _contains_sensitive_payload(event.payload):
             raise ValueError("事件 payload 包含禁止的敏感信息")
+        await self._check_result_event(event.run_id, event.event)
         async with self._lock:
+            await self._check_result_event(event.run_id, event.event)
             if event.run_id in self._closed_runs:
                 raise ValueError("Run 事件流已经结束")
             history = self._history.setdefault(event.run_id, [])
@@ -169,7 +211,9 @@ class EventHub:
         )
         if _contains_sensitive_payload(candidate.payload):
             raise ValueError("事件 payload 包含禁止的敏感信息")
+        await self._check_result_event(run_id, event)
         async with self._lock:
+            await self._check_result_event(run_id, event)
             if run_id in self._closed_runs:
                 raise ValueError("Run 事件流已经结束")
             history = self._history.setdefault(run_id, [])
@@ -229,7 +273,10 @@ class EventHub:
     async def scrub_memory_run(self, run_id: str) -> None:
         _validate_run_id(run_id)
         async with self._lock:
-            if run_id not in self._memory_scrubbed and len(self._memory_scrubbed) >= 1024:
+            if (
+                run_id not in self._memory_scrubbed
+                and len(self._memory_scrubbed) >= 1024
+            ):
                 raise ValueError("MEMORY_EVENT_FENCE_CAPACITY")
             self._memory_scrubbed.add(run_id)
             self._closed_runs.add(run_id)

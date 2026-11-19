@@ -102,6 +102,10 @@ public class CustomerServiceController {
             actors.revalidate(actor);
             service.getRun(actor.tenantId(), actor.userId(), id);
             PublicEvent projected = projector.project(id, actor.tenantId(), event);
+            if("context_refresh_required".equals(event.eventType())) {
+                projector.onMemoryWait(id,event,actor);return;
+            }
+            if("memory_derive_required".equals(event.eventType())) {projector.onMemoryDerive(id,event,actor);return;}
             if (projected != null) send(emitter, projected);
         }, emitter::completeWithError, emitter::complete);
         return emitter;

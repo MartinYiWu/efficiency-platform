@@ -8,6 +8,7 @@ import hashlib
 import json
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -39,6 +40,11 @@ from efficiency_platform_agent.core.budget import (
     BudgetState,
     RemainingBudget,
 )
+from efficiency_platform_agent.core.context_dispatch import (
+    ResultPublishDenied,
+    current_result_publish_guard,
+    result_publish_guard_required,
+)
 from efficiency_platform_agent.core.diagnostics import (
     DiagnosticLevel,
     DiagnosticRecord,
@@ -48,6 +54,11 @@ from efficiency_platform_agent.core.diagnostics import (
     safe_exception_location,
 )
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
+from efficiency_platform_agent.core.execution_control import (
+    RunControl,
+    current_run_control,
+    execution_scope,
+)
 from efficiency_platform_agent.core.memory_execution import (
     MemoryExecutionRecord,
     MemoryExecutionStore,
@@ -195,6 +206,7 @@ class AgentRuntimeService:
         | None = None,
         diagnostic_recorder: DiagnosticRecorderPort | None = None,
         memory_execution_store: MemoryExecutionStore | None = None,
+        memory_refresh_enabled: bool = False,
     ) -> None:
         self.repository = repository
         self.event_store = event_store
@@ -209,6 +221,10 @@ class AgentRuntimeService:
         self.output_streamer = output_streamer
         self.diagnostic_recorder = diagnostic_recorder or NoopDiagnosticRecorder()
         self.memory_execution_store = memory_execution_store
+        self.memory_refresh_enabled = memory_refresh_enabled
+        self.memory_derive_coordinator: Any | None = None
+        self.memory_index_runtime: Any | None = None
+        self._memory_run_controls: dict[tuple[str, str], tuple[RunControl, int]] = {}
         self._event_lock = asyncio.Lock()
         self._run_state_lock = asyncio.Lock()
         self._cancelled_runs: set[str] = set()
@@ -227,6 +243,81 @@ class AgentRuntimeService:
         self._run_state_listeners: list[Callable[[RunViewV1], Awaitable[None]]] = []
         self._pipeline_usage: dict[str, UsageSnapshot] = {}
         self._pending_clarifications: dict[str, Mapping[str, Any]] = {}
+
+    @asynccontextmanager
+    async def _memory_run_control(self, record):
+        if not self.memory_refresh_enabled:
+            yield
+            return
+        binding = binding_from_metadata(
+            record.request.metadata,
+            record.run_id,
+            record.budget_state.deadline_epoch_ms // 1000,
+        )
+        if binding is None or binding.memory_context is None:
+            yield
+            return
+        key = record.request.tenant_id, record.run_id
+        deadline = min(
+            record.budget_state.deadline_epoch_ms,
+            binding.memory_context.deadline_epoch_seconds * 1000,
+        )
+        existing = self._memory_run_controls.get(key)
+        current = current_run_control()
+        if existing is not None:
+            if current is not existing[0] or deadline != existing[1]:
+                raise HarnessError(
+                    "MEMORY_RUN_CONTROL_OWNER_REQUIRED", "原运行控制器未匹配"
+                )
+            current.check()
+            yield
+            return
+        if current is not None:
+            raise HarnessError(
+                "MEMORY_RUN_CONTROL_OWNER_REQUIRED", "原运行控制器未匹配"
+            )
+        remaining = deadline - self.clock.now_epoch_ms()
+        if remaining <= 0:
+            raise HarnessError("EXECUTION_EXPIRED", "原运行已过截止")
+        control = RunControl(timeout_ms=remaining)
+        self._memory_run_controls[key] = control, deadline
+        try:
+            with execution_scope(control):
+                control.check()
+                from contextlib import ExitStack
+
+                with ExitStack() as memory_frames:
+                    if self.memory_index_runtime is not None:
+                        memory_frames.enter_context(self.memory_index_runtime.for_run())
+                    if self.memory_derive_coordinator is None:
+                        yield
+                        return
+                    if self.memory_execution_store is None:
+                        raise HarnessError(
+                            "MEMORY_AUTHORITY_REQUIRED", "原运行授权不可用"
+                        )
+                    original = await self.memory_execution_store.get(
+                        binding.conversation.tenant_id, binding.execution_id
+                    )
+                    if (
+                        original is None
+                        or original.runtime_id != record.run_id
+                        or original.context != binding.memory_context
+                    ):
+                        raise HarnessError(
+                            "MEMORY_RUN_CONTROL_OWNER_REQUIRED", "原运行授权不匹配"
+                        )
+                    memory_frames.enter_context(
+                        self.memory_derive_coordinator.for_run(original)
+                    )
+                    yield
+        finally:
+            try:
+                await control.close()
+            finally:
+                control.results.clear()
+                control.operations.clear()
+                self._memory_run_controls.pop(key, None)
 
     def add_run_event_listener(
         self, listener: Callable[[RunEventRecord], Awaitable[None]]
@@ -322,9 +413,10 @@ class AgentRuntimeService:
             ),
         ):
             try:
-                return await self._prepare_and_execute_pipeline(
-                    record, original, prepare
-                )
+                async with self._memory_run_control(record):
+                    return await self._prepare_and_execute_pipeline(
+                        record, original, prepare
+                    )
             except HarnessError as error:
                 self._record_exception(
                     "pipeline_request_rejected",
@@ -587,6 +679,9 @@ class AgentRuntimeService:
         record = await self.repository.get(run_id, tenant_id)
         if record is None:
             raise ValueError("MEMORY_STOP_UNAVAILABLE")
+        entry = self._memory_run_controls.get((tenant_id, run_id))
+        if entry is not None:
+            entry[0].stop("AGENT_TASK_STOPPED")
         terminal = {
             RunStatus.SUCCEEDED,
             RunStatus.FAILED,
@@ -615,31 +710,123 @@ class AgentRuntimeService:
 
     async def can_emit_memory_events(self, run_id: str, tenant_id: str) -> bool:
         try:
+            if self.event_hub.is_memory_publication_blocked(run_id):
+                return False
             record = await self.repository.get(run_id, tenant_id)
             if record is None:
                 return False
-            binding = binding_from_metadata(record.request.metadata, run_id, record.budget_state.deadline_epoch_ms // 1000)
+            binding = binding_from_metadata(
+                record.request.metadata,
+                run_id,
+                record.budget_state.deadline_epoch_ms // 1000,
+            )
             if binding is None or binding.memory_context is None:
                 return True
             if self.memory_execution_store is None:
                 return False
-            authority = await self.memory_execution_store.get(tenant_id, binding.execution_id)
-            return authority is not None and authority.state == "ACTIVE" and authority.runtime_id == run_id
+            authority = await self.memory_execution_store.get(
+                tenant_id, binding.execution_id
+            )
+            if not self.memory_refresh_enabled:
+                return (
+                    authority is not None
+                    and authority.state == "ACTIVE"
+                    and authority.runtime_id == run_id
+                    and not self.event_hub.is_memory_publication_blocked(run_id)
+                )
+            deadline = min(
+                record.budget_state.deadline_epoch_ms,
+                binding.deadline_epoch_seconds * 1000,
+            )
+            if self.clock.now_epoch_ms() >= deadline:
+                return False
+            entry = self._memory_run_controls.get((tenant_id, run_id))
+            if entry is not None and entry[0].stopped is not None:
+                return False
+            if (
+                authority is None
+                or authority.state != "ACTIVE"
+                or authority.runtime_id != run_id
+                or (
+                    authority.context.packet.scope,
+                    authority.context.packet.task_id,
+                    authority.context.packet.execution_id,
+                )
+                != (binding.conversation, binding.task_id, binding.execution_id)
+                or (
+                    authority.grant_epoch,
+                    authority.source_epoch,
+                    authority.deletion_epoch,
+                )
+                != (
+                    authority.context.packet.grant_epoch,
+                    authority.context.packet.source_epoch,
+                    authority.context.packet.deletion_epoch,
+                )
+            ):
+                return False
+            return (
+                self.clock.now_epoch_ms()
+                < min(deadline, authority.deadline_epoch_seconds * 1000)
+                and not self.event_hub.is_memory_publication_blocked(run_id)
+                and (entry is None or entry[0].stopped is None)
+            )
         except ValueError:
             return False
+
+    async def _revalidate_result_publish(self, record: RunRecord) -> None:
+        guard = current_result_publish_guard()
+        required = result_publish_guard_required()
+        if guard is None and self.memory_refresh_enabled:
+            binding = binding_from_metadata(
+                record.request.metadata,
+                record.run_id,
+                record.budget_state.deadline_epoch_ms // 1000,
+            )
+            required = (
+                required or binding is not None and binding.memory_context is not None
+            )
+        try:
+            if guard is None:
+                if required:
+                    raise ResultPublishDenied("MEMORY_RESULT_PUBLISH_DENIED")
+                return
+            await guard.check(record.run_id)
+        except ResultPublishDenied:
+            self.event_hub.block_memory_publication(record.run_id)
+            raise
 
     async def scrub_memory_execution(self, record: MemoryExecutionRecord) -> bool:
         tenant = record.context.packet.scope.tenant_id
         run_id = record.runtime_id
-        if record.runtime_kind != "OPERATIONS" or record.state != "REVOKED" or self.event_hub is None:
+        if (
+            record.runtime_kind != "OPERATIONS"
+            or record.state != "REVOKED"
+            or self.event_hub is None
+        ):
             return False
-        if (tenant, run_id) not in self._background_exits or any(owner == (tenant, run_id) for owner in self._background_owners.values()):
+        if (tenant, run_id) not in self._background_exits or any(
+            owner == (tenant, run_id) for owner in self._background_owners.values()
+        ):
             return False
         original = await self.repository.get(run_id, tenant)
-        if original is None or original.status not in {RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED, RunStatus.TIMED_OUT}:
+        if original is None or original.status not in {
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMED_OUT,
+        }:
             return False
-        binding = binding_from_metadata(original.request.metadata, run_id, original.budget_state.deadline_epoch_ms // 1000)
-        if binding is None or binding.memory_context != record.context or original.request.user_id != record.context.packet.scope.user_id:
+        binding = binding_from_metadata(
+            original.request.metadata,
+            run_id,
+            original.budget_state.deadline_epoch_ms // 1000,
+        )
+        if (
+            binding is None
+            or binding.memory_context != record.context
+            or original.request.user_id != record.context.packet.scope.user_id
+        ):
             return False
         scrub_graph = getattr(self.graph_runtime, "scrub_memory_run", None)
         if not callable(scrub_graph) or not scrub_graph(run_id):
@@ -806,7 +993,8 @@ class AgentRuntimeService:
             ),
         ):
             try:
-                return await self._execute_queued(record, request)
+                async with self._memory_run_control(record):
+                    return await self._execute_queued(record, request)
             except Exception as error:  # noqa: BLE001 - 后台任务不得泄露未观察异常
                 current = await self.repository.get(record.run_id, request.tenant_id)
                 self._record_exception(
@@ -837,7 +1025,8 @@ class AgentRuntimeService:
                 run_id=record.run_id, request_id=request.request_id
             ),
         ):
-            return await self._execute_queued_with_context(record, request)
+            async with self._memory_run_control(record):
+                return await self._execute_queued_with_context(record, request)
 
     async def _publish_bound_operation_progress(
         self,
@@ -957,26 +1146,58 @@ class AgentRuntimeService:
                         record.run_id, event, phase, payload
                     )
 
+                async def apply_result(result):
+                    # 取消与原预算校验沿用同一入口，记忆路径在结果栅栏内调用。
+                    if await self._is_cancelled(record.run_id) and isinstance(
+                        result, GraphExecutionResult
+                    ):
+                        result = replace(
+                            result,
+                            next_status=RunStatus.CANCELLED,
+                            output=None,
+                            failure=None,
+                        )
+                    if (
+                        result.budget_state.started_at_epoch_ms
+                        != record.budget_state.started_at_epoch_ms
+                        or result.budget_state.deadline_epoch_ms
+                        != record.budget_state.deadline_epoch_ms
+                    ):
+                        result = replace(result, budget_state=record.budget_state)
+                    return await self._apply_graph_result(record, result)
+
                 with bind_operation_progress(publish_progress):
+                    if (
+                        registration is not None
+                        and getattr(registration.builder, "memory_gate", None)
+                        is not None
+                    ):
+                        memory_result = await self.graph_runtime.execute_memory_context(
+                            selection, state, apply_result
+                        )
+                        if isinstance(memory_result, GraphExecutionResult):
+                            if memory_result.next_status not in {
+                                RunStatus.FAILED,
+                                RunStatus.CANCELLED,
+                                RunStatus.TIMED_OUT,
+                            }:
+                                memory_result = replace(
+                                    memory_result,
+                                    next_status=RunStatus.FAILED,
+                                    output=None,
+                                    failure=RunFailure(
+                                        "MEMORY_RESULT_SAVE_REQUIRED",
+                                        "authority",
+                                        False,
+                                        "结果尚未通过保存权限核验",
+                                    ),
+                                )
+                            else:
+                                memory_result = replace(memory_result, output=None)
+                            return await apply_result(memory_result)
+                        return memory_result
                     result = await self.graph_runtime.execute(selection, state)
-                # 取消请求一旦被受理，晚到的图结果不得覆盖取消终态。
-                if await self._is_cancelled(record.run_id) and isinstance(
-                    result, GraphExecutionResult
-                ):
-                    result = replace(
-                        result,
-                        next_status=RunStatus.CANCELLED,
-                        output=None,
-                        failure=None,
-                    )
-                if (
-                    result.budget_state.started_at_epoch_ms
-                    != record.budget_state.started_at_epoch_ms
-                    or result.budget_state.deadline_epoch_ms
-                    != record.budget_state.deadline_epoch_ms
-                ):
-                    result = replace(result, budget_state=record.budget_state)
-                return await self._apply_graph_result(record, result)
+                return await apply_result(result)
         except HarnessError:
             raise
         except Exception as error:  # noqa: BLE001 - 图或适配器异常不得外泄
@@ -1148,13 +1369,19 @@ class AgentRuntimeService:
                 budget_state=result.budget_state,
                 degraded=record.degraded or result.degraded,
             )
+            if target is RunStatus.SUCCEEDED:
+                await self._revalidate_result_publish(next_record)
             await self.repository.save(next_record, record.version)
+            if target is RunStatus.SUCCEEDED:
+                await self._revalidate_result_publish(next_record)
         # 只有 Run CAS 成功后，才公开 Checkpoint 已保存事实。
         await self._event(
             next_record,
             "checkpoint_saved",
             {"checkpoint_id": result.checkpoint.checkpoint_id},
         )
+        if target is RunStatus.SUCCEEDED:
+            await self._revalidate_result_publish(next_record)
         terminal_event = {
             RunStatus.SUCCEEDED: "run_succeeded",
             RunStatus.FAILED: "run_failed",
@@ -1166,13 +1393,17 @@ class AgentRuntimeService:
             await self._event(next_record, "budget_exhausted")
         if target is RunStatus.SUCCEEDED:
             presentation_degraded = await self._publish_result_events(next_record)
+            await self._revalidate_result_publish(next_record)
             if presentation_degraded and not next_record.degraded:
                 revised = replace(
                     next_record, degraded=True, version=next_record.version + 1
                 )
                 await self.repository.save(revised, next_record.version)
+                await self._revalidate_result_publish(revised)
                 next_record = revised
         await self._event(next_record, terminal_event)
+        if target is RunStatus.SUCCEEDED:
+            await self._revalidate_result_publish(next_record)
         view = self._view(next_record)
         await self._notify_run_state(view)
         self._realtime_output_run_tenants.pop(record.run_id, None)
@@ -1335,6 +1566,9 @@ class AgentRuntimeService:
             raise HarnessError("RUN_ALREADY_TERMINAL", "Run 已经结束")
         if run_id not in self._cancelled_runs:
             self._cancelled_runs.add(run_id)
+            entry = self._memory_run_controls.get((request.tenant_id, run_id))
+            if entry is not None:
+                entry[0].stop("CANCELLED")
             if self.cancellation_signal is not None:
                 await self.cancellation_signal.request(run_id)
             await self._event(
@@ -1521,7 +1755,9 @@ class AgentRuntimeService:
             and record.run_id in self._realtime_output_runs
         )
         if isinstance(content, str) and content and not already_streamed:
+            await self._revalidate_result_publish(record)
             await self.event_hub.publish_next(record.run_id, "assistant_started", {})
+            await self._revalidate_result_publish(record)
             if self.output_streamer is None:
                 await self.event_hub.publish_next(
                     record.run_id, "assistant_delta", {"delta": content}
@@ -1530,12 +1766,17 @@ class AgentRuntimeService:
                 emitted = False
                 try:
                     async for delta in self.output_streamer(record.run_id, output):
+                        await self._revalidate_result_publish(record)
                         if isinstance(delta, str) and delta:
-                            emitted = True
                             await self.event_hub.publish_next(
                                 record.run_id, "assistant_delta", {"delta": delta}
                             )
+                            emitted = True
+                            await self._revalidate_result_publish(record)
+                except ResultPublishDenied:
+                    raise
                 except Exception:  # noqa: BLE001 - 流式呈现失败回退既有安全正文
+                    await self._revalidate_result_publish(record)
                     presentation_degraded = True
                     await self.event_hub.publish_next(
                         record.run_id,
@@ -1548,6 +1789,7 @@ class AgentRuntimeService:
                         },
                     )
                     fallback = content if not emitted else f"\n\n{content}"
+                    await self._revalidate_result_publish(record)
                     await self.event_hub.publish_next(
                         record.run_id, "assistant_delta", {"delta": fallback}
                     )
@@ -1588,6 +1830,7 @@ class AgentRuntimeService:
                     },
                 )
                 return True
+            await self._revalidate_result_publish(record)
             await self.event_hub.publish_next(
                 record.run_id,
                 "deliverable",

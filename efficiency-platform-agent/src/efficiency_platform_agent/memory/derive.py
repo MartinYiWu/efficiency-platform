@@ -12,7 +12,9 @@ from efficiency_platform_agent.contracts.memory import (
 from efficiency_platform_agent.core.derive_ports import DeriveOperation
 from efficiency_platform_agent.core.memory import MemoryContextPacket
 from efficiency_platform_agent.memory.summary_contracts import (
+    RejectedOption,
     SummaryBasisEvent,
+    SummaryEntry,
     SummaryInputSource,
     SummarySegment,
 )
@@ -34,6 +36,9 @@ class HydratedDeriveSources:
     bodies: tuple[str, ...] = field(repr=False)
     events: tuple[SummaryBasisEvent, ...] = field(repr=False)
     source_revision: int
+    required_entries: tuple[SummaryEntry | RejectedOption, ...] = field(
+        default=(), repr=False
+    )
 
 
 class DeriveSourceHydrator(Protocol):

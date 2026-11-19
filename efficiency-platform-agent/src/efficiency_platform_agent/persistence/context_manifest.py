@@ -1,7 +1,12 @@
-"""仅保存元数据的 MySQL Manifest 与操作回执适配器。"""
+"""MySQL Manifest、原操作回执与受信发送结果的原子持久化。"""
 
+import hashlib
+import json
+from dataclasses import asdict
+
+from pydantic import TypeAdapter
 from sqlalchemy import LargeBinary, bindparam, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.sql.elements import TextClause
 
@@ -12,6 +17,17 @@ from efficiency_platform_agent.core.context_ports import (
     OperationReceipt,
 )
 from efficiency_platform_agent.core.memory import ExecutionScope
+from efficiency_platform_agent.core.memory_execution import (
+    MemorySendPermit,
+    MemorySendPermitAuthority,
+    memory_operation_deadline_matches,
+)
+from efficiency_platform_agent.core.run import ProviderResult
+
+from .memory_context_refresh import MySqlMemoryContextRefreshStore, _journal_binding
+from .memory_execution import _fingerprint
+
+_RESULT = TypeAdapter(ProviderResult)
 
 _KEY = "tenant_id=:tenant_id AND task_id=:task_id AND execution_id=:execution_id AND operation_id=:operation_id"
 
@@ -35,8 +51,320 @@ def _statement(sql: str) -> TextClause:
 
 
 class MySqlContextManifestStore:
-    def __init__(self, engine: AsyncEngine):
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        *,
+        memory_execution_store=None,
+        result_fault_hook=None,
+    ):
         self._engine = engine
+        if (
+            memory_execution_store is not None
+            and memory_execution_store.engine is not engine
+        ):
+            raise ValueError("MEMORY_RESULT_ENGINE_MISMATCH")
+        self._memory_execution_store = memory_execution_store
+        self._result_authority: MemorySendPermitAuthority | None = None
+        self._result_fault_hook = result_fault_hook
+
+    def install_result_authority(self, authority: MemorySendPermitAuthority) -> None:
+        if self._result_authority is not None or not callable(
+            getattr(authority, "validate", None)
+        ):
+            raise ValueError("MEMORY_RESULT_AUTHORITY_ALREADY_CONFIGURED")
+        self._result_authority = authority
+
+    async def _validate_permit(self, manifest, operation, permit):
+        if (
+            not isinstance(permit, MemorySendPermit)
+            or self._result_authority is None
+            or self._memory_execution_store is None
+            or not await self._result_authority.validate(permit)
+        ):
+            raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+        if (
+            permit.scope != manifest.scope
+            or permit.operation_id != manifest.operation_id
+            or permit.operation_id != operation.operation_id
+            or permit.attempt != manifest.attempt
+            or permit.attempt != operation.attempt
+            or permit.input_hash != manifest.canonical_request_hmac
+            or permit.manifest_id != manifest.manifest_id
+            or permit.packet_id != manifest.packet_id
+            or permit.deadline_epoch_seconds != operation.deadline_epoch_seconds
+            or operation.memory_disabled
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+
+    async def _lock_result_owner(self, conn, manifest, operation, permit):
+        journal = MySqlMemoryContextRefreshStore(self._memory_execution_store)
+        owner, record = await journal.lock_owner(
+            conn, manifest.scope.conversation, manifest.scope.execution_id
+        )
+        packet = record.context.packet
+        if (
+            record.runtime_id != permit.runtime_id
+            or record.execution_revision != permit.execution_revision
+            or not memory_operation_deadline_matches(
+                manifest.node_id,
+                permit.deadline_epoch_seconds,
+                record.deadline_epoch_seconds,
+            )
+            or (packet.scope, packet.task_id, packet.execution_id)
+            != (
+                manifest.scope.conversation,
+                manifest.scope.task_id,
+                manifest.scope.execution_id,
+            )
+            or packet.packet_id != permit.packet_id
+            or packet.packet_revision != permit.packet_revision
+            or record.context.packet_digest != permit.packet_digest
+            or not set(manifest.safety_dependencies).issubset(
+                packet.safety_dependencies
+            )
+            or (record.grant_epoch, record.source_epoch, record.deletion_epoch)
+            != (packet.grant_epoch, packet.source_epoch, packet.deletion_epoch)
+            or not any(
+                (grant.node_id, grant.execution_agent_id, grant.purpose)
+                == (
+                    manifest.scope.subtask_id,
+                    manifest.scope.execution_agent_id,
+                    manifest.scope.purpose,
+                )
+                for grant in record.context.execution_grants
+            )
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        params = _key(manifest.scope, manifest.operation_id) | {
+            "attempt": manifest.attempt
+        }
+        row = (
+            (
+                await conn.execute(
+                    _statement(
+                        "SELECT * FROM agent_context_operation WHERE "
+                        + _KEY
+                        + " FOR UPDATE"
+                    ),
+                    params,
+                )
+            )
+            .mappings()
+            .first()
+        )
+        saved = (
+            await conn.execute(
+                _statement(
+                    "SELECT metadata_json FROM agent_context_manifest WHERE "
+                    + _KEY
+                    + " AND attempt=:attempt FOR UPDATE"
+                ),
+                params,
+            )
+        ).scalar_one_or_none()
+        if (
+            row is None
+            or row["input_hash"] != permit.input_hash
+            or row["deadline"] != operation.deadline_epoch_seconds
+            or row["latest_attempt"] != permit.attempt
+            or saved is None
+            or ContextManifestModel.model_validate_json(saved).to_core() != manifest
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        if not await journal.manifest_authorized_locked(
+            conn, manifest, operation, record, owner["current_context_fingerprint"]
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        return journal, owner, record, row
+
+    @staticmethod
+    def _result_id(operation_id, attempt):
+        operation = operation_id.encode()
+        return hashlib.sha256(
+            str(len(operation)).encode()
+            + b":"
+            + operation
+            + b":"
+            + str(attempt).encode()
+        ).hexdigest()
+
+    async def _result_fault(self, point):
+        if self._result_fault_hook is not None:
+            await self._result_fault_hook(point)
+
+    async def capture_result_once(self, manifest, operation, send_permit, result):
+        await self._validate_permit(manifest, operation, send_permit)
+        if not isinstance(result, ProviderResult) or result.error is not None:
+            raise ValueError("MEMORY_RESULT_INCOMPLETE")
+        body = {
+            "schema_version": "memory-provider-result/1",
+            "permit": asdict(send_permit),
+            "manifest": json.loads(
+                ContextManifestModel.from_core(manifest).model_dump_json()
+            ),
+            "result": json.loads(_RESULT.dump_json(result)),
+        }
+        result_hash = _fingerprint(body["result"])
+        record_id = self._result_id(manifest.operation_id, manifest.attempt)
+        ref = "memory-result:" + record_id
+        try:
+            async with self._engine.begin() as conn:
+                journal, owner, record, operation_row = await self._lock_result_owner(
+                    conn, manifest, operation, send_permit
+                )
+                existing = await journal.record(
+                    conn,
+                    manifest.scope.conversation,
+                    manifest.scope.execution_id,
+                    "RESULT",
+                    record_id,
+                )
+                if existing is not None:
+                    saved = journal.body(existing)
+                    if (
+                        existing["result_hash"] != result_hash
+                        or saved != body
+                        or existing["request_hash"] != _fingerprint(body)
+                    ):
+                        raise ValueError("MEMORY_RESULT_CONFLICT")
+                    if (
+                        operation_row["status"] != "SUCCEEDED"
+                        or operation_row["receipt_ref"] != ref
+                    ):
+                        raise ValueError("MEMORY_RESULT_UNAVAILABLE")
+                    return ref
+                if operation_row["status"] not in {"SENT", "UNKNOWN"}:
+                    raise ValueError("MEMORY_RESULT_UNAVAILABLE")
+                scope = manifest.scope.conversation
+                data = {
+                    "tenant_id": scope.tenant_id.encode(),
+                    "execution_id": manifest.scope.execution_id.encode(),
+                    "record_kind": "RESULT",
+                    "record_id": record_id.encode(),
+                    "runtime_id": send_permit.runtime_id.encode(),
+                    "task_id": manifest.scope.task_id.encode(),
+                    "user_id": scope.user_id.encode(),
+                    "domain": scope.domain,
+                    "top_level_agent_id": scope.top_level_agent_id,
+                    "session_kind": scope.session_kind,
+                    "session_id": None
+                    if scope.session_id is None
+                    else scope.session_id.encode(),
+                    "request_hash": _fingerprint(body),
+                    "request_fingerprint": record.request_fingerprint,
+                    "semantic_input_hash": record.context.packet.semantic_input_hash,
+                    "operation_id": manifest.operation_id.encode(),
+                    "attempt": manifest.attempt,
+                    "canonical_request_hmac": manifest.canonical_request_hmac,
+                    "execution_revision": record.execution_revision,
+                    "original_deadline": record.deadline_epoch_seconds,
+                    "old_packet_revision": record.context.packet.packet_revision,
+                    "expected_current_context_fingerprint": owner[
+                        "current_context_fingerprint"
+                    ],
+                    "phase": "CAPTURED",
+                    "sent_packet_revision": send_permit.packet_revision,
+                    "sent_packet_digest": send_permit.packet_digest,
+                    "send_permit_hash": _fingerprint(asdict(send_permit)),
+                    "result_hash": result_hash,
+                }
+                sealed = self._memory_execution_store.cipher.seal_journal(
+                    tuple(asdict(scope).values()),
+                    manifest.scope.execution_id,
+                    send_permit.runtime_id,
+                    record_id,
+                    "RESULT",
+                    json.dumps(
+                        body, ensure_ascii=False, separators=(",", ":")
+                    ).encode(),
+                    binding=_journal_binding(data),
+                    key_version=record.key_version,
+                )
+                data.update(
+                    body_ciphertext=sealed.ciphertext,
+                    body_nonce=sealed.nonce,
+                    key_version=sealed.key_version,
+                )
+                await conn.execute(
+                    text(
+                        "INSERT INTO agent_memory_context_refresh ("
+                        + ",".join(data)
+                        + ") VALUES ("
+                        + ",".join(":" + key for key in data)
+                        + ")"
+                    ),
+                    data,
+                )
+                await self._result_fault("after_result_insert")
+                changed = await conn.execute(
+                    _statement(
+                        "UPDATE agent_context_operation SET status='SUCCEEDED',receipt_ref=:ref WHERE "
+                        + _KEY
+                        + " AND status IN ('SENT','UNKNOWN') AND input_hash=:hmac AND latest_attempt=:attempt AND deadline=:deadline"
+                    ),
+                    _key(manifest.scope, manifest.operation_id)
+                    | {
+                        "ref": ref,
+                        "hmac": send_permit.input_hash,
+                        "attempt": send_permit.attempt,
+                        "deadline": send_permit.deadline_epoch_seconds,
+                    },
+                )
+                if changed.rowcount != 1:
+                    raise ValueError("MEMORY_RESULT_UNAVAILABLE")
+                await self._result_fault("after_result_receipt")
+            await self._result_fault("after_result_commit")
+            return ref
+        except SQLAlchemyError as exc:
+            code = getattr(exc.orig, "args", (None,))[0]
+            raise ValueError(
+                "MEMORY_REFRESH_SCHEMA_REQUIRED"
+                if code in {1054, 1146}
+                else "MEMORY_AUTHORITY_UNAVAILABLE"
+            ) from None
+
+    async def get_captured_result(self, manifest, operation, send_permit):
+        await self._validate_permit(manifest, operation, send_permit)
+        record_id = self._result_id(manifest.operation_id, manifest.attempt)
+        try:
+            async with self._engine.begin() as conn:
+                journal, _, _, row = await self._lock_result_owner(
+                    conn, manifest, operation, send_permit
+                )
+                saved = await journal.record(
+                    conn,
+                    manifest.scope.conversation,
+                    manifest.scope.execution_id,
+                    "RESULT",
+                    record_id,
+                )
+                if (
+                    saved is None
+                    or row["status"] != "SUCCEEDED"
+                    or row["receipt_ref"] != "memory-result:" + record_id
+                ):
+                    raise ValueError("MEMORY_RESULT_UNAVAILABLE")
+                body = journal.body(saved)
+                if (
+                    body.get("schema_version") != "memory-provider-result/1"
+                    or body.get("permit") != json.loads(json.dumps(asdict(send_permit)))
+                    or body.get("manifest")
+                    != json.loads(
+                        ContextManifestModel.from_core(manifest).model_dump_json()
+                    )
+                    or saved["request_hash"] != _fingerprint(body)
+                    or saved["result_hash"] != _fingerprint(body["result"])
+                ):
+                    raise ValueError("MEMORY_RESULT_UNAVAILABLE")
+                return _RESULT.validate_python(body["result"])
+        except SQLAlchemyError as exc:
+            code = getattr(exc.orig, "args", (None,))[0]
+            raise ValueError(
+                "MEMORY_REFRESH_SCHEMA_REQUIRED"
+                if code in {1054, 1146}
+                else "MEMORY_AUTHORITY_UNAVAILABLE"
+            ) from None
 
     async def execution_manifests(
         self, tenant_id: str, execution_id: str

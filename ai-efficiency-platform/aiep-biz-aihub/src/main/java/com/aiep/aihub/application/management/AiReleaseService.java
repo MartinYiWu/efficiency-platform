@@ -42,6 +42,8 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AiReleaseService {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private MemoryPromotionAssetGuard promotionGuard;
     private static final String USER_ID = "1";
     private final AiManagementMappers repository;
     private final AiInvokeFacade ai;
@@ -56,6 +58,10 @@ public class AiReleaseService {
 
     public AiReleasePO publish(String agentVersionId, String environment) {
         AgentVersionPO version = requiredVersion(agentVersionId);
+        if(version.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)) {
+            if(promotionGuard==null)throw new AiManagementException("MEMORY_PROMOTION_SOURCE_REVOKED","经验资产来源不可用");
+            promotionGuard.deploy("AGENT",version.id());
+        }
         if (!"VALIDATED".equals(version.status())) {
             throw new AiManagementException("AI_AGENT_VERSION_NOT_VALIDATED", "Agent 版本必须先通过校验");
         }
@@ -81,9 +87,35 @@ public class AiReleaseService {
         try {
             CustomerServiceReleaseRequest request = objectMapper.readValue(
                     snapshot.snapshotJson(), CustomerServiceReleaseRequest.class);
-            return deliver(requiredVersion(target.agentVersionId()), request, targetReleaseId);
+            AgentVersionPO version=requiredVersion(target.agentVersionId());
+            validateRollbackSnapshot(target,snapshot,version,request);
+            return deliver(version, request, targetReleaseId);
         } catch (JsonProcessingException exception) {
             throw new AiManagementException("AI_RELEASE_SNAPSHOT_INVALID", "Release 快照无法读取");
+        }
+    }
+
+    private void validateRollbackSnapshot(AiReleasePO target,AiReleaseSnapshotPO snapshot,
+            AgentVersionPO version,CustomerServiceReleaseRequest request) {
+        if(!target.id().equals(snapshot.agentReleaseId())||!target.releaseSnapshotId().equals(snapshot.id())
+                ||!target.agentDefinitionId().equals(version.agentDefinitionId())||!target.environment().equals(request.environment())
+                ||!version.semanticVersion().equals(request.agentVersion())||!version.graphKey().equals(request.graphKey())
+                ||!version.graphVersion().equals(request.graphVersion())||!List.of("VALIDATED","RELEASED").contains(version.status())
+                ||!snapshot.checksum().equals(request.snapshotChecksum())||!checksum(request).equals(request.snapshotChecksum()))
+            throw new AiManagementException("AI_RELEASE_SNAPSHOT_INVALID","历史发布快照绑定无效");
+        AgentDefinitionPO agent=repository.findAgent(version.agentDefinitionId());
+        if(agent==null||!"ACTIVE".equals(agent.status())||!request.agentKey().equals(agent.agentKey()))throw new AiManagementException("AI_ASSET_OWNER_MISMATCH","历史发布Agent归属无效");
+        if(version.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)) {
+            if(promotionGuard==null)throw new AiManagementException("MEMORY_PROMOTION_SOURCE_REVOKED","经验资产来源不可用");
+            promotionGuard.deploy("AGENT",version.id());
+        }
+        for(PromptBinding historical:request.promptBindings()) {
+            var matches=repository.findPromptVersionsBySnapshot(historical.promptKey(),historical.promptVersion(),historical.checksum());
+            if(matches==null||matches.size()!=1)throw new AiManagementException("AI_RELEASE_SNAPSHOT_INVALID","历史Prompt版本无法唯一核验");
+            var exact=matches.getFirst();
+            // prompt()只使用该历史version及其消息/变量，复验来源与owner；不读取当前Agent绑定。
+            var checked=prompt(version.agentDefinitionId(),new PromptBindingPO(version.id(),historical.stageKey(),historical.ordinal(),exact.promptDefinitionId(),exact.id(),false));
+            if(!checked.equals(historical))throw new AiManagementException("AI_RELEASE_SNAPSHOT_INVALID","历史Prompt正文或变量已变化");
         }
     }
 
@@ -197,8 +229,12 @@ public class AiReleaseService {
     private PromptBinding prompt(String agentId, PromptBindingPO binding) {
         PromptDefinitionPO definition = repository.findPromptDefinition(binding.promptDefinitionId());
         PromptVersionPO version = repository.findPromptVersion(binding.promptVersionId());
-        if (definition == null || version == null || !"PUBLISHED".equals(version.status())) {
+        if (definition == null || !"ACTIVE".equals(definition.status()) || version == null || !"PUBLISHED".equals(version.status())) {
             throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 版本未发布");
+        }
+        if(version.changeSummary().startsWith(MemoryPromotionAssetGuard.MARKER)) {
+            if(promotionGuard==null)throw new AiManagementException("MEMORY_PROMOTION_SOURCE_REVOKED","经验资产来源不可用");
+            promotionGuard.deploy("PROMPT",version.id());
         }
         if (!definition.id().equals(version.promptDefinitionId()) || !definition.stageKey().equals(binding.stageKey())) {
             throw new AiManagementException("AI_RELEASE_PROMPT_INVALID", "Prompt 版本与阶段归属不匹配");

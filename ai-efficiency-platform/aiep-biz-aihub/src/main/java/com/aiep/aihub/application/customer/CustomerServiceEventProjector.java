@@ -16,18 +16,29 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class CustomerServiceEventProjector {
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryAgentPolicyService memoryAgentPolicies;
     private final CustomerServiceMappers repository;
     private final ObjectMapper objectMapper;
+    private final com.aiep.aihub.application.memory.MemoryActorProvider actors;
+    private final com.aiep.aihub.application.memory.MemoryContextResumeService memoryResumes;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.aiep.aihub.application.memory.MemoryPacketService memoryPackets;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.aiep.aihub.application.memory.MemoryDependencyService memoryDependencies;
     @org.springframework.beans.factory.annotation.Autowired(required=false)
     private com.aiep.platformai.api.AiInvokeFacade ai;
+    @org.springframework.beans.factory.annotation.Autowired(required=false)
+    private com.aiep.aihub.application.memory.MemoryDerivePlanService memoryDerives;
 
-    public CustomerServiceEventProjector(CustomerServiceMappers repository, ObjectMapper objectMapper) {
-        this.repository = repository;
-        this.objectMapper = objectMapper;
+    public CustomerServiceEventProjector(CustomerServiceMappers repository,ObjectMapper objectMapper) {
+        this(repository,objectMapper,null,null);
+    }
+    @org.springframework.beans.factory.annotation.Autowired
+    public CustomerServiceEventProjector(CustomerServiceMappers repository,ObjectMapper objectMapper,
+            @org.springframework.lang.Nullable com.aiep.aihub.application.memory.MemoryActorProvider actors,
+            @org.springframework.lang.Nullable com.aiep.aihub.application.memory.MemoryContextResumeService memoryResumes) {
+        this.repository=repository;this.objectMapper=objectMapper;this.actors=actors;this.memoryResumes=memoryResumes;
     }
 
     @Transactional
@@ -36,10 +47,25 @@ public class CustomerServiceEventProjector {
         if (run == null || !event.runId().equals(run.agentRunId())) {
             throw new IllegalArgumentException("CUSTOMER_SERVICE_AGENT_RUN_MISMATCH");
         }
+        if("context_refresh_required".equals(event.eventType())) {
+            memoryWaitReference(event);
+            if(event.sequence()>run.lastEventSequence()&&!com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))
+                repository.advanceRun(javaRunId,event.sequence()-1,event.sequence(),run.status(),run.answerMode(),run.failureCode(),run.failureMessage());
+            // 只推进内部游标，不写员工步骤或消息；重连从客户端公开游标重新取得原wait。
+            return null;
+        }
+        if("memory_derive_required".equals(event.eventType())) {
+            memoryDeriveReferences(event);
+            if(event.sequence()>run.lastEventSequence()&&!com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))repository.advanceRun(javaRunId,event.sequence()-1,event.sequence(),run.status(),run.answerMode(),run.failureCode(),run.failureMessage());
+            return null;
+        }
         com.aiep.aihub.api.memory.MemoryScopeDTO memoryScope=null;
         java.util.List<com.aiep.platformai.api.dto.MemoryContextPacket.Dependency> actualMemoryInputs=java.util.List.of();
-        if(memoryPackets!=null&&memoryPackets.enabled()&&java.util.Set.of("answer.delta","answer.completed","citation.ready").contains(event.eventType())) {
+        if(memoryPackets!=null&&memoryPackets.enabled()
+                &&(memoryAgentPolicies==null||memoryAgentPolicies.privateMemoryDomain(tenantId,"customer-service")||memoryPackets.hasIssuedExecution(tenantId,javaRunId))
+                &&java.util.Set.of("answer.delta","answer.completed","citation.ready").contains(event.eventType())) {
             memoryScope=memoryPackets.issuedScope(tenantId,javaRunId);
+            memoryPackets.validateKnowledgePublication(memoryScope,javaRunId);
             actualMemoryInputs=memoryPackets.verifyManifest(memoryScope,javaRunId,run.agentRunId(),ai.queryMemoryManifest(tenantId,javaRunId));
         }
         if (event.sequence() <= run.lastEventSequence()) {
@@ -92,11 +118,54 @@ public class CustomerServiceEventProjector {
         return publicEvent(javaRunId, event, true);
     }
 
+    /** Controller须先提交project事务；原run关联、捕获登录及会话拥有关系再次核验。 */
+    public com.aiep.platformai.api.dto.MemoryResumeReceipt onMemoryWait(String javaRunId,CustomerServiceRunEvent event,
+            com.aiep.aihub.application.operation.OperationActor capturedActor) {
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_REFRESH_TRANSACTION_INVALID");
+        String ref=memoryWaitReference(event);
+        if(actors==null||memoryResumes==null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED");
+        var actor=actors.revalidate(capturedActor);var run=repository.findRun(javaRunId,actor.tenantId());
+        if(run==null||!actor.tenantId().equals(run.tenantId())||!event.runId().equals(run.agentRunId())||run.lastEventSequence()<event.sequence())
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_RESUME_CONFLICT");
+        var conversation=repository.findConversation(run.conversationId(),actor.tenantId(),actor.userId());
+        if(conversation==null||!actor.tenantId().equals(conversation.tenantId())||!actor.userId().equals(conversation.userId()))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_SCOPE_DENIED");
+        if(com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("ACCESS_REVOKED");
+        return memoryResumes.onWaitEvent(run.tenantId(),run.id(),run.agentRunId(),ref);
+    }
+    private static String memoryWaitReference(CustomerServiceRunEvent event) {
+        if(!"context_refresh_required".equals(event.eventType())||event.payload().contextWaitRef()==null)
+            throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_WAIT_EVENT_INVALID");
+        return event.payload().contextWaitRef();
+    }
+    /** 原内部通知只refs，事务外执行原唯一derive，员工SSE不暴露baseline/计划。 */
+    public void onMemoryDerive(String javaRunId,CustomerServiceRunEvent event,com.aiep.aihub.application.operation.OperationActor captured) {
+        if(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive())throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_OUTSIDE_TRANSACTION_REQUIRED");
+        var refs=memoryDeriveReferences(event);if(actors==null||memoryDerives==null||memoryPackets==null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_DERIVE_FEATURE_DISABLED");
+        var actor=actors.revalidate(captured);var run=repository.findRun(javaRunId,actor.tenantId());
+        if(run==null||!event.runId().equals(run.agentRunId())||run.lastEventSequence()<event.sequence())throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_BINDING_CONFLICT");
+        if(com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))return;
+        var conversation=repository.findConversation(run.conversationId(),actor.tenantId(),actor.userId());if(conversation==null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("MEMORY_SCOPE_DENIED");
+        var scope=memoryPackets.issuedScope(actor.tenantId(),javaRunId);
+        if(!"customer-service".equals(scope.domain())||!scope.userId().equals(actor.userId())||!scope.sessionId().equals(run.conversationId()))throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_SCOPE_MISMATCH");
+        memoryDerives.handlePendingDerive(actor,scope,javaRunId,run.agentRunId(),refs.get(0),refs.get(1));
+    }
+    private static java.util.List<String> memoryDeriveReferences(CustomerServiceRunEvent event) {
+        var payload=event.payload();
+        if(!"memory_derive_required".equals(event.eventType())||payload.derivePlanId()==null||payload.deriveBaselineRef()==null||payload.contextWaitRef()!=null||payload.delta()!=null||payload.citation()!=null)throw new com.aiep.aihub.api.memory.MemoryContracts.MemoryException("DERIVE_BINDING_CONFLICT");
+        com.aiep.aihub.repository.memory.MemoryMapper.identity(payload.derivePlanId());com.aiep.aihub.repository.memory.MemoryMapper.identity(payload.deriveBaselineRef());return java.util.List.of(payload.derivePlanId(),payload.deriveBaselineRef());
+    }
+
     public java.util.List<PublicEvent> replay(String javaRunId, String tenantId, long afterSequence) {
         RunPO run = repository.findRun(javaRunId, tenantId);
         if (run == null) throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_FOUND");
-        if(memoryPackets!=null&&memoryPackets.enabled())memoryPackets.verifyManifest(memoryPackets.issuedScope(tenantId,javaRunId),
-            javaRunId,run.agentRunId(),ai.queryMemoryManifest(tenantId,javaRunId));
+        if(memoryPackets!=null&&memoryPackets.enabled()
+                &&(memoryAgentPolicies==null||memoryAgentPolicies.privateMemoryDomain(tenantId,"customer-service")||memoryPackets.hasIssuedExecution(tenantId,javaRunId))) {
+            var scope=memoryPackets.issuedScope(tenantId,javaRunId);memoryPackets.validateKnowledgePublication(scope,javaRunId);
+            memoryPackets.verifyManifest(scope,javaRunId,run.agentRunId(),ai.queryMemoryManifest(tenantId,javaRunId));
+        }
         if (!com.aiep.aihub.domain.customer.CustomerServiceModels.TERMINAL_STATUSES.contains(run.status()))
             throw new IllegalArgumentException("CUSTOMER_SERVICE_RUN_NOT_TERMINAL");
         java.util.List<PublicEvent> result = new java.util.ArrayList<>();
@@ -111,6 +180,7 @@ public class CustomerServiceEventProjector {
                 String type = payloadNode.path("_event_type").asText("");
                 payloadNode.remove("_event_type");
                 var payload = objectMapper.treeToValue(payloadNode, CustomerServiceRunEvent.Payload.class);
+                if("context_refresh_required".equals(type)||"memory_derive_required".equals(type)||payload.contextWaitRef()!=null||payload.derivePlanId()!=null)continue;
                 if (type.isEmpty()) type = legacyEventType(step, payload);
                 if (type == null) continue;
                 var status = com.aiep.platformai.api.dto.CustomerServiceRunView.Status.valueOf(step.status());
@@ -160,6 +230,7 @@ public class CustomerServiceEventProjector {
     }
 
     private PublicEvent publicEvent(String javaRunId, CustomerServiceRunEvent event, boolean newlyProjected) {
+        if("context_refresh_required".equals(event.eventType())||"memory_derive_required".equals(event.eventType()))return null;
         if ("conversation.title".equals(event.eventType()))
             return new PublicEvent(event.sequence(), "run.progress", Map.of("stage", "conversation_title", "summary", "会话标题已更新"));
         if ("answer.delta".equals(event.eventType()))

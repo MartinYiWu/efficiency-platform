@@ -92,7 +92,7 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     }
     @Override public List<MessagePO> listCompletedHistory(String conversationId, String tenantId, int limit) {
         return jdbc.query("SELECT * FROM (SELECT * FROM ai_customer_service_message WHERE conversation_id=? AND tenant_id=? "
-                        + "AND status='COMPLETED' ORDER BY created_at DESC LIMIT ?) x ORDER BY created_at",
+                        + "AND status='COMPLETED' ORDER BY created_at DESC,CASE WHEN role='USER' THEN 0 ELSE 1 END DESC,id DESC LIMIT ?) x ORDER BY created_at,CASE WHEN role='USER' THEN 0 ELSE 1 END,id",
                 JdbcCustomerServiceMappers::message, conversationId, tenantId, limit);
     }
     @Override public void completeAssistantMessage(String id, String content, String answerMode, String status) {
@@ -109,6 +109,7 @@ public class JdbcCustomerServiceMappers implements CustomerServiceMappers {
     @Override public RunPO findRun(String id, String tenantId) {
         return one("SELECT * FROM ai_customer_service_run WHERE id=? AND tenant_id=?", JdbcCustomerServiceMappers::run, id, tenantId);
     }
+    @Override public RunPO findRunForUpdate(String id,String tenantId){return one("SELECT * FROM ai_customer_service_run WHERE id=? AND tenant_id=? FOR UPDATE",JdbcCustomerServiceMappers::run,id,tenantId);}
     @Override public RunPO findRunByUserMessage(String userMessageId, String tenantId) {
         return one("SELECT * FROM ai_customer_service_run WHERE user_message_id=? AND tenant_id=?", JdbcCustomerServiceMappers::run, userMessageId, tenantId);
     }

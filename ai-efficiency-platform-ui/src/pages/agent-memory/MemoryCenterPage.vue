@@ -15,6 +15,10 @@ import {
 import { useMemoryPreferences } from '../../features/memory-preferences/useMemoryPreferences';
 import MemoryPreferenceForm from '../../features/memory-preferences/MemoryPreferenceForm.vue';
 import MemoryDeletionPanel from '../../features/memory-preferences/MemoryDeletionPanel.vue';
+import MemoryProposalPanel from '../../features/memory-proposals/MemoryProposalPanel.vue';
+import MemoryAgentGrantPanel from '../../features/memory-sharing/MemoryAgentGrantPanel.vue';
+import MemorySharingPanel from '../../features/memory-sharing/MemorySharingPanel.vue';
+import MemoryPromotionPanel from '../../features/memory-sharing/MemoryPromotionPanel.vue';
 import styles from './MemoryCenterPage.module.css';
 const route = useRoute(),
   router = useRouter();
@@ -28,7 +32,10 @@ const scope = computed<MemoryScope>(() => ({
     ? { sessionId: route.query.sessionId }
     : {}),
 }));
-const authenticated = computed(() => validAgent.value.success && Boolean(token()));
+const deniedCredential = ref<string>();
+const authenticated = computed(
+  () => validAgent.value.success && Boolean(token()) && token() !== deniedCredential.value,
+);
 const api = createMemoryApi(() => (authenticated.value ? token() : undefined));
 const forgetTarget = ref<MemoryPreference>();
 const authorizationVersion = ref(0);
@@ -60,7 +67,8 @@ const {
   () => (authenticated.value ? token() : undefined),
   authorizationDenied,
 );
-function invalidateAuthorization() {
+function invalidateAuthorization(status?: number) {
+  if (status === 401) deniedCredential.value = token();
   clearPrivate();
   authorizationDenied();
 }
@@ -110,14 +118,13 @@ function switchAgent(topAgent: TopAgent) {
             @change="switchAgent"
           />
         </div>
-        <a-button disabled title="跨 Agent 共享尚未开放">跨 Agent 共享</a-button>
       </div>
       <div :class="styles.boundaries">
         <span>同 Agent 跨会话可用</span><span>会话内容仅用于本次会话</span>
       </div>
       <p>
-        只有已保存的偏好可在当前 Agent 的其他会话使用；当前聊天内容不会自动保存为偏好。跨 Agent
-        共享尚未开放。
+        已保存的私有偏好可在当前 Agent 的其他会话使用；跨 Agent 和范围共享需要单独授权。
+        当前聊天内容不会自动保存为偏好。
       </p>
       <p v-if="scope.topAgent === 'hr'">
         人事助手采用 TASK_ONLY：仅处理当前任务，不提供跨任务聊天历史。
@@ -127,6 +134,12 @@ function switchAgent(topAgent: TopAgent) {
       v-if="!validAgent.success"
       type="error"
       message="不支持的 Agent，请重新选择"
+      show-icon
+    />
+    <a-alert
+      v-if="deniedCredential && deniedCredential === token()"
+      type="error"
+      message="登录会话已失效，请重新登录后管理记忆"
       show-icon
     />
     <a-alert v-if="error" type="error" :message="error" show-icon />
@@ -139,6 +152,32 @@ function switchAgent(topAgent: TopAgent) {
       @revoked="revoked"
       @restored="restored"
       @cleared="forgetTarget = undefined"
+      @denied="invalidateAuthorization"
+    />
+    <MemoryProposalPanel
+      v-if="authenticated"
+      :scope="scope"
+      :authorization-version="authorizationVersion"
+      @saved="load()"
+      @denied="invalidateAuthorization"
+    />
+    <MemoryAgentGrantPanel
+      v-if="authenticated"
+      :scope="scope"
+      :items="items"
+      :authorization-version="authorizationVersion"
+      @denied="invalidateAuthorization"
+    />
+    <MemorySharingPanel
+      v-if="authenticated && scope.topAgent !== 'hr'"
+      :items="items"
+      :authorization-version="authorizationVersion"
+      @denied="invalidateAuthorization"
+    />
+    <MemoryPromotionPanel
+      v-if="authenticated"
+      :scope="scope"
+      :authorization-version="authorizationVersion"
       @denied="invalidateAuthorization"
     />
     <div :class="styles.workspace">

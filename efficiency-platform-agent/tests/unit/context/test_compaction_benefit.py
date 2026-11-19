@@ -18,6 +18,10 @@ from efficiency_platform_agent.core.run import (
     ProviderRequest,
     ProviderToolCall,
 )
+from efficiency_platform_agent.memory.summary_projection import (
+    SUMMARY_LEGEND,
+    render_summary,
+)
 from efficiency_platform_agent.providers.llm.request_counter import (
     ConservativeRequestTokenCounter,
 )
@@ -137,6 +141,52 @@ def rebuild(baseline, counter, *, policy=None, pieces=None):
     return replace(baseline, window_policy=policy, view=view)
 
 
+def projected_message(result):
+    return next(
+        message
+        for message in result.request.messages
+        if isinstance(message.content, str) and message.content.startswith('{"v":2,')
+    )
+
+
+def candidate_text(candidate, text):
+    validation = import_module("efficiency_platform_agent.memory.summary_validation")
+    goal = candidate.segment.goal.model_copy(update={"text": text})
+    required = tuple(
+        goal if entry.claim_ref == goal.claim_ref else entry
+        for entry in candidate.frozen_sources.required_entries
+    )
+    return validation.validate_summary(
+        candidate.segment.model_copy(update={"goal": goal}),
+        replace(candidate.frozen_sources, required_entries=required),
+        candidate.task_state,
+    )
+
+
+def candidate_at_tokens(candidate, counter, capacity, tokens):
+    base = candidate_text(candidate, "B")
+    measured = counter.measure_messages(
+        (ProviderMessage("user", render_summary(base.segment).text),), capacity
+    ).total_upper_bound
+    assert tokens >= measured
+    result = candidate_text(candidate, "B" * (tokens - measured + 1))
+    assert (
+        counter.measure_messages(
+            (ProviderMessage("user", render_summary(result.segment).text),), capacity
+        ).total_upper_bound
+        == tokens
+    )
+    return result
+
+
+def retained_message(counter, capacity, tokens):
+    base = ProviderMessage("user", "B")
+    measured = counter.measure_messages((base,), capacity).total_upper_bound
+    message = ProviderMessage("user", "B" * (tokens - measured + 1))
+    assert counter.measure_messages((message,), capacity).total_upper_bound == tokens
+    return message
+
+
 @pytest.mark.parametrize("role", ["system", "developer"])
 def test_historical_system_or_developer_contract_is_not_replaced(role):
     api, baseline, candidate, counter = setup()
@@ -165,6 +215,14 @@ def test_original_zero_summary_slot_rejects_despite_full_request_benefit():
 
 def test_summary_single_fragment_limit_is_independent_of_full_request_window():
     api, baseline, candidate, counter = setup(full_candidate=True)
+    candidate = candidate_text(candidate, "保留全部状态" * 100)
+    assert (
+        counter.measure_messages(
+            (ProviderMessage("user", render_summary(candidate.segment).text),),
+            baseline.capacity,
+        ).total_upper_bound
+        > 500
+    )
     policy = replace(baseline.window_policy, summary_token_limit=10000)
     baseline = rebuild(baseline, counter, policy=policy)
     result = api.propose_compaction(baseline, candidate, counter)
@@ -176,12 +234,13 @@ def test_summary_single_fragment_limit_is_independent_of_full_request_window():
 @pytest.mark.parametrize("summary_limit", [700, 1000])
 def test_retained_and_new_summaries_share_original_total_slot(summary_limit):
     api, baseline, candidate, counter = setup()
+    candidate = candidate_at_tokens(candidate, counter, baseline.capacity, 450)
     history = baseline.view.pieces[1]
     dependency = replace(history.safety_dependencies[0], source_id="m3")
     existing = ContextPiece(
         "existing",
         history.scope,
-        (ProviderMessage("user", "existing summary"),),
+        (retained_message(counter, baseline.capacity, 450),),
         (dependency,),
         kind="summary",
         covered_message_ids=("m3",),
@@ -203,8 +262,8 @@ def test_retained_and_new_summaries_share_original_total_slot(summary_limit):
         assert result.request is None
     else:
         assert result.status == "BENEFICIAL"
-        assert result.request.messages[2] is existing.messages[0]
-        summaries = (result.request.messages[1], result.request.messages[2])
+        assert existing.messages[0] in result.request.messages
+        summaries = (projected_message(result), existing.messages[0])
         assert all(
             counter.measure_messages((m,), baseline.capacity).total_upper_bound <= 500
             for m in summaries
@@ -217,6 +276,7 @@ def test_retained_and_new_summaries_share_original_total_slot(summary_limit):
 
 def test_wide_policy_cannot_raise_hard_summary_total_above_1000():
     api, baseline, candidate, counter = setup()
+    candidate = candidate_at_tokens(candidate, counter, baseline.capacity, 450)
     legal = api.propose_compaction(baseline, candidate, counter)
     assert legal.status == "BENEFICIAL"
     history = baseline.view.pieces[1]
@@ -224,7 +284,7 @@ def test_wide_policy_cannot_raise_hard_summary_total_above_1000():
         ContextPiece(
             "existing-" + identifier,
             history.scope,
-            (ProviderMessage("user", "existing summary"),),
+            (retained_message(counter, baseline.capacity, 450),),
             (replace(history.safety_dependencies[0], source_id=identifier),),
             kind="summary",
             covered_message_ids=(identifier,),
@@ -245,13 +305,13 @@ def test_wide_policy_cannot_raise_hard_summary_total_above_1000():
         pieces=baseline.view.pieces[:2] + retained + baseline.view.pieces[2:],
     )
     assert all(piece in baseline.view.pieces for piece in retained)
-    summaries = (legal.request.messages[1], *(piece.messages[0] for piece in retained))
+    summaries = (projected_message(legal), *(piece.messages[0] for piece in retained))
     assert tuple(
         counter.measure_messages((message,), baseline.capacity).total_upper_bound
         for message in summaries
-    ) == (497, 302, 302)
+    ) == (450, 450, 450)
     assert (
-        counter.measure_messages(summaries, baseline.capacity).total_upper_bound == 1099
+        counter.measure_messages(summaries, baseline.capacity).total_upper_bound > 1000
     )
     original = baseline.view.request
     result = api.propose_compaction(baseline, candidate, counter)
@@ -267,6 +327,7 @@ def test_compact_projection_preserves_all_fields_and_is_measured_before_slot_rej
     monkeypatch,
 ):
     api, baseline, candidate, counter = setup(full_candidate=True)
+    candidate = candidate_text(candidate, "完整叙述" * 100)
     captured = []
     original = ConservativeRequestTokenCounter.measure_messages
 
@@ -277,55 +338,55 @@ def test_compact_projection_preserves_all_fields_and_is_measured_before_slot_rej
     monkeypatch.setattr(ConservativeRequestTokenCounter, "measure_messages", measure)
     result = api.propose_compaction(baseline, candidate, counter)
     assert result.reason == "SUMMARY_SLOT_LIMIT"
-    payload = json.loads(captured[0].content)
-    assert payload["version"] == 1
-    assert payload["refs"] == [{"type": "MESSAGE", "id": "m1", "version": "v1"}]
-    original_goal = candidate.segment.goal
-    assert payload["goal"] == {
-        "claim": original_goal.claim_ref,
-        "text": original_goal.text,
-        "origin": original_goal.content_origin,
-        "status": original_goal.decision_status,
-        "sources": [0],
-        "basis": None,
-    }
-    original_rejected = candidate.segment.rejected_options[0]
-    assert payload["rejected_options"] == [
-        {
-            "claim": original_rejected.claim_ref,
-            "text": original_rejected.text,
-            "origin": original_rejected.content_origin,
-            "status": original_rejected.decision_status,
-            "sources": [0],
-            "basis": 0,
-            "reason": None,
-            "critical": [
-                value.model_dump(mode="json")
-                for value in original_rejected.critical_values
-            ],
-        }
+    payload = json.loads(
+        next(
+            message.content
+            for message in captured
+            if isinstance(message.content, str)
+            and message.content.startswith('{"v":2,')
+        )
+    )
+    assert payload["v"] == 2
+    aliases = json.loads(render_summary(candidate.segment).aliases_json)
+    assert aliases["references"] == [
+        candidate.segment.covered_sources[0].model_dump(mode="json")
     ]
-    assert "confirmed_constraints" not in payload
+    original_goal = candidate.segment.goal
+    goal = payload["g"]
+    assert aliases["claims"][goal[0]] == original_goal.claim_ref
+    assert goal[1:] == [original_goal.text, 2, 0, [0], None]
+    original_rejected = candidate.segment.rejected_options[0]
+    rejected = payload["r"][0]
+    assert aliases["claims"][rejected[0]] == original_rejected.claim_ref
+    assert rejected[1:6] == [original_rejected.text, 0, 2, [0], 0]
+    assert aliases["references"][
+        rejected[5]
+    ] == original_rejected.basis_event_ref.model_dump(mode="json")
+    assert rejected[6] == [
+        [
+            value.field_ref,
+            {"NUMBER": 0, "DATE": 1, "CONSTRAINT": 2}[value.kind],
+            value.value,
+            value.timezone,
+        ]
+        for value in original_rejected.critical_values
+    ]
+    assert rejected[7] is None
+    assert "c" not in payload
 
 
 @pytest.mark.parametrize("fragment_tokens", [500, 501])
 def test_single_summary_exact_fragment_boundary_uses_actual_counter(fragment_tokens):
     api, baseline, candidate, counter = setup()
-    validation = import_module("efficiency_platform_agent.memory.summary_validation")
-    goal = candidate.segment.goal.model_copy(
-        update={"text": "B" * (fragment_tokens - 496)}
-    )
-    checked = validation.validate_summary(
-        candidate.segment.model_copy(update={"goal": goal}),
-        replace(candidate.frozen_sources, required_entries=(goal,)),
-        candidate.task_state,
+    checked = candidate_at_tokens(
+        candidate, counter, baseline.capacity, fragment_tokens
     )
     result = api.propose_compaction(baseline, checked, counter)
     if fragment_tokens == 500:
         assert result.status == "BENEFICIAL"
         assert (
             counter.measure_messages(
-                (result.request.messages[1],), baseline.capacity
+                (projected_message(result),), baseline.capacity
             ).total_upper_bound
             == 500
         )
@@ -373,19 +434,23 @@ def test_legal_summary_reduces_full_serialized_request_and_baseline_is_immutable
     )
     assert result.request.options is original.options
     assert result.request.messages[0] is original.messages[0]
+    assert (
+        sum(message.content == SUMMARY_LEGEND for message in result.request.messages)
+        == 1
+    )
     assert result.request.messages[-2:] == original.messages[-2:]
     assert result.safety_dependencies == baseline.view.selected_safety_dependencies
     assert baseline.view.request is original
     assert result.commit_status == "NOT_COMMITTED"
     assert (
         counter.measure_messages(
-            (result.request.messages[1],), baseline.capacity
+            (projected_message(result),), baseline.capacity
         ).total_upper_bound
         <= 500
     )
     assert (
         counter.measure_messages(
-            (result.request.messages[1],), baseline.capacity
+            (projected_message(result),), baseline.capacity
         ).total_upper_bound
         <= baseline.window_policy.summary_token_limit
     )
@@ -516,8 +581,10 @@ def test_dependency_from_actual_input_remains_when_entry_display_refs_are_smalle
     assert hidden.to_core() in result.safety_dependencies
     assert result.request is not None
     assert hidden in checked.source_dependencies
-    payload = json.loads(result.request.messages[1].content)
-    assert all(ref["id"] != "hidden" for ref in payload["refs"])
+    payload = json.loads(projected_message(result).content)
+    aliases = json.loads(render_summary(checked.segment).aliases_json)
+    assert all(ref["source_id"] != "hidden" for ref in aliases["references"])
+    assert aliases["references"][payload["g"][4][0]]["source_id"] == "m1"
 
 
 def test_baseline_policy_authority_cannot_be_widened_by_candidate():

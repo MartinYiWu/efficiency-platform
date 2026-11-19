@@ -3,7 +3,14 @@
 import json
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_serializer,
+    model_validator,
+)
 
 from efficiency_platform_agent.core.memory_execution import (
     MemoryExecutionContext,
@@ -41,6 +48,27 @@ class MemoryAuthorizationModel(BaseModel):
     semantic_snapshot_digest: str
     request_digest: str
     input_dependencies: tuple[SourceDependencyModel, ...] = Field(min_length=1)
+    summary_context_json: str | None = Field(
+        default=None, max_length=524288, repr=False
+    )
+    derive_template_json: str | None = Field(
+        default=None, max_length=524288, repr=False
+    )
+    knowledge_context_json: str | None = Field(
+        default=None, max_length=524288, repr=False
+    )
+
+    @model_serializer(mode="wrap")
+    def serialize_optional_summary(self, handler):
+        value = handler(self)
+        for key in (
+            "summary_context_json",
+            "derive_template_json",
+            "knowledge_context_json",
+        ):
+            if value.get(key) is None:
+                value.pop(key, None)
+        return value
 
 
 class MemoryContextEnvelope(BaseModel):
@@ -83,6 +111,9 @@ class MemoryContextEnvelope(BaseModel):
             auth.semantic_snapshot_digest,
             auth.request_digest,
             tuple(dep.to_core() for dep in auth.input_dependencies),
+            auth.summary_context_json,
+            auth.derive_template_json,
+            auth.knowledge_context_json,
         )
 
 

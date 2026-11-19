@@ -70,6 +70,9 @@ from efficiency_platform_agent.configuration.integration import (
 )
 from efficiency_platform_agent.configuration.paid_budget import default_paid_budget_path
 from efficiency_platform_agent.configuration.research import ResearchPipelineSettings
+from efficiency_platform_agent.configuration.task_authorization import (
+    task_authorization_enabled,
+)
 from efficiency_platform_agent.context.dispatch import (
     ContextDispatch,
     ControlledModelProvider,
@@ -287,6 +290,7 @@ def build_local_agent_application(
     context_dispatch: ContextDispatch | None = None,
     memory_runtime: Any = None,
     memory_database: MySqlRuntimeDatabase | None = None,
+    memory_index_provider=None,
     test_mode: bool = False,
     http_client: Any | None = None,
     research_provider: Any | None = None,
@@ -388,6 +392,7 @@ def build_local_agent_application(
         if test_mode:
             raise ValueError("MEMORY_PERSISTENT_STORE_REQUIRED")
         from .memory_runtime import MemoryRuntimeComponents
+
         if not isinstance(memory_runtime, MemoryRuntimeComponents):
             raise ValueError("MEMORY_RUNTIME_COMPONENTS_REQUIRED")
         assert resolved.memory_encryption_key is not None
@@ -412,7 +417,9 @@ def build_local_agent_application(
             InMemoryRetrievalSnapshotRepository()
         )
     else:
-        runtime_database = memory_database or MySqlRuntimeDatabase(_secret(resolved, "runtime_database_url"))
+        runtime_database = memory_database or MySqlRuntimeDatabase(
+            _secret(resolved, "runtime_database_url")
+        )
         run_repository = MySqlRunRepository(runtime_database.engine, memory_cipher)
         run_event_store = MySqlRunEventStore(runtime_database.engine)
         ranked_reference_repository = MySqlRankedReferenceRepository(
@@ -517,7 +524,12 @@ def build_local_agent_application(
     client = http_client
     paid_clients: tuple[httpx.AsyncClient, ...] = ()
     paid_ledger = (
-        None if test_mode else SqlitePaidBudgetLedger(default_paid_budget_path())
+        None
+        if test_mode
+        else SqlitePaidBudgetLedger(
+            default_paid_budget_path(),
+            task_authorization_enabled=task_authorization_enabled(),
+        )
     )
     # 同进程各Provider在预留前共用槽位；跨进程仍由固定总账执行最终限制。
     paid_snapshot = paid_ledger.snapshot() if paid_ledger is not None else {}
@@ -587,8 +599,23 @@ def build_local_agent_application(
             from efficiency_platform_agent.orchestration.context_gate import (
                 FencedModelProvider,
             )
-            current = FencedModelProvider(current, memory_runtime.registry, "official")
-            customer_current = FencedModelProvider(customer_current, memory_runtime.registry, "NO_CHECKPOINT")
+
+            current = FencedModelProvider(
+                current,
+                memory_runtime.registry,
+                "official",
+                send_authority=memory_runtime.send_authority
+                if resolved.memory_refresh_enabled
+                else None,
+            )
+            customer_current = FencedModelProvider(
+                customer_current,
+                memory_runtime.registry,
+                "NO_CHECKPOINT",
+                send_authority=memory_runtime.send_authority
+                if resolved.memory_refresh_enabled
+                else None,
+            )
         provider_registry.register(provider_id, current)
         candidates.append(_candidate(provider_id, provider_id, model, tier))
         customer_service_model_providers.setdefault(model, customer_current)
@@ -647,7 +674,9 @@ def build_local_agent_application(
         diagnostic_recorder=execution_logger,
         memory_registry=memory_runtime.registry if resolved.memory_enabled else None,
         checkpoint_store=memory_runtime.owned if resolved.memory_enabled else None,
-        checkpoint_serializer=memory_runtime.serializer if resolved.memory_enabled else None,
+        checkpoint_serializer=memory_runtime.serializer
+        if resolved.memory_enabled
+        else None,
     )
     runtime = AgentRuntimeService(
         repository=run_repository,
@@ -664,6 +693,7 @@ def build_local_agent_application(
         event_hub=event_hub,
         diagnostic_recorder=execution_logger,
         memory_execution_store=memory_store,
+        memory_refresh_enabled=resolved.memory_refresh_enabled,
     )
     runtime_service = runtime
     local_live_components = None
@@ -938,6 +968,201 @@ def build_local_agent_application(
 
         dependency_probe = hr_dependency_probe
 
+    if resolved.memory_refresh_enabled:
+        if (
+            memory_runtime.refresh_service is None
+            or memory_runtime.send_authority is None
+            or context_dispatch is None
+            or memory_store is None
+        ):
+            raise ValueError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+
+        from efficiency_platform_agent.core.run_context_binding import (
+            current_run_context,
+        )
+
+        async def publish_context_wait(
+            wait_id: str, execution_id: str, runtime_id: str
+        ) -> None:
+            binding = current_run_context()
+            if (
+                binding is None
+                or binding.memory_context is None
+                or binding.execution_id != execution_id
+            ):
+                raise PermissionError("MEMORY_RUN_BINDING_REQUIRED")
+            record = await memory_store.get(
+                binding.conversation.tenant_id, execution_id
+            )
+            if (
+                record is None
+                or record.state != "ACTIVE"
+                or record.runtime_id != runtime_id
+                or record.context.packet.scope != binding.conversation
+            ):
+                raise PermissionError("ACCESS_REVOKED")
+            wait = await memory_runtime.refresh_service.get_wait(
+                binding.conversation, execution_id
+            )
+            if (
+                wait is None
+                or wait.wait_event_id != wait_id
+                or wait.runtime_id != runtime_id
+            ):
+                raise PermissionError("MEMORY_WAIT_CONSUMED")
+            if record.runtime_kind == "CUSTOMER_SERVICE":
+                if (
+                    customer_service_run_service is None
+                    or not await customer_service_run_service.notify_context_wait(
+                        record, wait_id
+                    )
+                ):
+                    raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+            elif record.runtime_kind == "OPERATIONS":
+                await event_hub.publish_next(
+                    runtime_id, "context_refresh_required", {"wait_event_id": wait_id}
+                )
+            else:
+                raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+
+        context_dispatch.install_refresh(
+            memory_runtime.refresh_service, memory_store, on_wait=publish_context_wait
+        )
+        from efficiency_platform_agent.orchestration.context_gate import (
+            MemoryDirectContextGate,
+        )
+        from efficiency_platform_agent.orchestration.fenced_checkpoint import (
+            FencedCheckpointStore,
+        )
+
+        if not isinstance(graph_runtime.checkpoints, FencedCheckpointStore):
+            raise ValueError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+
+        direct_memory_gate = MemoryDirectContextGate(
+            memory_runtime.refresh_service,
+            memory_store,
+            memory_runtime.registry,
+            memory_runtime.send_authority,
+            saver=memory_runtime.saver,
+            checkpoint_store=graph_runtime.checkpoints,
+            dispatch=context_dispatch,
+            on_wait=publish_context_wait,
+        )
+        memory_runtime.saver.install_context_checkpoint_authority(direct_memory_gate)
+        graph_runtime.checkpoints.install_context_checkpoint_authority(
+            direct_memory_gate
+        )
+        registry.get(StrategyMode.DIRECT).builder.memory_gate = direct_memory_gate
+        memory_runtime.refresh_service.frame_verifier = (
+            direct_memory_gate.verify_wait_frame
+        )
+        memory_runtime.refresh_service.checkpoint_verifier = (
+            direct_memory_gate.verify_wait_checkpoint
+        )
+        memory_runtime.refresh_service.wait_task_resolver = (
+            direct_memory_gate.wait_frame_task
+        )
+        from .memory_runtime import build_memory_binding_updater
+
+        memory_runtime.refresh_service.binding_updater = build_memory_binding_updater(
+            direct_memory_gate, customer_service_run_service
+        )
+
+    derive_coordinator = None
+    if resolved.memory_derive_enabled:
+        if (
+            memory_store is None
+            or memory_cipher is None
+            or context_dispatch is None
+            or runtime_database is None
+            or paid_ledger is None
+            or model_client is None
+        ):
+            raise ValueError("MEMORY_DERIVE_RUNTIME_REQUIRED")
+        from efficiency_platform_agent.configuration.context_publication import (
+            load_context_publication,
+        )
+
+        from .memory_derive_factory import build_memory_derive_coordinator
+
+        publication = load_context_publication(resolved.context_publication_file)
+        derive_metadata = [
+            item for item in publication.metadata if item.node_id == "memory.derive"
+        ]
+        if len(derive_metadata) != 1:
+            raise ValueError("MEMORY_DERIVE_PUBLICATION_REQUIRED")
+
+        async def notify_derive(runtime_id: str, payload: dict[str, str]) -> None:
+            if customer_service_run_service is not None:
+                for run in tuple(customer_service_run_service._runs.values()):
+                    if str(run.view.run_id)==runtime_id and run.context_binding is not None:
+                        record=await memory_store.get(run.request.tenant_id,run.context_binding.execution_id)
+                        if record is None or not await customer_service_run_service.notify_memory_derive(record,payload):
+                            raise PermissionError("DERIVE_ORIGINAL_EXECUTION_REQUIRED")
+                        return
+            await event_hub.publish_next(runtime_id, "memory_derive_required", payload)
+
+        derive_coordinator = build_memory_derive_coordinator(
+            engine=runtime_database.engine,
+            client=model_client,
+            ledger=paid_ledger,
+            cipher=memory_cipher,
+            hmac_key=_secret(resolved, "context_hmac_key").encode(),
+            metadata=derive_metadata[0],
+            execution_store=memory_store,
+            api_key=_secret(resolved, "deepseek_api_key"),
+            base_url=_secret(resolved, "deepseek_base_url"),
+            notify_waitasync=notify_derive,
+            send_authority=memory_runtime.send_authority,
+        )
+        context_dispatch.controller.install_derive_runtime(derive_coordinator.frames)
+        context_dispatch.derive_coordinator = derive_coordinator
+        runtime.memory_derive_coordinator = derive_coordinator
+        if customer_service_run_service is not None:
+            customer_service_run_service.memory_derive_coordinator=derive_coordinator
+
+    memory_index_runtime: Any = None
+    if resolved.memory_index_enabled or resolved.memory_recall_enabled:
+        if (
+            memory_index_provider is None
+            or memory_store is None
+            or paid_ledger is None
+            or memory_runtime.send_authority is None
+            or test_mode
+        ):
+            raise ValueError("MEMORY_INDEX_RUNTIME_REQUIRED")
+        from efficiency_platform_agent.persistence.memory_index import (
+            PostgresMemoryIndex,
+        )
+
+        from .memory_index_runtime import MemoryIndexRuntime
+
+        memory_index_runtime = MemoryIndexRuntime(
+            PostgresMemoryIndex(memory_index_provider),
+            memory_store,
+            memory_runtime.send_authority,
+            paid_ledger,
+            embedding,
+            index_enabled=resolved.memory_index_enabled,
+            recall_enabled=resolved.memory_recall_enabled,
+            query_embedding_enabled=resolved.memory_query_embedding_enabled,
+        )
+        runtime.memory_index_runtime = memory_index_runtime
+        if customer_service_run_service is not None:
+            customer_service_run_service.memory_index_runtime = memory_index_runtime
+    elif resolved.memory_index_cleanup_enabled:
+        if memory_index_provider is None:
+            raise ValueError("MEMORY_INDEX_RUNTIME_REQUIRED")
+        from efficiency_platform_agent.persistence.memory_index import (
+            PostgresMemoryIndex,
+        )
+
+        from .memory_index_runtime import MemoryIndexCleanupRuntime
+
+        memory_index_runtime = MemoryIndexCleanupRuntime(
+            PostgresMemoryIndex(memory_index_provider)
+        )
+
     app = create_app(
         runtime,
         event_hub=event_hub,
@@ -950,11 +1175,25 @@ def build_local_agent_application(
         hr_skill_authorizer=hr_authorizer,
         context_internal_authorizer=context_authorizer,
         memory_enabled=resolved.memory_enabled,
+        memory_index_runtime=memory_index_runtime,
+        memory_derive_endpoint=derive_coordinator.handler
+        if derive_coordinator is not None
+        else None,
+        memory_derive_coordinator=derive_coordinator,
         memory_execution_store=memory_store,
         runtime_mode="s2_fake_in_memory" if test_mode else "local_real_mysql",
-        memory_erase_threads=memory_runtime.erasure.prepare_and_erase if resolved.memory_enabled else None,
-        memory_cleanup_journal=memory_runtime.journal if resolved.memory_enabled else None,
-        memory_resume_execution=memory_runtime.registry.resume if resolved.memory_enabled else None,
+        memory_erase_threads=memory_runtime.erasure.prepare_and_erase
+        if resolved.memory_enabled
+        else None,
+        memory_cleanup_journal=memory_runtime.journal
+        if resolved.memory_enabled
+        else None,
+        memory_resume_execution=memory_runtime.registry.resume
+        if resolved.memory_enabled
+        else None,
+        memory_refresh_service=memory_runtime.refresh_service
+        if resolved.memory_refresh_enabled
+        else None,
         memory_manifest_reader=cast(
             MySqlContextManifestStore, context_dispatch.store
         ).execution_manifests
@@ -980,7 +1219,13 @@ def build_local_agent_application(
         client if owns_client else None,
         research_client,
         runtime_database,
-        customer_service_resources + ((memory_runtime,) if resolved.memory_enabled else ()),
+        customer_service_resources
+        + (
+            (memory_index_runtime.expiry_worker,)
+            if memory_index_runtime is not None
+            else ()
+        )
+        + ((memory_runtime,) if resolved.memory_enabled else ()),
     )
     app.router.add_event_handler("shutdown", application.close)
     return application

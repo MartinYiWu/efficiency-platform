@@ -11,6 +11,8 @@ public interface MemoryLifecycleMapper {
  int release(@Param("delivery") Delivery delivery,@Param("token") byte[] token);
  int sourceTombstone(@Param("tenant") byte[] tenant,@Param("source") byte[] source,@Param("epoch") long epoch);
  List<VersionProof> versionProofs(@Param("tenant") byte[] tenant,@Param("item") byte[] item,@Param("version") byte[] version);
+ int proposalScrubbed(@Param("tenant") byte[] tenant,@Param("id") byte[] id,@Param("version") byte[] version);
+ int episodeScrubbed(@Param("tenant") byte[] tenant,@Param("id") byte[] id,@Param("version") byte[] version);
  record VersionProof(String status,String policyJson) {}
  record Delivery(byte[] tenantId,byte[] eventId,byte[] jobId,long deletionEpoch,long revision) {}
 }

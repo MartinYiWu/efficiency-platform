@@ -52,6 +52,29 @@ class PacketMemoryReader:
                 raise ValueError("MEMORY_VALUE_DENIED")
             if not item.safety_dependencies:
                 raise ValueError("MEMORY_ITEM_DEPENDENCIES_REQUIRED")
+            grants = tuple(
+                dep
+                for dep in item.safety_dependencies
+                if dep.source_type == "MEMORY_SHARE_GRANT"
+            )
+            if item.item_id.startswith("share:"):
+                if (
+                    len(grants) != 1
+                    or grants[0].source_id != item.item_id.removeprefix("share:")
+                    or scope.conversation.domain == "hr"
+                    or not any(
+                        dep.source_type == "USER_PREFERENCE_DECISION"
+                        for dep in item.safety_dependencies
+                    )
+                    or any(
+                        dep.source_type
+                        not in {"MEMORY_SHARE_GRANT", "USER_PREFERENCE_DECISION"}
+                        for dep in item.safety_dependencies
+                    )
+                ):
+                    raise ValueError("MEMORY_SHARE_GRANT_REQUIRED")
+            elif grants:
+                raise ValueError("MEMORY_SHARE_GRANT_BINDING_INVALID")
             seen.add(item.field_key)
         items = tuple(item for item in packet.items if item.field_key in fields)
         dependencies = inherit_safety_dependencies(

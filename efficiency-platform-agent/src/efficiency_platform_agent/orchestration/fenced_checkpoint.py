@@ -12,9 +12,13 @@ from importlib.metadata import version
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.types import Interrupt
 
 from efficiency_platform_agent.core.budget import BudgetCharge, BudgetState
 from efficiency_platform_agent.core.enums import RunStatus
+from efficiency_platform_agent.core.memory_execution import (
+    current_memory_wait_checkpoint_capability,
+)
 from efficiency_platform_agent.core.memory_thread import (
     CheckpointBodyCipher,
     CheckpointCiphertext,
@@ -56,6 +60,11 @@ class CheckpointPayloadSerializer:
             ]
         if type(value) is RunStatus:
             return ["run_status", value.value]
+        if type(value) is Interrupt:
+            return [
+                "langgraph_interrupt",
+                self._pack({"value": value.value, "id": value.id}),
+            ]
         raise TypeError("CHECKPOINT_VALUE_UNSUPPORTED")
 
     def _unpack(self, value: Any) -> Any:
@@ -92,6 +101,15 @@ class CheckpointPayloadSerializer:
             )
         if tag == "run_status" and type(data) is str:
             return RunStatus(data)
+        if tag == "langgraph_interrupt":
+            raw = self._unpack(data)
+            if (
+                type(raw) is not dict
+                or set(raw) != {"value", "id"}
+                or type(raw["id"]) is not str
+            ):
+                raise ValueError("CHECKPOINT_BODY_UNAVAILABLE")
+            return Interrupt(raw["value"], id=raw["id"])
         raise ValueError("CHECKPOINT_BODY_UNAVAILABLE")
 
     def encode(self, location: CheckpointLocation, value: Any) -> dict[str, str]:
@@ -155,6 +173,12 @@ class FencedCheckpointSaver(BaseCheckpointSaver[Any]):
             raise ValueError("CHECKPOINT_ENCRYPTION_REQUIRED")
         self._saver, self._registry, self.backend_id = saver, registry, backend_id
         self.serializer = serializer
+        self._context_checkpoint_authority = None
+
+    def install_context_checkpoint_authority(self, authority):
+        if self._context_checkpoint_authority is not None:
+            raise ValueError("MEMORY_CHECKPOINT_AUTHORITY_ALREADY_BOUND")
+        self._context_checkpoint_authority = authority
 
     @property
     def config_specs(self):
@@ -163,14 +187,27 @@ class FencedCheckpointSaver(BaseCheckpointSaver[Any]):
     def get_next_version(self, current, channel):
         return self._saver.get_next_version(current, channel)
 
-    def _guard(self, config, *, pending_writes=False):
+    def _guard(self, config, *, pending_writes=False, values=None, writes=None):
         if config is None:
             raise PermissionError("MEMORY_THREAD_REQUIRED")
-        values = config.get("configurable", {})
-        thread = values.get("thread_id")
-        namespace = values.get("checkpoint_ns", "")
+        configuration = config.get("configurable", {})
+        thread = configuration.get("thread_id")
+        namespace = configuration.get("checkpoint_ns", "")
         if not isinstance(thread, str) or not thread or not isinstance(namespace, str):
             raise PermissionError("MEMORY_THREAD_REQUIRED")
+        authority = self._context_checkpoint_authority
+        if current_memory_wait_checkpoint_capability() is not None and (
+            authority is None or not authority.has_frame()
+        ):
+            raise PermissionError("MEMORY_WAIT_CHECKPOINT_FORBIDDEN")
+        if authority is not None and authority.has_frame():
+            return authority.checkpoint_guard(
+                self.backend_id,
+                namespace,
+                values=values,
+                writes=writes,
+                pending_writes=pending_writes,
+            )
         return self._registry.guard(
             thread, self.backend_id, namespace, pending_writes=pending_writes
         )
@@ -178,11 +215,20 @@ class FencedCheckpointSaver(BaseCheckpointSaver[Any]):
     async def aget_tuple(self, config):
         async with self._guard(config) as owner:
             value = await self._saver.aget_tuple(config)
-            return (
+            decoded = (
                 self._decode_tuple(owner, value)
                 if self.serializer is not None and value is not None
                 else value
             )
+            if (
+                decoded is not None
+                and current_memory_wait_checkpoint_capability() is not None
+                and not self._context_checkpoint_authority.validate_cpu_checkpoint(
+                    dict(decoded.checkpoint["channel_values"])
+                )
+            ):
+                raise PermissionError("MEMORY_WAIT_CHECKPOINT_FORBIDDEN")
+            return decoded
 
     def _decode_tuple(self, owner, value):
         config = value.config["configurable"]
@@ -265,7 +311,7 @@ class FencedCheckpointSaver(BaseCheckpointSaver[Any]):
                     break
 
     async def aput(self, config, checkpoint, metadata, new_versions):
-        async with self._guard(config) as owner:
+        async with self._guard(config, values=checkpoint["channel_values"]) as owner:
             if self.serializer is not None:
                 if checkpoint.get("pending_sends") or any(
                     type(value).__name__ == "_DeltaSnapshot"
@@ -312,7 +358,7 @@ class FencedCheckpointSaver(BaseCheckpointSaver[Any]):
             return await self._saver.aput(config, checkpoint, metadata, new_versions)
 
     async def aput_writes(self, config, writes, task_id, task_path=""):
-        async with self._guard(config, pending_writes=True) as owner:
+        async with self._guard(config, pending_writes=True, writes=writes) as owner:
             if self.serializer is not None:
                 checkpoint_id = config["configurable"]["checkpoint_id"]
                 writes = [
@@ -440,6 +486,22 @@ class FencedCheckpointStore:
         self._store, self._registry = store, registry
         self.backend_id = store.backend_id
         self.serializer = serializer
+        self._context_checkpoint_authority = None
+
+    def install_context_checkpoint_authority(self, authority):
+        if self._context_checkpoint_authority is not None:
+            raise ValueError("MEMORY_CHECKPOINT_AUTHORITY_ALREADY_BOUND")
+        self._context_checkpoint_authority = authority
+
+    def _guard(self, run_id, namespace, state=None):
+        authority = self._context_checkpoint_authority
+        if current_memory_wait_checkpoint_capability() is not None and (
+            authority is None or not authority.has_frame()
+        ):
+            raise PermissionError("MEMORY_WAIT_CHECKPOINT_FORBIDDEN")
+        if authority is not None and authority.has_frame():
+            return authority.checkpoint_guard(self.backend_id, namespace, values=state)
+        return self._registry.guard(run_id, self.backend_id, namespace)
 
     @staticmethod
     def _binding(value) -> JsonObject:
@@ -454,9 +516,7 @@ class FencedCheckpointStore:
         raise ValueError("CHECKPOINT_BINDING_INVALID")
 
     async def save(self, run_id, checkpoint_ns, state, *, tenant_id="", **kwargs):
-        async with self._registry.guard(
-            run_id, self.backend_id, checkpoint_ns
-        ) as owner:
+        async with self._guard(run_id, checkpoint_ns, state) as owner:
             if owner is not None and owner.scope.conversation.tenant_id != tenant_id:
                 raise PermissionError("MEMORY_THREAD_OWNER_MISMATCH")
             if self.serializer is not None:
@@ -484,9 +544,7 @@ class FencedCheckpointStore:
             return await value if inspect.isawaitable(value) else value
 
     async def get(self, run_id, checkpoint_ns, tenant_id=""):
-        async with self._registry.guard(
-            run_id, self.backend_id, checkpoint_ns
-        ) as owner:
+        async with self._guard(run_id, checkpoint_ns) as owner:
             if owner is not None and owner.scope.conversation.tenant_id != tenant_id:
                 raise PermissionError("MEMORY_THREAD_OWNER_MISMATCH")
             value = self._store.get(run_id, checkpoint_ns, tenant_id)

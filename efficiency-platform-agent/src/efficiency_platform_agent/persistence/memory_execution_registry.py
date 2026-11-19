@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import asdict
 from typing import Any
 from uuid import uuid4
@@ -26,7 +27,10 @@ from efficiency_platform_agent.core.memory import (
     ExecutionScope,
     SourceDependency,
 )
-from efficiency_platform_agent.core.memory_execution import MemoryExecutionStore
+from efficiency_platform_agent.core.memory_execution import (
+    MemoryExecutionStore,
+    memory_operation_deadline_matches,
+)
 from efficiency_platform_agent.core.memory_thread import (
     CheckpointLocation,
     ResumeReceipt,
@@ -116,6 +120,88 @@ class PostgresMemoryExecutionRegistry:
             clock,
         )
         self._lock = asyncio.Lock()
+        self._result_authority = None
+        self._wait_authority = None
+        self._wait_checkpoint_context: ContextVar[Any] = ContextVar(
+            "memory_wait_checkpoint_scope", default=None
+        )
+        self._result_checkpoint_context: ContextVar[Any] = ContextVar(
+            "memory_result_checkpoint_scope", default=None
+        )
+
+    def install_result_authority(self, authority) -> None:
+        if self._result_authority is not None or not callable(
+            getattr(authority, "validate_issued", None)
+        ):
+            raise ValueError("MEMORY_RESULT_AUTHORITY_ALREADY_CONFIGURED")
+        self._result_authority = authority
+
+    def install_wait_authority(self, authority) -> None:
+        if self._wait_authority is not None or not callable(
+            getattr(authority, "validate_wait_capability", None)
+        ):
+            raise ValueError("MEMORY_WAIT_AUTHORITY_ALREADY_CONFIGURED")
+        self._wait_authority = authority
+
+    def current_wait_checkpoint_capability(self):
+        current = self._wait_checkpoint_context.get()
+        if current is None:
+            return None
+        capability, _ = current
+        if (
+            self._wait_authority is None
+            or self._wait_authority.validate_wait_capability(capability) is not True
+        ):
+            raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+        return capability
+
+    @asynccontextmanager
+    async def wait_checkpoint_scope(self, capability):
+        from efficiency_platform_agent.core.memory_execution import (
+            MemoryWaitCheckpointCapability,
+            bind_memory_wait_checkpoint_capability,
+        )
+
+        if (
+            not isinstance(capability, MemoryWaitCheckpointCapability)
+            or self._wait_authority is None
+            or self._wait_authority.validate_wait_capability(capability) is not True
+            or self._wait_authority.validate_wait_scope_task(capability) is not True
+            or self._wait_checkpoint_context.get() is not None
+        ):
+            raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+        key = (capability.scope.conversation.tenant_id, capability.scope.execution_id)
+        async with self._transaction():
+            row = await self._one(
+                "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s FOR UPDATE",
+                key,
+            )
+            if (
+                row is None
+                or row["checkpoint_mode"] != "GRAPH"
+                or row["state"] != "WAITING_CONTEXT"
+                or row["wait_status"] != "BUILDING"
+                or row["wait_event_id"] != capability.wait_event_id
+                or _scope(row["scope"]) != capability.scope
+                or row["runtime_id"] != capability.runtime_id
+                or row["execution_revision"] != capability.execution_revision
+                or row["packet_revision"] != capability.packet_revision
+                or row["wait_context_fingerprint"]
+                != capability.current_context_fingerprint
+                or row["original_deadline"] != capability.original_deadline
+            ):
+                raise PermissionError("MEMORY_WAIT_CONSUMED")
+            denial = await self._active(
+                row | {"state": "ACTIVE"}, ignore_packet_ttl=True
+            )
+            if denial:
+                raise PermissionError(denial)
+            token = self._wait_checkpoint_context.set((capability, row))
+            try:
+                with bind_memory_wait_checkpoint_capability(capability):
+                    yield capability
+            finally:
+                self._wait_checkpoint_context.reset(token)
 
     def _sql(self, template: str):
         return sql.SQL(template).format(
@@ -250,14 +336,20 @@ class PostgresMemoryExecutionRegistry:
             record.deadline_epoch_seconds,
             context.semantic_snapshot_digest,
         )
+        initial_fp = (
+            _hash(context.metadata()) if self._wait_authority is not None else None
+        )
         async with self._transaction():
             await self.connection.execute(
                 self._sql(
                     "INSERT INTO {execution} (tenant_id,execution_id,runtime_id,root_thread_id,scope,operation_hash,"
-                    "execution_revision,state,dependencies,backend_ids,packet_revision,packet_expires_at,original_deadline,semantic_digest) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s,%s,%s,%s,%s) ON CONFLICT (tenant_id,execution_id) DO NOTHING"
+                    "execution_revision,state,dependencies,backend_ids,packet_revision,packet_expires_at,original_deadline,semantic_digest"
+                    + (",current_context_fingerprint" if initial_fp is not None else "")
+                    + ") VALUES (%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,%s,%s,%s,%s,%s"
+                    + (",%s" if initial_fp is not None else "")
+                    + ") ON CONFLICT (tenant_id,execution_id) DO NOTHING"
                 ),
-                params,
+                (*params, initial_fp) if initial_fp is not None else params,
             )
             row = await self._one(
                 "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s FOR UPDATE",
@@ -270,6 +362,8 @@ class PostgresMemoryExecutionRegistry:
                 or row["state"] != "ACTIVE"
                 or row["execution_revision"] != record.execution_revision
                 or row.get("checkpoint_mode", "GRAPH") != "GRAPH"
+                or initial_fp is not None
+                and row.get("current_context_fingerprint") != initial_fp
             ):
                 raise PermissionError("MEMORY_THREAD_OWNER_CONFLICT")
             await self.connection.execute(
@@ -313,13 +407,21 @@ class PostgresMemoryExecutionRegistry:
             record.deadline_epoch_seconds,
             record.context.semantic_snapshot_digest,
         )
+        initial_fp = (
+            _hash(record.context.metadata())
+            if self._wait_authority is not None
+            else None
+        )
         async with self._transaction():
             await self.connection.execute(
                 self._sql(
-                    "INSERT INTO {execution} (tenant_id,execution_id,runtime_id,root_thread_id,scope,operation_hash,execution_revision,state,dependencies,backend_ids,packet_revision,packet_expires_at,original_deadline,semantic_digest,checkpoint_mode,registry_complete) "
-                    "VALUES (%s,%s,%s,NULL,%s,%s,%s,'ACTIVE',%s,'[]'::jsonb,%s,%s,%s,%s,'NONE',true) ON CONFLICT (tenant_id,execution_id) DO NOTHING"
+                    "INSERT INTO {execution} (tenant_id,execution_id,runtime_id,root_thread_id,scope,operation_hash,execution_revision,state,dependencies,backend_ids,packet_revision,packet_expires_at,original_deadline,semantic_digest,checkpoint_mode,registry_complete"
+                    + (",current_context_fingerprint" if initial_fp is not None else "")
+                    + ") VALUES (%s,%s,%s,NULL,%s,%s,%s,'ACTIVE',%s,'[]'::jsonb,%s,%s,%s,%s,'NONE',true"
+                    + (",%s" if initial_fp is not None else "")
+                    + ") ON CONFLICT (tenant_id,execution_id) DO NOTHING"
                 ),
-                params,
+                (*params, initial_fp) if initial_fp is not None else params,
             )
             row = await self._one(
                 "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s FOR UPDATE",
@@ -334,6 +436,8 @@ class PostgresMemoryExecutionRegistry:
                 or row["operation_hash"] != record.request_fingerprint
                 or row["state"] != "ACTIVE"
                 or row["execution_revision"] != record.execution_revision
+                or initial_fp is not None
+                and row.get("current_context_fingerprint") != initial_fp
             ):
                 raise PermissionError("MEMORY_THREAD_OWNER_CONFLICT")
             complete = not await self._members(row)
@@ -349,7 +453,9 @@ class PostgresMemoryExecutionRegistry:
         if not complete:
             raise PermissionError("MEMORY_REGISTRY_INCOMPLETE")
 
-    async def _active(self, row) -> str | None:
+    async def _active(
+        self, row, *, defer_packet_ttl=False, ignore_packet_ttl=False
+    ) -> str | None:
         if row["state"] != "ACTIVE" or not row["registry_complete"]:
             return "MEMORY_THREAD_FENCED"
         scope = _scope(row["scope"])
@@ -358,7 +464,17 @@ class PostgresMemoryExecutionRegistry:
             row["execution_id"],
         ):
             return "MEMORY_THREAD_OWNER_MISMATCH"
-        if int(self.clock()) >= min(row["original_deadline"], row["packet_expires_at"]):
+        if int(self.clock()) >= row["original_deadline"]:
+            return (
+                "MEMORY_EXECUTION_EXPIRED"
+                if defer_packet_ttl or ignore_packet_ttl
+                else "MEMORY_PACKET_EXPIRED"
+            )
+        if (
+            not defer_packet_ttl
+            and not ignore_packet_ttl
+            and int(self.clock()) >= row["packet_expires_at"]
+        ):
             return "MEMORY_PACKET_EXPIRED"
         if not await self.source_authority.current(
             scope, _dependencies(row["dependencies"])
@@ -400,7 +516,197 @@ class PostgresMemoryExecutionRegistry:
             )
         ):
             return "MEMORY_EXECUTION_AUTHORITY_DENIED"
+        if not ignore_packet_ttl and int(self.clock()) >= row["packet_expires_at"]:
+            return "MEMORY_PACKET_EXPIRED"
         return None
+
+    @asynccontextmanager
+    async def send_lease_execution(
+        self, tenant_id: str, execution_id: str, backend_id: str, namespace: str
+    ):
+        denial = None
+        async with self._transaction():
+            row = await self._one(
+                "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s FOR UPDATE",
+                (tenant_id, execution_id),
+            )
+            if row is None:
+                raise PermissionError("MEMORY_EXECUTION_OWNER_REQUIRED")
+            if (
+                row.get("checkpoint_mode", "GRAPH") == "NONE"
+                and (backend_id != "NO_CHECKPOINT" or namespace != "provider")
+            ) or (
+                row.get("checkpoint_mode", "GRAPH") == "GRAPH"
+                and backend_id not in self.backend_ids
+            ):
+                denial = "MEMORY_CHECKPOINT_CAPABILITY_DENIED"
+            elif row["state"] in {"WAITING_CONTEXT", "REFRESH_PENDING"}:
+                denial = "MEMORY_REFRESH_PENDING"
+            else:
+                try:
+                    denial = await self._active(row, defer_packet_ttl=True)
+                except Exception:  # noqa: BLE001 - 权威异常不能授予发送
+                    denial = "MEMORY_AUTHORITY_UNAVAILABLE"
+            if denial:
+                if row["state"] == "ACTIVE" and denial != "MEMORY_PACKET_EXPIRED":
+                    await self.connection.execute(
+                        self._sql(
+                            "UPDATE {execution} SET state='BLOCKED',fence_revision=fence_revision+1 WHERE tenant_id=%s AND execution_id=%s"
+                        ),
+                        (tenant_id, execution_id),
+                    )
+            else:
+                yield CheckpointLocation(
+                    _scope(row["scope"]), row["runtime_id"], namespace, ()
+                )
+        if denial:
+            raise PermissionError(denial)
+
+    @asynccontextmanager
+    async def result_lease_execution(
+        self, tenant_id: str, execution_id: str, backend_id: str, namespace: str, permit
+    ):
+        from efficiency_platform_agent.core.memory_execution import (
+            MemorySendPermit,
+            bind_memory_result_checkpoint_permit,
+        )
+
+        if (
+            not isinstance(permit, MemorySendPermit)
+            or self._result_authority is None
+            or self._result_authority.validate_issued(permit) is not True
+            or (permit.scope.conversation.tenant_id, permit.scope.execution_id)
+            != (tenant_id, execution_id)
+        ):
+            raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+        async with self._transaction():
+            row = await self._one(
+                "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s FOR UPDATE",
+                (tenant_id, execution_id),
+            )
+            if (
+                row is None
+                or (
+                    _scope(row["scope"]).conversation,
+                    _scope(row["scope"]).task_id,
+                    _scope(row["scope"]).execution_id,
+                )
+                != (
+                    permit.scope.conversation,
+                    permit.scope.task_id,
+                    permit.scope.execution_id,
+                )
+                or row["runtime_id"] != permit.runtime_id
+                or row["execution_revision"] != permit.execution_revision
+                or row["packet_revision"] != permit.packet_revision
+                or not memory_operation_deadline_matches(
+                    "memory.derive"
+                    if getattr(
+                        self._result_authority, "is_derive_permit", lambda value: False
+                    )(permit)
+                    else "original",
+                    permit.deadline_epoch_seconds,
+                    row["original_deadline"],
+                )
+            ):
+                raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+            record = await self.execution_store.get(tenant_id, execution_id)
+            if record is None or not any(
+                (grant.node_id, grant.execution_agent_id, grant.purpose)
+                == (
+                    permit.scope.subtask_id,
+                    permit.scope.execution_agent_id,
+                    permit.scope.purpose,
+                )
+                for grant in record.context.execution_grants
+            ):
+                raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+            if (
+                row.get("checkpoint_mode", "GRAPH") == "NONE"
+                and (backend_id != "NO_CHECKPOINT" or namespace != "provider")
+            ) or (
+                row.get("checkpoint_mode", "GRAPH") == "GRAPH"
+                and backend_id not in self.backend_ids
+            ):
+                raise PermissionError("MEMORY_CHECKPOINT_CAPABILITY_DENIED")
+            denial = await self._active(row, ignore_packet_ttl=True)
+            if denial:
+                raise PermissionError(denial)
+            with bind_memory_result_checkpoint_permit(permit):
+                yield CheckpointLocation(
+                    _scope(row["scope"]), row["runtime_id"], namespace, ()
+                )
+
+    @asynccontextmanager
+    async def result_checkpoint_scope(
+        self, tenant_id, execution_id, backend_id, namespace, permit, result_ref
+    ):
+        authority = self._result_authority
+        if (
+            authority is None
+            or not callable(getattr(authority, "validate_captured", None))
+            or authority.validate_captured(permit, result_ref) is not True
+            or self._result_checkpoint_context.get() is not None
+        ):
+            raise PermissionError("MEMORY_REFRESH_CAPABILITY_UNSUPPORTED")
+        async with self.result_lease_execution(
+            tenant_id, execution_id, backend_id, namespace, permit
+        ):
+            row = await self._one(
+                "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s",
+                (tenant_id, execution_id),
+            )
+            token = self._result_checkpoint_context.set((permit, row, result_ref))
+            try:
+                yield permit
+            finally:
+                self._result_checkpoint_context.reset(token)
+
+    async def revalidate_result_checkpoint(self, permit, result_ref) -> None:
+        current = self._result_checkpoint_context.get()
+        if (
+            current is None
+            or current[0] is not permit
+            or current[2] != result_ref
+            or self._result_authority is None
+            or self._result_authority.validate_captured(permit, result_ref) is not True
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        row = await self._one(
+            "SELECT * FROM {execution} WHERE tenant_id=%s AND execution_id=%s",
+            (permit.scope.conversation.tenant_id, permit.scope.execution_id),
+        )
+        if (
+            row is None
+            or row["runtime_id"] != permit.runtime_id
+            or row["execution_revision"] != permit.execution_revision
+            or row["packet_revision"] != permit.packet_revision
+            or not memory_operation_deadline_matches(
+                "memory.derive"
+                if getattr(
+                    self._result_authority, "is_derive_permit", lambda value: False
+                )(permit)
+                else "original",
+                permit.deadline_epoch_seconds,
+                row["original_deadline"],
+            )
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        actual = _scope(row["scope"])
+        if (actual.conversation, actual.task_id, actual.execution_id) != (
+            permit.scope.conversation,
+            permit.scope.task_id,
+            permit.scope.execution_id,
+        ):
+            raise PermissionError("MEMORY_RESULT_BINDING_MISMATCH")
+        denial = await self._active(row, ignore_packet_ttl=True)
+        if denial:
+            raise PermissionError(denial)
+        if (
+            int(self.clock()) >= permit.deadline_epoch_seconds
+            or self._result_authority.validate_captured(permit, result_ref) is not True
+        ):
+            raise PermissionError("MEMORY_RESULT_PUBLICATION_EXPIRED")
 
     @asynccontextmanager
     async def guard(
@@ -411,6 +717,43 @@ class PostgresMemoryExecutionRegistry:
         *,
         pending_writes: bool = False,
     ) -> AsyncIterator[CheckpointLocation]:
+        result_scope = self._result_checkpoint_context.get()
+        if result_scope is not None:
+            permit, row, result_ref = result_scope
+            if (
+                self._result_authority is None
+                or self._result_authority.validate_captured(permit, result_ref)
+                is not True
+                or thread_id != row["root_thread_id"]
+                or namespace != {"official": "", "owned": "s2:direct:1"}.get(backend_id)
+                or backend_id not in self.backend_ids
+            ):
+                raise PermissionError("MEMORY_CHECKPOINT_CAPABILITY_DENIED")
+            await self.connection.execute(
+                self._sql(
+                    "INSERT INTO {namespace} (thread_id,backend_id,checkpoint_ns,pending_writes) VALUES (%s,%s,%s,%s) ON CONFLICT (thread_id,backend_id,checkpoint_ns) DO UPDATE SET pending_writes={namespace}.pending_writes OR EXCLUDED.pending_writes"
+                ),
+                (thread_id, backend_id, namespace, pending_writes),
+            )
+            yield CheckpointLocation(permit.scope, thread_id, namespace, ())
+            return
+        capability = self.current_wait_checkpoint_capability()
+        if capability is not None:
+            _, row = self._wait_checkpoint_context.get()
+            if (
+                thread_id != row["root_thread_id"]
+                or namespace != {"official": "", "owned": "s2:direct:1"}.get(backend_id)
+                or backend_id not in self.backend_ids
+            ):
+                raise PermissionError("MEMORY_CHECKPOINT_CAPABILITY_DENIED")
+            await self.connection.execute(
+                self._sql(
+                    "INSERT INTO {namespace} (thread_id,backend_id,checkpoint_ns,pending_writes) VALUES (%s,%s,%s,%s) ON CONFLICT (thread_id,backend_id,checkpoint_ns) DO UPDATE SET pending_writes={namespace}.pending_writes OR EXCLUDED.pending_writes"
+                ),
+                (thread_id, backend_id, namespace, pending_writes),
+            )
+            yield CheckpointLocation(capability.scope, thread_id, namespace, ())
+            return
         denial = None
         async with self._transaction():
             row = await self._one(
@@ -442,6 +785,58 @@ class PostgresMemoryExecutionRegistry:
                     self._sql(
                         "INSERT INTO {namespace} (thread_id,backend_id,checkpoint_ns,pending_writes) VALUES (%s,%s,%s,%s) "
                         "ON CONFLICT (thread_id,backend_id,checkpoint_ns) DO UPDATE SET pending_writes={namespace}.pending_writes OR EXCLUDED.pending_writes"
+                    ),
+                    (thread_id, backend_id, namespace, pending_writes),
+                )
+                yield CheckpointLocation(_scope(row["scope"]), thread_id, namespace, ())
+        if denial:
+            raise PermissionError(denial)
+
+    @asynccontextmanager
+    async def guard_for_refresh_checkpoint(
+        self,
+        thread_id: str,
+        backend_id: str,
+        namespace: str,
+        *,
+        pending_writes: bool = False,
+    ):
+        if self.current_wait_checkpoint_capability() is not None:
+            async with self.guard(
+                thread_id, backend_id, namespace, pending_writes=pending_writes
+            ) as owner:
+                yield owner
+            return
+        denial = None
+        async with self._transaction():
+            row = await self._one(
+                "SELECT e.* FROM {execution} e JOIN {member} m USING(tenant_id,execution_id) WHERE m.thread_id=%s FOR UPDATE OF e",
+                (thread_id,),
+            )
+            if row is None:
+                raise PermissionError("MEMORY_THREAD_UNREGISTERED")
+            if (
+                backend_id not in self.backend_ids
+                or backend_id not in row["backend_ids"]
+            ):
+                denial = "MEMORY_BACKEND_UNREGISTERED"
+            else:
+                try:
+                    denial = await self._active(row, defer_packet_ttl=True)
+                except Exception:  # noqa: BLE001 - 权威异常仍拒绝写入
+                    denial = "MEMORY_AUTHORITY_UNAVAILABLE"
+            if denial:
+                if row["state"] == "ACTIVE" and denial != "MEMORY_PACKET_EXPIRED":
+                    await self.connection.execute(
+                        self._sql(
+                            "UPDATE {execution} SET state='BLOCKED',fence_revision=fence_revision+1 WHERE tenant_id=%s AND execution_id=%s"
+                        ),
+                        (row["tenant_id"], row["execution_id"]),
+                    )
+            else:
+                await self.connection.execute(
+                    self._sql(
+                        "INSERT INTO {namespace} (thread_id,backend_id,checkpoint_ns,pending_writes) VALUES (%s,%s,%s,%s) ON CONFLICT (thread_id,backend_id,checkpoint_ns) DO UPDATE SET pending_writes={namespace}.pending_writes OR EXCLUDED.pending_writes"
                     ),
                     (thread_id, backend_id, namespace, pending_writes),
                 )
@@ -558,10 +953,27 @@ class PostgresMemoryExecutionRegistry:
                 or source not in _dependencies(row["dependencies"])
             ):
                 return None
-            if row["state"] not in {"REVOKED", "DELETED"}:
+            if row["state"] == "REFRESH_PENDING":
+                aborted = await self._one(
+                    "UPDATE {resume} SET candidate_phase='ABORTED',result_code='SOURCE_REVOKED',receipt_state='REVOKED',dispatch_allowed=false,authorization_binding=NULL,next_wait_event_id=NULL WHERE tenant_id=%s AND execution_id=%s AND record_kind='RESUME' AND candidate_id=%s AND candidate_phase='PENDING' RETURNING receipt_ref",
+                    (
+                        row["tenant_id"],
+                        row["execution_id"],
+                        row["pending_resume_request_id"],
+                    ),
+                )
+                if aborted is None:
+                    raise ValueError("MEMORY_REFRESH_FINAL_RECEIPT_REQUIRED")
+            if row["state"] not in {"REVOKED", "SCRUBBED", "DELETED"}:
                 await self.connection.execute(
                     self._sql(
-                        "UPDATE {execution} SET state='REVOKED',fence_revision=fence_revision+1 WHERE tenant_id=%s AND execution_id=%s"
+                        "UPDATE {execution} SET state='REVOKED',fence_revision=fence_revision+1"
+                        + (
+                            ",pending_resume_request_id=NULL,pending_candidate_digest=NULL,pending_packet_revision=NULL,pending_context_fingerprint=NULL"
+                            if "pending_resume_request_id" in row
+                            else ""
+                        )
+                        + " WHERE tenant_id=%s AND execution_id=%s"
                     ),
                     (row["tenant_id"], row["execution_id"]),
                 )
@@ -825,10 +1237,23 @@ class PostgresMemoryExecutionRegistry:
                 ]
             ):
                 return None
-            if row["state"] not in {"REVOKED", "DELETED"}:
+            if row["state"] == "REFRESH_PENDING":
+                aborted = await self._one(
+                    "UPDATE {resume} SET candidate_phase='ABORTED',result_code='SOURCE_REVOKED',receipt_state='REVOKED',dispatch_allowed=false,authorization_binding=NULL,next_wait_event_id=NULL WHERE tenant_id=%s AND execution_id=%s AND record_kind='RESUME' AND candidate_id=%s AND candidate_phase='PENDING' RETURNING receipt_ref",
+                    (*key[:2], row["pending_resume_request_id"]),
+                )
+                if aborted is None:
+                    raise ValueError("MEMORY_REFRESH_FINAL_RECEIPT_REQUIRED")
+            if row["state"] not in {"REVOKED", "SCRUBBED", "DELETED"}:
                 await self.connection.execute(
                     self._sql(
-                        "UPDATE {execution} SET state='REVOKED',fence_revision=fence_revision+1 WHERE tenant_id=%s AND execution_id=%s"
+                        "UPDATE {execution} SET state='REVOKED',fence_revision=fence_revision+1"
+                        + (
+                            ",pending_resume_request_id=NULL,pending_candidate_digest=NULL,pending_packet_revision=NULL,pending_context_fingerprint=NULL"
+                            if "pending_resume_request_id" in row
+                            else ""
+                        )
+                        + " WHERE tenant_id=%s AND execution_id=%s"
                     ),
                     key[:2],
                 )

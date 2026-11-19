@@ -153,6 +153,14 @@ class S7IntegrationSettings(BaseModel):
     context_internal_secret: SecretStr | None = None
     context_hmac_key: SecretStr | None = None
     memory_enabled: bool = False
+    memory_refresh_enabled: bool = False
+    memory_summary_enabled: bool = False
+    memory_derive_enabled: bool = False
+    memory_index_enabled: bool = False
+    memory_recall_enabled: bool = False
+    memory_query_embedding_enabled: bool = False
+    memory_index_cleanup_enabled: bool = False
+    memory_index_schema: str = ""
     memory_encryption_key: SecretStr | None = None
     memory_encryption_key_version: str = ""
     context_publication_file: Path | None = None
@@ -192,6 +200,40 @@ class S7IntegrationSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_hr_configuration(self) -> S7IntegrationSettings:
+        if self.memory_index_cleanup_enabled:
+            from efficiency_platform_agent.core.postgres_schema import (
+                validate_agent_owned_schema,
+            )
+
+            if not self.context_enabled:
+                raise ValueError("MEMORY_INDEX_CLEANUP_INTERNAL_AUTH_REQUIRED")
+            validate_agent_owned_schema(self.memory_index_schema)
+        if self.memory_query_embedding_enabled and not self.memory_recall_enabled:
+            raise ValueError("MEMORY_QUERY_EMBEDDING_REQUIRES_RECALL")
+        if self.memory_index_enabled or self.memory_recall_enabled:
+            from efficiency_platform_agent.core.postgres_schema import (
+                validate_agent_owned_schema,
+            )
+
+            from .task_authorization import task_authorization_enabled
+
+            if (
+                not self.memory_enabled
+                or not self.memory_refresh_enabled
+                or not task_authorization_enabled()
+            ):
+                raise ValueError("MEMORY_INDEX_REQUIRES_MEMORY_REFRESH_TASK_AUTH")
+            validate_agent_owned_schema(self.memory_index_schema)
+        if self.memory_refresh_enabled and not self.memory_enabled:
+            raise ValueError("MEMORY_REFRESH_REQUIRES_MEMORY")
+        if (
+            self.memory_summary_enabled or self.memory_derive_enabled
+        ) and not self.memory_enabled:
+            raise ValueError("MEMORY_SUMMARY_REQUIRES_MEMORY")
+        if self.memory_derive_enabled and not self.memory_summary_enabled:
+            raise ValueError("MEMORY_DERIVE_REQUIRES_SUMMARY")
+        if self.memory_derive_enabled and not self.memory_refresh_enabled:
+            raise ValueError("MEMORY_DERIVE_REQUIRES_REFRESH_CONTROL")
         if self.memory_enabled and (
             not self.context_enabled
             or self.memory_encryption_key is None

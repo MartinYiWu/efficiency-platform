@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import AbstractContextManager, nullcontext
+from dataclasses import asdict
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import Command, interrupt
 
 from efficiency_platform_agent.agents.conversation.general_agent import (
     GeneralConversationAgent,
@@ -19,9 +21,18 @@ from efficiency_platform_agent.contracts.direct_conversation import (
 from efficiency_platform_agent.conversation.direct_submission import (
     DirectConversationSubmissionError,
 )
-from efficiency_platform_agent.core.budget import BudgetCharge, BudgetState
+from efficiency_platform_agent.core.budget import (
+    BudgetCharge,
+    BudgetState,
+    RemainingBudget,
+)
 from efficiency_platform_agent.core.enums import RunStatus, StrategyMode
-from efficiency_platform_agent.core.run import JsonObject, JsonValue, RunRequest
+from efficiency_platform_agent.core.run import (
+    JsonObject,
+    JsonValue,
+    ProviderMessage,
+    RunRequest,
+)
 from efficiency_platform_agent.orchestration.contracts import GraphRegistration
 from efficiency_platform_agent.orchestration.state import AgentGraphState
 
@@ -30,6 +41,22 @@ DirectSubmissionResolver = Callable[
 ]
 ModelCallScope = Callable[[str], AbstractContextManager[None]]
 ConversationOutputPublisher = Callable[[str, str], Awaitable[None]]
+
+
+class _DirectGraphState(AgentGraphState, total=False):
+    direct_submission: dict[str, Any]
+
+
+def _submission(state):
+    raw = state["direct_submission"]
+    return DirectConversationSubmission(
+        raw["contract_version"],
+        RunRequest(**raw["request"]),
+        tuple(ProviderMessage(**message) for message in raw["visible_history"]),
+        raw["current_message"],
+        raw["local_response"],
+        RemainingBudget(**raw["remaining_budget"]),
+    )
 
 
 class _EmptyPayloadAdapter:
@@ -44,9 +71,10 @@ class _EmptyPayloadAdapter:
 class _ConversationDirectProgram:
     """把 LangGraph 编译对象适配为 S2 GraphProgram。"""
 
-    def __init__(self, compiled: Any) -> None:
+    def __init__(self, compiled: Any, memory_gate=None) -> None:
         self._compiled = compiled
         self._last: dict[str, Any] = {}
+        self._memory_gate = memory_gate
 
     def scrub_memory_body(self) -> None:
         self._last.clear()
@@ -55,7 +83,16 @@ class _ConversationDirectProgram:
         self, initial_state: AgentGraphState, config: Mapping[str, JsonValue]
     ) -> Mapping[str, JsonValue]:
         """执行单节点通用对话；副作用仅为一次模型调用或本地响应。"""
-        self._last = dict(await self._compiled.ainvoke(initial_state, config))
+        return self._normalize(
+            await self._compiled.ainvoke(
+                initial_state,
+                config,
+                **({"durability": "sync"} if self._memory_gate is not None else {}),
+            )
+        )
+
+    def _normalize(self, values):
+        self._last = dict(values)
         # LangGraph 内保留 JSON；返回统一 Runtime 前归一化为原 Run 的预算值对象。
         raw_budget = self._last.get("budget_state")
         if isinstance(raw_budget, Mapping):
@@ -70,6 +107,19 @@ class _ConversationDirectProgram:
                 raw_budget["deadline_epoch_ms"],
             )
         return self._last
+
+    async def resume_memory_context(self, capability, config):
+        if self._memory_gate is None or not await self._memory_gate.consume_resume(
+            capability, config
+        ):
+            raise PermissionError("MEMORY_CONTEXT_RESUME_REQUIRED")
+        return self._normalize(
+            await self._compiled.ainvoke(
+                Command(resume={"contract_version": "memory-context-resume/1"}),
+                config,
+                durability="sync",
+            )
+        )
 
     async def resume(
         self, resume_value: JsonObject, config: Mapping[str, JsonValue]
@@ -104,6 +154,7 @@ class ConversationDirectGraphBuilder:
         output_publisher: ConversationOutputPublisher | None = None,
         *,
         checkpointer=None,
+        memory_gate=None,
     ) -> None:
         if not isinstance(agent, GeneralConversationAgent):
             raise TypeError("agent必须是GeneralConversationAgent")
@@ -116,12 +167,13 @@ class ConversationDirectGraphBuilder:
         self.checkpointer = (
             checkpointer if checkpointer is not None else InMemorySaver()
         )
+        self.memory_gate = memory_gate
 
     def build(self) -> _ConversationDirectProgram:
         """构建通用对话 Graph；提交消费和模型调用只发生一次。"""
-        graph = StateGraph(AgentGraphState)
+        graph = StateGraph(_DirectGraphState)
 
-        async def execute(state: AgentGraphState) -> dict[str, Any]:
+        async def prepare(state: AgentGraphState) -> dict[str, Any]:
             """校验身份并返回最小状态增量；异常只写稳定错误码。"""
             try:
                 request = RunRequest(
@@ -154,6 +206,43 @@ class ConversationDirectGraphBuilder:
                     "error_code": "DIRECT_CONVERSATION_IDENTITY_MISMATCH",
                     "output": None,
                 }
+            prepared = {
+                "contract_version": submission.contract_version,
+                "request": {
+                    "request_id": submission.request.request_id,
+                    "tenant_id": submission.request.tenant_id,
+                    "user_id": submission.request.user_id,
+                    "input_text": submission.request.input_text,
+                },
+                "visible_history": [
+                    {"role": message.role, "content": message.content}
+                    for message in submission.visible_history
+                ],
+                "current_message": submission.current_message,
+                "local_response": submission.local_response,
+                "remaining_budget": asdict(submission.remaining_budget),
+            }
+            notify = getattr(self.memory_gate, "prepared", None)
+            if notify is not None:
+                notify(state, prepared)
+            return {"direct_submission": prepared}
+
+        async def authorization_gate(state):
+            if (
+                self.memory_gate is not None
+                and state.get("direct_submission") is not None
+            ):
+                submission = _submission(state)
+                if submission.local_response is None:
+                    wait_id = await self.memory_gate.before_dispatch(state, submission)
+                    if wait_id is not None:
+                        interrupt({"memory_context_wait": wait_id})
+            return {}
+
+        async def dispatch(state):
+            if state.get("direct_submission") is None:
+                return {}
+            submission = _submission(state)
             if submission.local_response is not None:
                 return {
                     "next_status": RunStatus.SUCCEEDED.value,
@@ -168,7 +257,9 @@ class ConversationDirectGraphBuilder:
                 }
             try:
                 with self.model_call_scope(str(state.get("run_id", ""))):
-                    output_publisher = self.output_publisher
+                    output_publisher = (
+                        self.output_publisher if self.memory_gate is None else None
+                    )
                     if output_publisher is None:
                         result = await self.agent.execute(submission)
                     else:
@@ -195,7 +286,7 @@ class ConversationDirectGraphBuilder:
                         {"attempt": item.attempt} for item in error.attempts
                     ],
                 }
-            return {
+            delta = {
                 "next_status": RunStatus.SUCCEEDED.value,
                 "output": {"content": result.content},
                 "usage": {
@@ -209,11 +300,34 @@ class ConversationDirectGraphBuilder:
                     {"attempt": item.attempt} for item in result.attempts
                 ],
             }
+            notify = getattr(self.memory_gate, "dispatch_completed", None)
+            if notify is not None:
+                await notify(state, delta)
+            return delta
 
-        graph.add_node("general_conversation", execute)
-        graph.set_entry_point("general_conversation")
-        graph.add_edge("general_conversation", END)
-        return _ConversationDirectProgram(graph.compile(checkpointer=self.checkpointer))
+        async def publish(state):
+            if self.memory_gate is not None and state.get("output") is not None:
+                await self.memory_gate.before_publish(state)
+                if self.output_publisher is not None and not getattr(
+                    self.memory_gate, "defer_publication", False
+                ):
+                    await self.output_publisher(
+                        str(state["run_id"]), state["output"]["content"]
+                    )
+            return {}
+
+        graph.add_node("Prepare", prepare)
+        graph.add_node("AuthorizationGate", authorization_gate)
+        graph.add_node("Dispatch", dispatch)
+        graph.add_node("Publish", publish)
+        graph.set_entry_point("Prepare")
+        graph.add_edge("Prepare", "AuthorizationGate")
+        graph.add_edge("AuthorizationGate", "Dispatch")
+        graph.add_edge("Dispatch", "Publish")
+        graph.add_edge("Publish", END)
+        return _ConversationDirectProgram(
+            graph.compile(checkpointer=self.checkpointer), self.memory_gate
+        )
 
 
 def build_conversation_direct_registration(
@@ -223,6 +337,7 @@ def build_conversation_direct_registration(
     model_call_scope: ModelCallScope | None = None,
     output_publisher: ConversationOutputPublisher | None = None,
     checkpointer=None,
+    memory_gate=None,
 ) -> GraphRegistration:
     """显式登记通用对话 DIRECT Graph，不改变 S2 公共生命周期。"""
     return GraphRegistration(
@@ -241,6 +356,7 @@ def build_conversation_direct_registration(
             model_call_scope,
             output_publisher,
             checkpointer=checkpointer,
+            memory_gate=memory_gate,
         ),
         payload_adapter=_EmptyPayloadAdapter(),
     )

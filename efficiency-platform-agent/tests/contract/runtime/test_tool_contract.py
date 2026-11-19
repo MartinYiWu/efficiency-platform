@@ -33,6 +33,10 @@ def test_tool_contract_shapes_are_stable() -> None:
         "max_attempts",
         "timeout_ms",
         "max_output_bytes",
+        "projection_port",
+        "projection_schema",
+        "projection_version",
+        "model_visible_token_upper_bound",
     ]
     assert [field.name for field in fields(ToolInvocationRecord)] == [
         "invocation_id",

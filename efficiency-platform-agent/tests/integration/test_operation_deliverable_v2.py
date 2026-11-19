@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 import pytest
 
 from efficiency_platform_agent.capabilities.model.runtime import ModelRuntime
@@ -525,12 +526,18 @@ async def test_local_factory_forwards_explicit_collection_version(monkeypatch):
         return original(*args, **kwargs)
 
     monkeypatch.setattr(local_real_factory, "build_operation_agent", build)
-    application = local_real_factory.build_local_agent_application(
-        synthetic_settings(),
-        test_mode=True,
-        deliverable_set_contract_version="deliverable-set/1",
-    )
-    await application.close()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: pytest.fail("组合根装配不得发起外部HTTP")
+        )
+    ) as client:
+        application = local_real_factory.build_local_agent_application(
+            synthetic_settings(),
+            test_mode=True,
+            http_client=client,
+            deliverable_set_contract_version="deliverable-set/1",
+        )
+        await application.close()
     assert captured == ["deliverable-set/1"]
 
 

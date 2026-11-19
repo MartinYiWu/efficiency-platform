@@ -1,6 +1,6 @@
 # Agent私有记忆闭环验收记录
 
-状态：M1-B隔离工程验收进行中，尚未完成正式发布。负责人：当前执行者；更新时间：2026-11-17；适用：运营Direct和客服GENERAL_QUERY的当前受支持入口。依据：统一记忆实施计划D10—D17。
+状态：M1-B隔离工程验收进行中，授权刷新真实接合已部分通过，尚未完成正式发布。负责人：当前执行者；更新时间：2026-11-18；适用：运营Direct和客服GENERAL_QUERY的当前受支持入口。依据：统一记忆实施计划D10—D17。
 
 ## 当前可核验结果
 
@@ -19,6 +19,21 @@
 | 浏览器记忆管理 | D14API真实浏览器→Java身份/业务Mapper/MySQL；17 GET/10 POST，双用户、双Agent与撤登录 | 通过；验收宿主仅内存Bearer，生产登录壳未交付 |
 
 上述成功分别绑定各自冻结代码和场景，不能合并描述成全部Agent、全部记忆层或生产部署已完成。HR当前TASK_ONLY，不建立候选人长期印象；专家/知识路径未完成的记忆入口仍失败关闭，统一覆盖留D30。
+
+## 授权刷新实际接合增量
+
+以下证据均位于 `.local-acceptance/agent-memory-implementation/` 的不可变运行目录；真实本机接口、MySQL与PostgreSQL参与，外部模型仅Fixed Fake或MockTransport。
+
+| 场景 | 实际证据 | 已证实行为 |
+| --- | --- | --- |
+| Java→客服原回答栈的TTL刷新 | `runs/D16RF07/9c0c59afc5f59578/`，1/0/0/0，BUILD26.594s | 原运行、deadline与计数保留，Java复核原登录/来源后自动刷新；意图与回答各一次；原准备Manifest保持1/1，RESULT实际发送授权分别1/2；员工SSE不含等待引用，终态重连不再resume |
+| 运营Direct真实CPU等待与结果保存 | `runs/D16RF04G/66ef02d0da4c8dad/`，2passed18.57s | 真实LangGraph interrupt、官方/自有同ID检查点及内部HTTP恢复；含响应跨TTL后保存加密结果、原Run再发布，模型与费用预留各一次 |
+| 原Paid栈连续候选过期 | `runs/D16RF04P/63cf560058b75616/`，2passed12.17s | 两次安装后过期沿同原栈迁移继任等待，第三次有效ACKED后发送一次；refresh_count=3、当前版本4，原reservation、attempt与冻结请求不重建 |
+| 跨库局部ACK过期 | `runs/D16RF03I1/d45cc8156de6e9ad/`与`5697b4f630afd0a8/`，1+5定向passed | MySQL先确认而PG未提交时，候选过期后安全落ABORTED/BLOCKED；保留MySQL不可变历史、原count/财务锚，无过期ACTIVE；独立复审C0/I0 |
+| 启动结构门禁 | `runs/D16RF03/31c5b2fd5d0d3482/`，8passed7.43s | 完整结构可启动；真实缺表/缺列、未强制CHECK、缺失或禁用trigger、缺唯一索引分别拒启，无启动DDL |
+| 内部HTTP拒绝与重放 | `runs/D16RF07N/12a39fd0b306af63/`，1passed2.35s | 错身份/作用域、操作锚与Schema变化不增加候选或计数；正确候选同ID多次回放保持同回执 |
+
+新增验收暴露并记录了两个尚未关闭的组合缺口：运营Graph在reserve后才过期时，须绑定真实Dispatch检查点而非重跑Dispatch；客服在intent阶段刷新后，后续调用须同时使用原执行的最新绑定和经认证的原grant。后者已有精确离线ContextVar反例与修补，但真实intent链在更早的grant登记差异处被拒，仍在接合，不能用回答阶段通过代替。上述表格也不等于R01—R17完整验收或生产功能启用。
 
 ## 最新完整接口执行
 
@@ -53,7 +68,7 @@ D17INFLIGHT独立真实用例：1/0/0/0、test24.00s，BUILD28.814s；日志`log
 
 - 正式共享MySQL迁移仍受1419限制。账户具备普通CREATE/ALTER/TRIGGER，但共享binlog条件要求额外受信配置/权限；本任务没有提升账号、改变全局配置或冒认已部署。
 - 在途网络流及当前范围进程重启已通过；备份恢复完整操作编排与阶段Agent全套检查继续执行。Java/Vue本次结果不替代后续新增功能的必要验证。
-- Java新包纯授权刷新与Agent持久授权更新接线仍需按最终合同核验；当前不支持的paid continuation/内容追加必须明确拒绝，不把注册器内部测试当实际HTTP恢复完成。
+- Java新包纯授权刷新与Agent持久更新已取得上述真实接口证据；运营reserve后过期组合、客服intent阶段刷新与最终R01—R17门禁仍需闭合。当前不支持的跨执行paid continuation/内容追加继续明确拒绝，原运行中的TTL刷新不生成新预算。
 - 生产登录宿主、所有Agent业务启用和正式灰度发布另有门禁。自动提炼、向量、跨Agent/跨用户共享及案例晋升没有因本阶段通过而开放。
 - M2摘要合同/唯一derive/压缩收益当前只有各自独立组件证据，Schema/权威来源投影/CAS/主流程和真实模型语义仍未全部接合，不声明M2完成。
 

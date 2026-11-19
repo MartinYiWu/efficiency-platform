@@ -47,6 +47,9 @@ class FakeService:
     events: list[RunEventV1] = field(default_factory=list)
     calls: list[tuple[str, Any]] = field(default_factory=list)
     error: HarnessError | None = None
+    event_authorities: dict[tuple[str, str], bool] = field(
+        default_factory=lambda: {("tenant-1", "run-1"): True}
+    )
 
     async def create_and_execute(self, request: CreateRunRequestV1) -> RunViewV1:
         self.calls.append(("create", request))
@@ -79,6 +82,10 @@ class FakeService:
         if self.error:
             raise self.error
         return tuple(event for event in self.events if event.sequence > after_sequence)
+
+    async def can_emit_memory_events(self, run_id: str, tenant_id: str) -> bool:
+        self.calls.append(("can_emit", (run_id, tenant_id)))
+        return self.event_authorities.get((tenant_id, run_id), False)
 
 
 def client(service: FakeService) -> TestClient:
@@ -240,6 +247,31 @@ def test_sse_serializes_events_and_replays_after_last_event_id() -> None:
         )["event_id"]
         == "e-2"
     )
+
+
+def test_sse_withholds_replay_when_memory_event_authority_is_revoked() -> None:
+    service = FakeService(
+        events=[
+            RunEventV1(
+                event_id="e-1",
+                event_type="run_succeeded",
+                run_id="run-1",
+                sequence=1,
+                occurred_at_epoch_ms=1,
+                status=RunStatus.SUCCEEDED,
+            )
+        ],
+        event_authorities={},
+    )
+    response = client(service).get(
+        "/v1/runs/run-1/events", headers={"X-Tenant-ID": "tenant-1"}
+    )
+    assert response.status_code == 200
+    assert response.text == ""
+    assert service.calls == [
+        ("events", ("run-1", "tenant-1", 0)),
+        ("can_emit", ("run-1", "tenant-1")),
+    ]
 
 
 def test_sse_rejects_invalid_cursor() -> None:

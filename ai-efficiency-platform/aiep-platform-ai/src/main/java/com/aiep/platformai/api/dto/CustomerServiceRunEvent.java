@@ -26,6 +26,13 @@ public record CustomerServiceRunEvent(
         if (status == null || occurredAt == null || payload == null) {
             throw new IllegalArgumentException("status、occurred_at 和 payload 不能为空");
         }
+        if ("context_refresh_required".equals(eventType)) {
+            if(status!=CustomerServiceRunView.Status.RUNNING||payload.contextWaitRef()==null
+                    ||payload.stage()!=null||payload.progressPercent()!=null||payload.publicSummary()!=null||payload.delta()!=null
+                    ||payload.answerMode()!=null||payload.citation()!=null||payload.errorCode()!=null||payload.errorMessage()!=null
+                    ||payload.retrievalFacts()!=null||payload.phase()!=null||payload.conversationTitle()!=null)
+                throw new IllegalArgumentException("MEMORY_WAIT_EVENT_INVALID");
+        } else if(payload.contextWaitRef()!=null)throw new IllegalArgumentException("MEMORY_WAIT_EVENT_INVALID");
         if ("stage.started".equals(eventType) && !"STARTED".equals(payload.phase())) {
             throw new IllegalArgumentException("stage.started 必须带 STARTED 阶段状态");
         }
@@ -53,11 +60,26 @@ public record CustomerServiceRunEvent(
             @JsonProperty("error_message") String errorMessage,
             @JsonProperty("retrieval_facts") RetrievalFacts retrievalFacts,
             @JsonProperty("phase") String phase,
-            @JsonProperty("conversation_title") String conversationTitle) {
+            @JsonProperty("conversation_title") String conversationTitle,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @JsonProperty("context_wait_ref") String contextWaitRef,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @JsonProperty("derive_plan_id") String derivePlanId,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            @JsonProperty("derive_baseline_ref") String deriveBaselineRef) {
+        public Payload(String stage,Integer progressPercent,String publicSummary,String delta,String answerMode,Citation citation,String errorCode,String errorMessage,RetrievalFacts retrievalFacts,String phase,String conversationTitle,String contextWaitRef){this(stage,progressPercent,publicSummary,delta,answerMode,citation,errorCode,errorMessage,retrievalFacts,phase,conversationTitle,contextWaitRef,null,null);}
         public Payload {
+            if(contextWaitRef!=null)MemoryContextPacket.requireId(contextWaitRef);
+            if((derivePlanId==null)!=(deriveBaselineRef==null))throw new IllegalArgumentException("MEMORY_DERIVE_EVENT_INVALID");
+            if(derivePlanId!=null){MemoryContextPacket.requireId(derivePlanId);MemoryContextPacket.requireId(deriveBaselineRef);}
             if (phase != null && !List.of("STARTED", "COMPLETED").contains(phase)) {
                 throw new IllegalArgumentException("phase 无效");
             }
+        }
+
+        public Payload(String stage,Integer progressPercent,String publicSummary,String delta,String answerMode,Citation citation,
+                String errorCode,String errorMessage,RetrievalFacts retrievalFacts,String phase,String conversationTitle) {
+            this(stage,progressPercent,publicSummary,delta,answerMode,citation,errorCode,errorMessage,retrievalFacts,phase,conversationTitle,null);
         }
 
         public Payload(String stage, Integer progressPercent, String publicSummary, String delta,
